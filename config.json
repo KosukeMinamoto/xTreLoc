@@ -1,0 +1,10 @@
+{
+	"stnFile": "station.tbl",
+	"taumodFile": "prem",
+	"catalogFilePath": "synthetic.csv",
+	"datPattern": "./dat-grd/*",
+	"numJobs": 6,
+	"numGrid": 100,
+	"hypBottom": 40,
+	"threshold": 0
+}
