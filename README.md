@@ -1,4 +1,4 @@
-# xTreLoc
+# xTreLoc (*Cross-Correlation-Based Tremor Relocation Tools*)
 
 xTreLoc is a Java-based program for (re)determining the hypocenters of tremors based on cross-correlation.
 
@@ -48,7 +48,7 @@ To run xTreLoc, the following files are required:
 
 - **config.json**: Parameter settings file.
 - **station.tbl**: A space-separated file containing station latitude, longitude, elevation, and station correction values.
-- **Velocity Structure Model (TauP format)**: Optional. The default TauP models can be used if not specified.
+- **Velocity Structure Model (TauP[^1] format)**: Optional. The default TauP models can be used if not specified.
 - **catalog.csv**: A CSV file storing hypocenter information. It can also serve as the ground truth for synthetic tests.
 
 ## Sample Workflow
@@ -83,10 +83,7 @@ This project is licensed under the Apache License 2.0. See the LICENSE file for 
 
 ## Author
 
-- **Developer:** A.B.
-- **Contact:** [example@gmail.com](mailto:example@gmail.com)
+- **Developer:** K. Minamoto
+- **Contact:** [kosuke.minamoto.s8[at]gmail.com](mailto:example@gmail.com)
 
-## Repository
-
-The source code will be available on GitHub soon.
-
+[^1]: Crotwell, H. P., T. J. Owens, and J. Ritsema (1999). The TauP Toolkit: Flexible seismic travel-time and ray-path utilities, Seismological Research Letters 70, 154–160.
