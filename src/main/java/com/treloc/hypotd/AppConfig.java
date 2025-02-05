@@ -26,15 +26,16 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 public final class AppConfig {
 	private int numJobs;
 	private int numGrid;
-	private double depLim;
-	private double xcorrVal;
-	private String taumodFile = "prem";
+	private double hypBottom;
+	private double threshold;
+	private String taumodFile;
 	private String catalogFilePath;
 	private AppConfig config;
 	private double[][] stnTable;
 	private Path[] datPaths;
 	private Path parentPath;
 	private String[] codes;
+	private double stnBottom = 0;
 
 	public AppConfig readConfig(String configFilePath) throws IOException {
 		ObjectMapper mapper = new ObjectMapper();
@@ -42,9 +43,9 @@ public final class AppConfig {
 
 		this.numJobs = root.get("numJobs").asInt();
 		this.numGrid = root.get("numGrid").asInt();
-		this.depLim = root.get("depthLim").asDouble();
+		this.hypBottom = root.get("hypBottom").asDouble();
 		this.taumodFile = root.get("taumodFile").asText();
-		this.xcorrVal = root.get("xcorrVal").asDouble();
+		this.threshold = root.get("threshold").asDouble();
 		this.catalogFilePath = root.get("catalogFilePath").asText();
 
 		String stnFile = root.get("stnFile").asText();
@@ -82,10 +83,27 @@ public final class AppConfig {
 				// Station code
 				codeList.add(parts[0]);
 
-				// Lat, Lon, Dep, Pcorr, Scorr
+				// Lat, Lon, Dep, P-corr, S-corr
 				double[] observation = new double[5];
 				for (int i = 0; i < 5; i++) {
 					observation[i] = Double.parseDouble(parts[i + 1]);
+				}
+
+				double latitude = observation[0];
+				if (Math.abs(latitude) > 90) {
+					throw new IllegalArgumentException("Unreal Latitude:" + line);
+				}
+
+				double longitude = observation[1];
+				if (Math.abs(longitude) > 180) {
+					throw new IllegalArgumentException("Unreal Longitude:" + line);
+				}
+
+				double depth = observation[2];
+				if ( Math.abs(depth) > 1000 ) {
+					System.err.println("Warning: Depth units must be in 'km' (pos-down): " + line);
+				} else if ( depth > this.stnBottom ) {
+					this.stnBottom = depth + 0.001;
 				}
 				stnList.add(observation);
 			}
@@ -105,12 +123,12 @@ public final class AppConfig {
 		return this.numGrid;
 	}
 
-	public double getDepLim() {
-		return this.depLim;
+	public double getHypBottom() {
+		return this.hypBottom;
 	}
 
-	public double getCorrVal() {
-		return this.xcorrVal;
+	public double getThreshold() {
+		return this.threshold;
 	}
 
 	public String getTaumodPath() {
@@ -123,6 +141,10 @@ public final class AppConfig {
 
 	public double[][] getStationTable (){
 		return this.stnTable;
+	}
+
+	public double getStnBottom() {
+		return this.stnBottom;
 	}
 
 	public String[] getCodes () {

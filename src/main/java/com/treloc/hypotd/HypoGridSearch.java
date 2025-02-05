@@ -18,7 +18,7 @@ public class HypoGridSearch {
 
 	private final double[][] stnTable;
 	private final String[] allCodes;
-	private final double deepest;
+	private final double hypBottom, stnBottom;
 	private final int numGrid;
 
 	public HypoGridSearch(AppConfig config) throws Exception {
@@ -27,7 +27,8 @@ public class HypoGridSearch {
 		stnTable = appConfig.getStationTable();
 		allCodes = appConfig.getCodes();
 		numGrid = appConfig.getNumGrid();
-		deepest = appConfig.getDepLim();
+		hypBottom = appConfig.getHypBottom();
+		stnBottom = appConfig.getStnBottom();
 	}
 
 	public void start( String datFile, String outFile ) throws TauModelException {
@@ -42,14 +43,13 @@ public class HypoGridSearch {
 
 		double[] latLim = getMinMax(stnTable, 0); // latitude
 		double[] lonLim = getMinMax(stnTable, 1); // longitude
-		double[] depLim = getMinMax(stnTable, 2); // depth
 		// 3 stages of focused random search
 		double[] dtt = new double[0];
 		for (int stage = 0; stage < 3; stage++) {
 			double rangeFactor = Math.pow(0.5, stage);
 			double[] latGrids = generageRandomGrid(latLim[0] - (latLim[1] - latLim[0]) * rangeFactor, latLim[1] - (latLim[1] - latLim[0]) * rangeFactor, numGrid);
 			double[] lonGrids = generageRandomGrid(lonLim[0] - (lonLim[1] - lonLim[0]) * rangeFactor, lonLim[1] - (lonLim[1] - lonLim[0]) * rangeFactor, numGrid);
-			double[] depGrids = generageRandomGrid(Math.max(depLim[1], dep - 10 * rangeFactor), Math.min(deepest, dep + 10 * rangeFactor), numGrid);
+			double[] depGrids = generageRandomGrid(Math.max(stnBottom, dep - 10 * rangeFactor), Math.min(hypBottom, dep + 10 * rangeFactor), numGrid);
 
 			for (int i = 0; i < numGrid; i++) {
 				double[] hyp = new double[]{lonGrids[i], latGrids[i], depGrids[i]};

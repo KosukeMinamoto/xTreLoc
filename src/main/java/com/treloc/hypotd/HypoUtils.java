@@ -58,8 +58,8 @@ import edu.sc.seis.TauP.VelocityModel;
 				System.out.println("Unsupported file (only .tvel file are supported): " + extension);
 		}
 		velMod = tauMod.getVelocityModel();
-		velMod.printGMT(modPath + ".gmt");
 		System.out.println("Velocity model:\n" + velMod);
+		// velMod.printGMT(modPath + ".gmt");
 	}
 
 	private String getFileExtension(String fileName) {
@@ -122,8 +122,7 @@ import edu.sc.seis.TauP.VelocityModel;
 				double tak = fastestArr.getTakeoffAngle();
 				if (!Double.isNaN(tak)) {
 					if (tak < 0.0) {
-						// TauP applies "fake neg velocity so angle is neg in case of upgoing"
-						tak += 180.0;
+						tak += 180.0; // TauP applies "fake neg velocity so angle is neg in case of upgoing"
 					}
 					tak = Math.toRadians(tak);
 				}
@@ -151,8 +150,8 @@ import edu.sc.seis.TauP.VelocityModel;
 					}
 				}
 
-				dtdr[i][0] = -Math.sin(tak) * Math.sin(azm) / sVel * App.deg2km; // dt/dx (lon)
-				dtdr[i][1] = -Math.sin(tak) * Math.cos(azm) / sVel * App.deg2km * Math.cos(Math.toRadians(hypLat)); // dt/dy (lat)
+				dtdr[i][0] = -Math.sin(tak) * Math.sin(azm) / sVel * App.deg2km * Math.cos(Math.toRadians(hypLat)); // dt/dx (lon)
+				dtdr[i][1] = -Math.sin(tak) * Math.cos(azm) / sVel * App.deg2km; // dt/dy (lat)
 				dtdr[i][2] = -Math.cos(tak) / sVel; // dt/dz (dep)
 
 				// Theoritical travel time

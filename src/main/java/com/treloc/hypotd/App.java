@@ -18,9 +18,8 @@ import java.util.concurrent.atomic.AtomicInteger;
  * @usage: 
  */
 
-
 public class App {
-	public static double deg2km = 111.11111;
+	public static double deg2km = 111.32;
 	public static double deg2rad = Math.PI / 180;
 	public static void main(String[] args) {
 		if (args.length == 0) {
@@ -33,8 +32,8 @@ public class App {
 			System.out.println("Usage: java App <mode>");
 			System.out.println("Modes:");
 			System.out.println("  GRS    - Location by grid search");
-			System.out.println("  LMO    - Location by Station-pair DD");
-			System.out.println("  STD    - Create dat files for synthetic test");
+			System.out.println("  STD    - Location by Station-pair DD");
+			System.out.println("  SYN    - Create dat files for synthetic test");
 			System.out.println("  SEE    - View location results");
 			System.out.println("  TRD    - Re-location by Triple Difference");
 			return;

@@ -41,7 +41,7 @@ public class DataHandler {
 
 	public void read(String datFile, String[] codes) {
 		try (BufferedReader reader = new BufferedReader(new FileReader(datFile))) {
-			double threshold = appConfig.getCorrVal();
+			double threshold = appConfig.getThreshold();
 			List<double[]> lagList = new ArrayList<>();
 			int lineCount = 0;
 			String line;

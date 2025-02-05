@@ -1,7 +1,5 @@
 package com.treloc.hypotd;
 
-// import java.util.Arrays;
-
 import org.apache.commons.math3.fitting.leastsquares.LeastSquaresBuilder;
 import org.apache.commons.math3.fitting.leastsquares.LeastSquaresOptimizer;
 import org.apache.commons.math3.fitting.leastsquares.LeastSquaresProblem;
@@ -11,13 +9,14 @@ import org.apache.commons.math3.fitting.leastsquares.ParameterValidator;
 // import org.apache.commons.math3.fitting.leastsquares.EvaluationRmsChecker;
 import org.apache.commons.math3.linear.Array2DRowRealMatrix;
 import org.apache.commons.math3.linear.ArrayRealVector;
-import org.apache.commons.math3.linear.DiagonalMatrix;
+// import org.apache.commons.math3.linear.DiagonalMatrix;
 import org.apache.commons.math3.linear.MatrixUtils;
 import org.apache.commons.math3.linear.RealMatrix;
 import org.apache.commons.math3.linear.RealVector;
 import org.apache.commons.math3.util.Pair;
 import org.apache.commons.math3.linear.LUDecomposition;
 import org.apache.commons.math3.util.Precision;
+import org.apache.commons.math3.linear.SingularMatrixException;
 import edu.sc.seis.TauP.TauModelException;
 
 /*
@@ -38,11 +37,12 @@ public class HypoLevenbergMarquardt {
 
 	private final double[][] stnTable;
 	private final String[] allCodes;
-	private final double deepest;
+	private final double hypBottom, stnBottom;
 
 	public HypoLevenbergMarquardt(AppConfig config) throws Exception {
 		appConfig = config;
-		deepest = config.getDepLim();
+		hypBottom = config.getHypBottom();
+		stnBottom = config.getStnBottom();
 		hypoUtils = new HypoUtils(appConfig);
 		stnTable = appConfig.getStationTable();
 		allCodes = appConfig.getCodes();
@@ -67,18 +67,17 @@ public class HypoLevenbergMarquardt {
 		// Initial hypocenter
 		RealVector hypvec = MatrixUtils.createRealVector(new double[] {lon, lat, dep});
 		RealVector target = MatrixUtils.createRealVector(new double[numPhase]);
-		RealMatrix weight = new DiagonalMatrix(numPhase);
-		for (int i = 0; i < numPhase; i++) {
+		for ( int i = 0; i < numPhase; i++ ) {
 			target.setEntry(i, lagTable[i][2]);
-			weight.setEntry(i, i, lagTable[i][3]);
 		}
 
 		// Iteration to remove outliers
 		boolean hasOutlier = false;
-		for (int n = 0; n < 5; n++) {
+		boolean[] isOutlier = new boolean[numPhase];
+		for (int n = 0; n < 10; n++) {
 			LeastSquaresProblem problem = new LeastSquaresBuilder()
 					.start(hypvec)
-					.weight(weight)
+					// .weight(weight)
 					.target(target)
 					.model(getPartialDerivativeFunction(lagTable, usedIdx))
 					// .checker(new EvaluationRmsChecker(2))
@@ -88,8 +87,8 @@ public class HypoLevenbergMarquardt {
 					.parameterValidator(new ParameterValidator() {
 						@Override
 						public RealVector validate(RealVector params) {
-							if (params.getEntry(2) < 0){ // Airquake
-								params.setEntry(2, Math.random()*deepest);
+							if (params.getEntry(2) <= stnBottom){ // Airquake
+								params.setEntry(2, Math.random()*hypBottom);
 							}
 							return params;
 						}
@@ -103,22 +102,30 @@ public class HypoLevenbergMarquardt {
 				Precision.SAFE_MIN
 			).optimize(problem);
 
+			// res = optimum.getRMS();
+
 			RealVector resDiffTime = optimum.getResiduals();
-			double[] newWeight = new double[numPhase];
-			res = optimum.getRMS();
+			double sumOfSquares = 0;
+			int okCount = 0;
 			for (int i = 0; i < numPhase; i++) {
-				if (Math.abs(resDiffTime.getEntry(i)) > 3*res) {
-					lagTable[i][3] = 0;
-					newWeight[i] = 0;
-					hasOutlier = true;
-				} else {
-					lagTable[i][3] = resDiffTime.getEntry(i);
-					newWeight[i] = 1;
+				if ( !isOutlier[i] ) {
+					sumOfSquares += Math.pow(resDiffTime.getEntry(i), 2);
+					okCount++;
+				}
+			}
+			res = Math.sqrt(sumOfSquares / okCount);
+
+			for (int i = 0; i < numPhase; i++) {
+				if ( !isOutlier[i] ) {
+					if (Math.abs(resDiffTime.getEntry(i)) > 2 * res) {
+						lagTable[i][3] = 0;
+						isOutlier[i] = true;
+						hasOutlier = true;
+					}
 				}
 			}
 
 			if ( hasOutlier ) {
-				weight = new DiagonalMatrix(newWeight);
 				hasOutlier = false;
 				continue;
 			} else {
@@ -126,20 +133,41 @@ public class HypoLevenbergMarquardt {
 				lon = xmin[0];
 				lat = xmin[1];
 				dep = xmin[2];
-				method = "LMO";
+				method = "STD";
 
-				RealMatrix fjac = optimum.getJacobian();
-				RealMatrix rtr = fjac.transpose().multiply(fjac);
-				LUDecomposition luDecomposition = new LUDecomposition(rtr);
-				RealMatrix inverseRtr = luDecomposition.getSolver().getInverse();
-
-				double[] sigma = new double[3];
-				for (int i = 0; i < 3; i++) {
-					sigma[i] = res * Math.sqrt(inverseRtr.getEntry(i, i));
+				// Error estimation
+				boolean success = false;
+				RealVector sigma = new ArrayRealVector(3);
+				try {
+					RealMatrix fjac = optimum.getJacobian();
+					RealMatrix rtr = fjac.transpose().multiply(fjac);
+					LUDecomposition luDecomposition = new LUDecomposition(rtr);
+					RealMatrix err = luDecomposition.getSolver().getInverse().scalarMultiply(res * res);
+					for ( int i = 0; i<3; i++ ) {
+						sigma.setEntry(i, Math.sqrt(err.getEntry(i, i)));
+					}
+					success = true;
+				} catch (SingularMatrixException e) {
+					// pass 
 				}
-				eLon = sigma[0] * App.deg2km * Math.cos(Math.toRadians(lat));
-				eLat = sigma[1] * App.deg2km;
-				eDep = sigma[2];
+ 
+				if ( !success ) {
+					try {
+						RealVector tmp = optimum.getSigma(1e-10);
+						for (int i = 0; i < 3; i++) {
+							sigma.setEntry(i, tmp.getEntry(i) * res);
+						}
+					} catch	( SingularMatrixException e ) {
+						for (int i = 0; i < 3; i++) {
+							sigma.setEntry(i, 999);
+						}
+					}
+				}
+
+				eLon = sigma.getEntry(0) * App.deg2km * Math.cos(Math.toRadians(lat));
+				eLat = sigma.getEntry(1) * App.deg2km;
+				eDep = sigma.getEntry(2);
+
 				// System.out.println("Evaluations: " + optimum.getEvaluations());
 				// System.out.println("Iterations: " + optimum.getIterations());
 				break;
@@ -172,26 +200,34 @@ public class HypoLevenbergMarquardt {
 					for (int i = 0; i < lagTable.length; i++) {
 						int nstnk = (int) lagTable[i][0];
 						int nstnl = (int) lagTable[i][1];
-
-						// When the TauP tool returning NaN values for the takeoff angle
-						// (for unknown reasons), equations are excluded
-						// if (HypoUtils.containsNaN(dtdr[nstnk]) | HypoUtils.containsNaN(dtdr[nstnl])) {
-						// 	value.setEntry(i, 0);
-						// 	jacobian.setEntry(i, 0, 0.0);
-						// 	jacobian.setEntry(i, 1, 0.0);
-						// 	jacobian.setEntry(i, 2, 0.0);
-						// 	System.out.println(hypoVector.getEntry(1) + " " + hypoVector.getEntry(0) + " " + hypoVector.getEntry(2) + " @ " + nstnk + " " + nstnl);
-						// } else if (lagTable[i][3] < 0.001) {
-						// 	value.setEntry(i, 0);
-						// 	jacobian.setEntry(i, 0, 0.0);
-						// 	jacobian.setEntry(i, 1, 0.0);
-						// 	jacobian.setEntry(i, 2, 0.0);
-						// } else {
-						value.setEntry(i, trvTime[nstnl] - trvTime[nstnk]);
-						jacobian.setEntry(i, 0, dtdr[nstnl][0] - dtdr[nstnk][0]); // dt/dx
-						jacobian.setEntry(i, 1, dtdr[nstnl][1] - dtdr[nstnk][1]); // dt/dy
-						jacobian.setEntry(i, 2, dtdr[nstnl][2] - dtdr[nstnk][2]); // dt/dz
-						// }
+						if ( (int) lagTable[i][3] == 0 ) { // Outlier
+							value.setEntry(i, 0);
+							jacobian.setEntry(i, 0, 0); // dt/dx
+							jacobian.setEntry(i, 1, 0); // dt/dy
+							jacobian.setEntry(i, 2, 0); // dt/dz
+						} else {
+							// When the TauP tool returning NaN values for the takeoff angle
+							// (for unknown reasons), equations are excluded
+							// if (HypoUtils.containsNaN(dtdr[nstnk]) | HypoUtils.containsNaN(dtdr[nstnl]))
+							// {
+							// value.setEntry(i, 0);
+							// jacobian.setEntry(i, 0, 0.0);
+							// jacobian.setEntry(i, 1, 0.0);
+							// jacobian.setEntry(i, 2, 0.0);
+							// System.out.println(hypoVector.getEntry(1) + " " + hypoVector.getEntry(0) + "
+							// " + hypoVector.getEntry(2) + " @ " + nstnk + " " + nstnl);
+							// } else if (lagTable[i][3] < 0.001) {
+							// value.setEntry(i, 0);
+							// jacobian.setEntry(i, 0, 0.0);
+							// jacobian.setEntry(i, 1, 0.0);
+							// jacobian.setEntry(i, 2, 0.0);
+							// } else {
+							value.setEntry(i, trvTime[nstnl] - trvTime[nstnk]);
+							jacobian.setEntry(i, 0, dtdr[nstnl][0] - dtdr[nstnk][0]); // dt/dx
+							jacobian.setEntry(i, 1, dtdr[nstnl][1] - dtdr[nstnk][1]); // dt/dy
+							jacobian.setEntry(i, 2, dtdr[nstnl][2] - dtdr[nstnk][2]); // dt/dz
+							// }
+						}
 					}
 				} catch (Exception e) {
 					throw new RuntimeException(e.getMessage());
