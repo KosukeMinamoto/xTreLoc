@@ -1,113 +1,92 @@
 # xTreLoc
 
-## About this program
+xTreLoc is a Java-based program for (re)determining the hypocenters of tremors based on cross-correlation.
 
-This is the Cross-correlation based Tremor reLocation tool (xTreLoc) developed by K.M.
+## Requirements
 
-This software supports:
-- Hypocenter location based on the differential travel-time of the S-wave
-- Hypocenter relocation using the relative location method
-- Check located results with ease
+- Java 17
+- Supports both Maven and Gradle
 
-## Compile
+## Installation
 
-### Maven
+You can use either Maven or Gradle to build the project. Ensure you have Java 17 installed before proceeding.
 
+### Using Maven
+
+```sh
+mvn clean install
 ```
-mvn clean package
-```
 
-* mavenで依存関係まるごとダウンロード: `mvn dependency:copy-dependencies -DoutputDirectory=lib`
+### Using Gradle
 
-### Gradle
-
-```
+```sh
 gradle clean build
 ```
 
 ## Usage
 
-```sh {cmd=True}
-./xtreloc
+Once built, you can execute the program using the following command:
+
+```sh
+java -jar /path/to/jarfile MODE
 ```
 
+### Modes
 
-## Configure file
+xTreLoc supports multiple execution modes:
 
-### Velocity model
+- **GRS**: Determines hypocenters using the Grid Search algorithm.
+- **STD**: Determines hypocenters using the Station-Pair Double Difference method.
+- **CLS**: Performs spatial clustering of hypocenters and generates `triplediff.csv` for TRP mode.
+- **TRP**: Re-determines hypocenters using the Triple Difference method.
+- **SYN**: Runs synthetic tests, referencing `catalog_file` in `config.json`.
+- **SEE**: Plots the epicentral distribution, referencing `catalog_file` in `config.json`.
 
-- カスタム速度構造
-\
-`taup velmerge -mod prem --nd merge aob.nd`
-\
-`taup create -nd prem_aob.nd`
-\
-For more info., see taup manual (p.15)
+## Required Files
 
-### Station table
+To run xTreLoc, the following files are required:
 
-Space(s) separated station table with the columns of station code (String), latidude (float), longitude (float), depth (float, pos down in km), travel-time correction val. (float, P-wave), the same as former (float, S-wave), user defined vals. (Not recognized)
+- **config.json**: Parameter settings file.
+- **station.tbl**: A space-separated file containing station latitude, longitude, elevation, and station correction values.
+- **Velocity Structure Model (TauP format)**: Optional. The default TauP models can be used if not specified.
+- **catalog.csv**: A CSV file storing hypocenter information. It can also serve as the ground truth for synthetic tests.
 
-Here is the example of Ocean Bottom Seismometers (OBSs) deployed in the Japan Trench (Around North 39 deg., East 143 deg., 2 km below the sea-surface).
+## Sample Workflow
 
-@import "station_B.tbl" {line_begin=2 line_end=5}
+To use xTreLoc in a complete workflow, follow these steps:
 
-<!-- {code_block=true class="line-numbers"} -->
+1. Run **SYN** mode to generate `dat` files inside `dat-syn` (referenced by `dat_dir` in `config.json`).
+2. Run **STD** mode to determine individual hypocenters.
+3. Run **CLS** mode to perform spatial clustering and generate `triplediff.csv`.
+4. Run **TRP** mode to re-determine hypocenters using the Triple Difference method.
 
-### datPattern
+All necessary files for this workflow are stored in the `test` directory.
 
-The pattern of the files in the UNIX format, ***NOT in the java format***.
+## Additional Tools
 
-## Example
+Several auxiliary programs are included in the `test` directory:
 
-### Synthetic Test
-
-At first, you need to prepare true catalog like this:
-
-@import "synthetic.csv" {line_end=4}
-
-Next, generate datasets for synthetic test as below:
-
-```
-java -jar build/libs/xtreloc-1.0-SNAPSHOT.jar SYN
-```
-
-Note that columns of date, error, type are NOT used here, and example datasets will be written in the path. Location with the Station-pair DD method can be done as:
-
-```
-java -jar build/libs/xtreloc-1.0-SNAPSHOT.jar STD
-```
-
-and also with the Triple Difference method as:
-
-```
-java -jar build/libs/xtreloc-1.0-SNAPSHOT.jar TDR
-```
-
-!!! warning
-    Files in the "dat-out" directory will be overwritten after running (re-) location. You must copy the directory in each steps if you want.
-
-## Utilities
-
-- sumdat\.py
-
-- map.plt
-
+- **sumdat.py** (Python script): 
+    This script reads all files in `dat_dir` and generates a visualization script in the specified format (default: gnuplot).
+  - Usage:
+    ```sh
+    python3 sumdat.py [-h] --dat_dir DAT_DIR [--map_type {gnuplot,python,matlab,gmt6}]
+    ```
 
 ## License
 
-```txt
-Copyright 2025 Kosuke Minamoto
+This project is licensed under the Apache License 2.0. See the LICENSE file for details.
 
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
+## Version
 
-    http://www.apache.org/licenses/LICENSE-2.0
+- **Current Version:** 0.1
 
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-```
+## Author
+
+- **Developer:** A.B.
+- **Contact:** [example@gmail.com](mailto:example@gmail.com)
+
+## Repository
+
+The source code will be available on GitHub soon.
+
