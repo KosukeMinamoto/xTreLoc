@@ -1,3 +1,4 @@
+@import "style.css"
 
 # xTreLoc
 
@@ -5,8 +6,11 @@
 
 xTreLoc is a Java-based program for (re)determining the hypocenters of earthquakes by optimizing lag-time. For more info., pls see `demo/docx/demo.pdf`.
 
-I would appreciate if you would cite this paper:
-: K. Minamoto et al. (202X)
+If you find this useful, I'd appreciate if you would cite this paper:
+
+```txt
+K. Minamoto et al. (202X)
+```
 
 ## Directory structure
 
@@ -78,8 +82,10 @@ All necessary files for this workflow are stored in the `demo` directory.
 
 ## To Do
 
-- [ ] Add test scripts using JUnits
+- [x] Add test scripts using JUnits
 - [ ] Add "fix-depth" mode
+- [ ] `dat` ファイルの観測点順が逆の場合でもうまくいくようにする
+- [ ] `.DS_Store`に反応しないように
 
 ## License
 
@@ -87,7 +93,7 @@ This project is licensed under the Apache License 2.0. See the LICENSE file for 
 
 ## Version
 
-- **Current Version:** 0.1
+- **Current Version:** 0.1 (Feb. 9th, 2025)
 
 ## Author
 

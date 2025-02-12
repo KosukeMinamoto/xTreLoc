@@ -1,0 +1,5 @@
+#!/bin/bash
+
+mkdir -p "dat-out"
+
+java -jar /Users/kosukeminamoto/kminamoto/java/xtreloc/target/xtreloc-1.0-SNAPSHOT-jar-with-dependencies.jar $1
