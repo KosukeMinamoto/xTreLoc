@@ -19,42 +19,41 @@ import edu.sc.seis.TauP.TauModelException;
  */
 
 public class SyntheticTest extends HypoUtils {
-	private AppConfig config;
 	private final double[][] stnTable;
 	private final String[] allCodes;
 	private Random rand;
-	private String catalogFilePath;
+	private String catalogFile;
 	private final double phsErr, locErr;
-	private final int randomSeed;
+	private final int randomSeed = 100;
 
-	public SyntheticTest(AppConfig config) throws Exception {
+	public SyntheticTest(AppConfig config) {
 		super(config);
 		stnTable = config.getStationTable();
 		allCodes = config.getCodes();
-		catalogFilePath = config.getCatalogFilePath();
+		catalogFile = config.getCatalogFile();
 
 		phsErr = 0.1; // Second
 		locErr = 0.03; // Degree
-
-		randomSeed = 100;
 		rand = new Random(randomSeed);
 	}
 
-	public void generateDataFromCatalog() {
-		try (BufferedReader reader = new BufferedReader(new FileReader(catalogFilePath))) {
+	public void generateDataFromCatalog(double minSelectRate, double maxSelectRate) {
+		try (BufferedReader reader = new BufferedReader(new FileReader(catalogFile))) {
 			String line;
 			while ((line = reader.readLine()) != null) {
 				if (line.startsWith("[A-Z]")) {
 					continue;
 				} 
 
-				String[] data = line.split(",");
+				String[] data = line.split(" ");
 				generateData(
 					Double.parseDouble(data[2]), // lon
 					Double.parseDouble(data[1]), // lat
 					Double.parseDouble(data[3]), // dep
 					LocalDateTime.parse(data[0].trim()), // time
-					data[9] // data file-path
+					data[9], // data file-path
+					minSelectRate,
+					maxSelectRate
 					);
 			}
 		} catch (Exception e) {
@@ -62,27 +61,32 @@ public class SyntheticTest extends HypoUtils {
 		}
 	}
 
-	private void generateData(double lon, double lat, double dep, LocalDateTime time, String dataFilePath) throws TauModelException {
+	public void generateData(
+		double lon, double lat, double dep, LocalDateTime time, String dataFilePath,
+		double minSelectRate, double maxSelectRate) throws TauModelException {
 		double[] hyp = new double[] { lon, lat, dep };
-		double[][] lagTable = randomLagTime(hyp);
+		double[][] lagTable = randomLagTime(hyp, minSelectRate, maxSelectRate);
 
-		DataHandler handler = new DataHandler(config);
-		handler.setLatitude(lat + rand.nextGaussian() * locErr);
-		handler.setLongitude(lon + rand.nextGaussian() * locErr);
-		handler.setDepth(dep + rand.nextGaussian() * locErr * App.deg2km);
-		handler.setLatitudeError(locErr);
-		handler.setLongitudeError(locErr);
-		handler.setDepthError(locErr * App.deg2km);
-		handler.setResidual(-999);
-		handler.setMethod("SYN");
-		handler.setLagTable(lagTable);
-		handler.write(dataFilePath, allCodes);
+		PointsHandler pointsHandler = new PointsHandler();
+		Point point = pointsHandler.getMainPoint();
+		point.setLat(lat + rand.nextGaussian() * locErr);
+		point.setLon(lon + rand.nextGaussian() * locErr);
+		point.setDep(dep + rand.nextGaussian() * locErr * App.deg2km);
+		point.setElat(locErr);
+		point.setElon(locErr);
+		point.setEdep(locErr * App.deg2km);
+		point.setRes(-999);
+		point.setType("SYN");
+		point.setLagTable(lagTable);
+		pointsHandler.writeDatFile(dataFilePath, allCodes);
 
-		System.out.println("Generated data: " + dataFilePath);
+		System.out.println("> Generated data: " + dataFilePath);
 	}
 
-	private double[][] randomLagTime(double[] hyp) throws TauModelException {
-		// Create synthetic data of all station-pair
+	private double[][] randomLagTime(
+		double[] hyp,
+		double minSelectRate,
+		double maxSelectRate) throws TauModelException {
 		int[] codeIdx = IntStream.rangeClosed(0, stnTable.length-1).toArray();
 		double[] sTravelTime = travelTime(stnTable, codeIdx, hyp);
 
@@ -101,8 +105,8 @@ public class SyntheticTest extends HypoUtils {
 		}
 
 		// Select phase randomly
-		int minPairs = (int)(numAllPairs * 0.2);
-		int maxPairs = (int)(numAllPairs * 0.4); 
+		int minPairs = (int)(numAllPairs * minSelectRate);
+		int maxPairs = (int)(numAllPairs * maxSelectRate); 
 		int numRandomPairs = minPairs + rand.nextInt(maxPairs - minPairs + 1);
 
 		// Shuffle indices using Fisher-Yates algorithm

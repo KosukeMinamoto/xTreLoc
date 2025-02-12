@@ -1,7 +1,5 @@
 package com.treloc.hypotd;
 
-// import java.util.Arrays;
-
 import org.apache.commons.math3.linear.RealVector;
 
 import edu.sc.seis.TauP.Arrival;
@@ -9,6 +7,7 @@ import edu.sc.seis.TauP.NoSuchLayerException;
 import edu.sc.seis.TauP.NoSuchMatPropException;
 import edu.sc.seis.TauP.TauModel;
 import edu.sc.seis.TauP.TauModelException;
+import edu.sc.seis.TauP.TauModelLoader;
 import edu.sc.seis.TauP.TauP_Time;
 import edu.sc.seis.TauP.VelocityLayer;
 import edu.sc.seis.TauP.VelocityModel;
@@ -19,7 +18,7 @@ import edu.sc.seis.TauP.VelocityModel;
 /*
  * Ray-tracing using TauP toolkit
  * @author: K.M.
- * @date: 2025/01/26
+ * @date: 2025/02/12
  * @version: 0.1
  * @description: The class is used to calculate the travel time 
  * and partial derivative matrix using TauP toolkit.
@@ -28,11 +27,11 @@ import edu.sc.seis.TauP.VelocityModel;
 
  public class HypoUtils {
 	private final String modPath;
-	private VelocityModel velMod;
+	private final VelocityModel velMod;
 	private TauModel tauMod;
 
-	public HypoUtils (AppConfig config) throws Exception {
-		modPath = config.getTaumodPath();
+	public HypoUtils (AppConfig config) {
+		modPath = config.getTaumodFile();
 		String extension = getFileExtension(modPath);
 		switch (extension) {
 			case "":
@@ -47,22 +46,32 @@ import edu.sc.seis.TauP.VelocityModel;
 				 * pwdk, see [Weber & Davis, 1990]
 				 * sp6, see [Morelli & Dziewonski, 1993]
 				 */ 
-				TauP_Time taup_time = new TauP_Time(modPath);
-				tauMod = taup_time.getTauModel();
+				try {
+					tauMod = TauModelLoader.load(modPath);
+				} catch (TauModelException e) {
+					e.printStackTrace();
+					System.exit(1);
+				}
+				// TauP_Time taup_time = new TauP_Time(modPath);
+				// tauMod = taup_time.getTauModel();
 				// tauMod.wfriteModel(modPath + extension);
 				break;
 			case "taup":
-				tauMod = TauModel.readModel(modPath);
+				try {
+					tauMod = TauModel.readModel(modPath);
+				} catch (Exception e) {
+					e.printStackTrace();
+				}
 				break;
 			default:
-				System.out.println("Unsupported file (only .tvel file are supported): " + extension);
+				System.out.println("> Unsupported file (only .tvel file are supported): " + extension);
 		}
 		velMod = tauMod.getVelocityModel();
-		System.out.println("Velocity model:\n" + velMod);
+		System.out.println("> Velocity model:\n" + velMod);
 		// velMod.printGMT(modPath + ".gmt");
 	}
 
-	private String getFileExtension(String fileName) {
+	private static String getFileExtension(String fileName) {
 		if (fileName.lastIndexOf(".") != -1 && fileName.lastIndexOf(".") != 0) {
 			return fileName.substring(fileName.lastIndexOf(".") + 1);
 		} else {
@@ -203,7 +212,7 @@ import edu.sc.seis.TauP.VelocityModel;
 		return trvTime;
 	}
 
-	private double getAzimuth(double lat1, double lon1, double lat2, double lon2) {
+	public static double getAzimuth(double lat1, double lon1, double lat2, double lon2) {
 		/*
 		 * Calculate azimuth angle between two points
 		 * Return: Azimuth angle [rad]
@@ -220,10 +229,15 @@ import edu.sc.seis.TauP.VelocityModel;
 		return azimuth;
 	}
 
-	private double getDistance2D(double lat1, double lon1, double lat2, double lon2) {
+	public static double getDistance2D(double lat1, double lon1, double lat2, double lon2) {
 		/*
 		 * Calculate 2D distance between two points
-		 * Return: Distance [deg]
+		 * 
+		 * @param lat1 Latitude val.
+		 * @param lon1 Longitude val.
+		 * @param lat2 Latitude val.
+		 * @param lon2 Longitude val.
+		 * @return Distance in degree
 		 */
 		lon1 = Math.toRadians(lon1);
 		lat1 = Math.toRadians(lat1);
@@ -237,7 +251,7 @@ import edu.sc.seis.TauP.VelocityModel;
 	public static double[] residual2weight(RealVector resDiffTime) {
 		/*
 		 * Convert residuals to weights
-		 * @param resDiffTime: Residuals [s]
+		 * @param resDiffTime: Residuals in sec.
 		 * @return weights: Weights
 		 */
 		double[] weight = new double[resDiffTime.getDimension()];
@@ -263,44 +277,5 @@ import edu.sc.seis.TauP.VelocityModel;
 			weight[i] = w;
 		}
 		return weight;
-	}
-
-	public static double standardDeviation(double[] data) {
-		double sum = 0.0, standardDeviation = 0.0;
-		int length = data.length;
-
-		for (double num : data) {
-			sum += num;
-		}
-		double mean = sum / length;
-
-		for (double num : data) {
-			standardDeviation += Math.pow(num - mean, 2);
-		}
-		return Math.sqrt(standardDeviation / length);
-	}
-
-	public static double standardDeviation(RealVector data) {
-		double sum = 0.0, standardDeviation = 0.0;
-		int length = data.getDimension();
-
-		for (int i = 0; i < length; i++) {
-			sum += data.getEntry(i);
-		}
-		double mean = sum / length;
-
-		for (int i = 0; i < length; i++) {
-			standardDeviation += Math.pow(data.getEntry(i) - mean, 2);
-		}
-		return Math.sqrt(standardDeviation / length);
-	}
-
-	public static boolean containsNaN(double[] array) {
-		for (double value : array) {
-			if (Double.isNaN(value)) {
-				return true;
-			}
-		}
-		return false;
 	}
 }

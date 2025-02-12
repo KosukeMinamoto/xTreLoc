@@ -10,66 +10,79 @@ import java.io.BufferedReader;
 import java.io.FileReader;
 import java.util.ArrayList;
 import java.util.List;
+import java.io.PrintWriter;
+import java.io.FileNotFoundException;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
 
 /*
  * Configuration class
  * @author: K.M.
- * @date: 2025/01/26
+ * @date: 2025/02/11
  * @version: 0.1
  * @description: The class is used to read the configuration file.
  * @usage: 
  */
 
 public final class AppConfig {
-	private int numJobs;
-	private int numGrid;
-	private double hypBottom;
-	private double threshold;
-	private String taumodFile;
-	private String catalogFilePath;
-	private AppConfig config;
+	private int numJobs, numGrid;
+	private double hypBottom, stnBottom, threshold;
+	private String taumodFile, catalogFile, stnFile, datPattern;
 	private double[][] stnTable;
-	private Path[] datPaths;
-	private Path parentPath;
 	private String[] codes;
-	private double stnBottom = 0;
+	private int clsPts=10;
+	private double clsEps;
 
-	public AppConfig readConfig(String configFilePath) throws IOException {
+	public AppConfig readConfig(String configFilePath)  {
 		ObjectMapper mapper = new ObjectMapper();
-		JsonNode root = mapper.readTree(new File(configFilePath));
+		try {
+			JsonNode root = mapper.readTree(new File(configFilePath));
+			this.numJobs = root.get("numJobs").asInt();
+			this.numGrid = root.get("numGrid").asInt();
+			this.hypBottom = root.get("hypBottom").asDouble();
+			this.taumodFile = root.get("taumodFile").asText();
+			this.catalogFile = root.get("catalogFile").asText();
+			this.threshold = root.get("threshold").asDouble();
+			this.datPattern = root.get("datPattern").asText();
+			this.stnFile = root.get("stnFile").asText();
+			
+			this.clsEps = root.get("clsEps").asDouble();
+			this.clsPts = root.get("clsPts").asInt();
 
-		this.numJobs = root.get("numJobs").asInt();
-		this.numGrid = root.get("numGrid").asInt();
-		this.hypBottom = root.get("hypBottom").asDouble();
-		this.taumodFile = root.get("taumodFile").asText();
-		this.threshold = root.get("threshold").asDouble();
-		this.catalogFilePath = root.get("catalogFilePath").asText();
-
-		String stnFile = root.get("stnFile").asText();
-		readStnTable(stnFile);
-
-		String datPattern = root.get("datPattern").asText();
-		seachFile(datPattern);
+			readStnTable(stnFile);
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
 		return this;
 	}
 
-	private void seachFile(String pathPattern) throws IOException {
+	public void writeConfig(String configFile) throws IOException {
+		ObjectMapper objectMapper = new ObjectMapper();
+		objectMapper.enable(SerializationFeature.INDENT_OUTPUT);
+
+		objectMapper.writeValue(new File(configFile), this);
+	}
+
+	
+
+	private List<Path> seachFile(String pathPattern) {
 		String filePattern = pathPattern
 				.substring(pathPattern.lastIndexOf("/") + 1)
 				.replace("*", ".*");
 
-		this.parentPath = Paths.get(pathPattern.substring(0, pathPattern.lastIndexOf("/")));
+		Path parentPath = Paths.get(pathPattern.substring(0, pathPattern.lastIndexOf("/")));
 		List<Path> datPathList = new ArrayList<>();
 		try (DirectoryStream<Path> stream = Files.newDirectoryStream(parentPath,
 				path -> path.getFileName().toString().matches(filePattern))) {
 			for (Path entry : stream) {
 				datPathList.add(entry);
 			}
-		}
-		this.datPaths = datPathList.toArray(new Path[0]);
+		} catch (IOException e) {
+			System.err.println(e);
+		} 
+		return datPathList; //.toArray(new Path[0]);
 	}
 
 	private void readStnTable (String stnFile) {
@@ -115,32 +128,76 @@ public final class AppConfig {
 		this.codes = codeList.toArray(new String[codeList.size()]);
 	}
 
+	public void setNumJobs( int numJobs ) {
+		this.numJobs = numJobs;
+	}
+
 	public int getNumJobs() {
 		return this.numJobs;
+	}
+
+	public void setNumGrid( int numGrid ) {
+		this.numGrid = numGrid;
 	}
 
 	public int getNumGrid() {
 		return this.numGrid;
 	}
 
+	public void setHypBottom( int hypBottom ) {
+		this.hypBottom = hypBottom;
+	}
+
 	public double getHypBottom() {
 		return this.hypBottom;
 	}
 
+	public void setThreshold( double threshold ) {
+		this.threshold = threshold;
+	}
+	
 	public double getThreshold() {
 		return this.threshold;
 	}
 
-	public String getTaumodPath() {
+	public void setTaumodFile( String taumodFile ) {
+		this.taumodFile = taumodFile;
+	}
+
+	public String getTaumodFile() {
 		return this.taumodFile;
 	}
 
-	public String getCatalogFilePath() {
-		return this.catalogFilePath;
+	public void setCatalogFile( String catalogFile ) {
+		this.catalogFile = catalogFile;
+	}
+
+	public String getCatalogFile() {
+		return this.catalogFile;
+	}
+
+	public void setStnFile(String stnFile) {
+		this.stnFile = stnFile;
+	}
+
+	public String getStnFile() {
+		return this.stnFile;
+	}
+
+	public void setStationTable(double[][] stnTable) {
+		this.stnTable = stnTable;
+	}
+
+	public void setCodes(String[] codes) {
+		this.codes = codes;
 	}
 
 	public double[][] getStationTable (){
 		return this.stnTable;
+	}
+
+	public void setStnBottom( double stnBottom ) {
+		this.stnBottom = stnBottom;
 	}
 
 	public double getStnBottom() {
@@ -151,11 +208,43 @@ public final class AppConfig {
 		return this.codes;
 	}
 
-	public Path[] getDatPath () {
-		return this.datPaths;
+	public void setDatPattern(String datPattern) {
+		this.datPattern = datPattern;
 	}
 
-	public AppConfig getConfig() {
-		return this.config;
+	public String getDatPattern() {
+		return this.datPattern;
+	}
+
+	public Path[] getDatPaths () {
+		String datPattern = getDatPattern();
+		List<Path> pathList = seachFile(datPattern);
+		return pathList.toArray(new Path[0]);
+	}
+
+	public int getClsPts () {
+		return clsPts;
+	}
+
+	public double getClsEps() {
+		return clsEps;
+	}
+
+	/**
+	 * Write station table to a file.
+	 * @param fileName The name of the file to write to
+	 */
+	public void writeStnTable( String fileName ) {
+		try (PrintWriter writer = new PrintWriter(fileName)) {
+			for (int i=0; i<stnTable.length; i++) {
+				writer.print(codes[i] + " ");
+				for (double value : stnTable[i]) {
+					writer.print(value + " ");
+				}
+				writer.println();
+			}
+		} catch (FileNotFoundException e) {
+			System.err.println("Error writing station table to file: " + e.getMessage());
+		}
 	}
 }

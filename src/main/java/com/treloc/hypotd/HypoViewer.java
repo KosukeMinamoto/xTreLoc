@@ -52,17 +52,17 @@ import java.awt.BorderLayout;
 public class HypoViewer extends ApplicationFrame {
 	private double[][] stationTable;
 	private final String[] allCodes;
-	private AppConfig config;
+	private Path[] filePaths;
 	private JFreeChart chart;
 
 	private int height = 800;
 	private int width;
 
-	public HypoViewer(AppConfig config) {
+	public HypoViewer (AppConfig appConfig) {
 		super("HypoViewer");
-		this.config = config;
-		stationTable = config.getStationTable();
-		allCodes = config.getCodes();
+		stationTable = appConfig.getStationTable();
+		allCodes = appConfig.getCodes();
+		filePaths = appConfig.getDatPaths();
 
 		XYSeriesCollection dataset = new XYSeriesCollection();
 
@@ -113,9 +113,9 @@ public class HypoViewer extends ApplicationFrame {
 				try {
 					String figName = JOptionPane.showInputDialog("Save fig as: ");
 					ChartUtilities.saveChartAsPNG(new File(figName + ".png"), chart, width, height);
-					System.out.println("Chart saved as " + figName + ".png");
+					System.out.println("> Chart saved as " + figName + ".png");
 				} catch (IOException e2) {
-					System.err.println("Error saving chart: " + e2.getMessage());
+					System.err.println("> Error saving chart: " + e2.getMessage());
 				}
 			}
 		});
@@ -148,18 +148,13 @@ public class HypoViewer extends ApplicationFrame {
 
 	private XYSeries loadEventData () {
 		XYSeries hypSeries = new XYSeries("Hypocenter");
-		Path[] filePaths = config.getDatPath();
-		DataHandler dataHandler = new DataHandler(config);
+		PointsHandler pointsHandler = new PointsHandler();
 		for (Path filePath : filePaths) {
-			try {
-				dataHandler.read(filePath.toString(), allCodes);
-				double lat = dataHandler.getLatitude();
-				double lon = dataHandler.getLongitude();
-				hypSeries.add(lon, lat);
-			} catch (Exception e) {
-				System.err.println(">> File loading error " + filePath);
-				continue;
-			}
+			pointsHandler.readDatFile(filePath.toString(), allCodes, 0);
+			Point point = pointsHandler.getMainPoint();
+			double lat = point.getLat();
+			double lon = point.getLon();
+			hypSeries.add(lon, lat);
 		}
 		return hypSeries;
 	}
