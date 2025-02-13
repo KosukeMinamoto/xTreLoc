@@ -1,5 +1,3 @@
-@import "style.css"
-
 # xTreLoc
 
 ## X-correlation-based Tremor Re-location Tools
