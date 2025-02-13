@@ -6,12 +6,6 @@
 
 xTreLoc is a Java-based program for (re)determining the hypocenters of earthquakes by optimizing lag-time. For more info., pls see `demo/docx/demo.pdf`.
 
-If you find this useful, I'd appreciate if you would cite this paper:
-
-```txt
-K. Minamoto et al. (202X)
-```
-
 ## Directory structure
 
 - README: This file
