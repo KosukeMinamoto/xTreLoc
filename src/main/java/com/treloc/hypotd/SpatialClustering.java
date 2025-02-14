@@ -11,52 +11,73 @@ import java.util.stream.Collectors;
 import java.util.Collections;
 import java.util.List;
 
-import javax.swing.JFrame;
-import javax.swing.JPanel;
-import javax.swing.SwingUtilities;
-import java.awt.BorderLayout;
-import java.awt.Color;
-import java.awt.Font;
-
-import org.jfree.chart.ChartFactory;
-import org.jfree.chart.ChartPanel;
-import org.jfree.chart.JFreeChart;
-import org.jfree.chart.plot.PlotOrientation;
-import org.jfree.chart.title.TextTitle;
-import org.jfree.chart.plot.XYPlot;
-import org.jfree.chart.renderer.xy.XYLineAndShapeRenderer;
-import org.jfree.data.xy.XYSeries;
-import org.jfree.data.xy.XYSeriesCollection;
-import org.jfree.ui.HorizontalAlignment;
-import org.jfree.ui.RectangleEdge;
-
 import org.apache.commons.math3.ml.clustering.Cluster;
-// import org.apache.commons.math3.ml.clustering.Clusterable;
 import org.apache.commons.math3.ml.clustering.DBSCANClusterer;
 import org.apache.commons.math3.ml.distance.EuclideanDistance;
 import org.apache.commons.math3.stat.descriptive.rank.Median;
+
+/*
+ * SpatialClustering
+ * @author: K.M.
+ * @date: 2025/02/14
+ * @version: 0.1
+ * @description: The class is used to perform the spatial clustering.
+ */
 
 public class SpatialClustering extends HypoUtils {
 	private Point refPoint;
 	private int minPts;
 	private double eps;
-	private String[] codes;
+	private String[] codeStrings;
 	private double threshold;
+	private String catalogFile;
 
-	public SpatialClustering (AppConfig appConfig) {
+	public SpatialClustering (ConfigLoader appConfig) {
 		super(appConfig);
-		double[][] stnTable = appConfig.getStationTable();
-		double refLat = new Median().evaluate(stnTable[0]);
-		double refLon = new Median().evaluate(stnTable[1]);
+		this.catalogFile = appConfig.getCatalogFile();
+	
+		double[][] stationTable = appConfig.getStationTable();
+		double refLat = new Median().evaluate(stationTable[0]);
+		double refLon = new Median().evaluate(stationTable[1]);
 		this.refPoint = new Point("", refLat, refLon, 0, 0, 0, 0, 0, "", "REF", -999);
-
+	
 		this.threshold = appConfig.getThreshold();
-		this.codes = appConfig.getCodes();
+		this.codeStrings = appConfig.getCodeStrings();
 
 		this.minPts = appConfig.getClsPts();
 		this.eps = appConfig.getClsEps();
 
-		runClustering(appConfig.getCatalogFile(), refPoint);
+		Cluster<Point> cluster = loadPointsFromCatalog(catalogFile, false);
+		boolean hasCid = cluster.getPoints().stream().anyMatch(p -> p.getCid() != -1);
+
+		if (hasCid) {
+			System.out.println("> No clustering performed");
+			System.out.println("> The number of defined cls.: " + cluster.getPoints().stream().map(Point::getCid).distinct().count());
+		} else {
+			System.out.println("> CID not set for any point. Proceeding with clustering...");
+			List<Cluster<Point>> clusters = runClustering(cluster, refPoint);
+
+			List<Point> points = new ArrayList<>();
+			for (Cluster<Point> cls : clusters) {
+				points.addAll(cls.getPoints());
+			}
+			writePointsToFile(points, catalogFile);
+		}
+
+		int clusterId = 1;
+		while (true) {
+			Cluster<Point> clsPts = loadPointsFromCatalog(catalogFile, true, clusterId);
+			if (clsPts.getPoints().isEmpty()) {
+				break;
+			}
+
+			Cluster<Point> cls = new Cluster<>();
+			clsPts.getPoints().forEach(cls::addPoint);
+
+			List<Object[]> trpDiff = calcTripleDifferences(cls, clusterId);
+			saveTripleDifferences(trpDiff, clusterId);
+			clusterId++;
+		}
 	}
 
 	/**
@@ -66,56 +87,37 @@ public class SpatialClustering extends HypoUtils {
 	 * @param minPts      the minimum number of points to form a cluster
 	 * @param refPoints   the list of reference points
 	 */
-	public void runClustering(String catalogFile, Point refPoint) {
-		List<Point> Points = loadPointsFromCatalog(catalogFile, false);
-		boolean hasCid = Points.stream().anyMatch(p -> p.getCid() != -1);
+	public List<Cluster<Point>> runClustering(Cluster<Point> clsPts, Point refPoint) {
+		List<Point> points = clsPts.getPoints();
+		for (Point p : points) {
+			p.setKmLat((p.getLat() - refPoint.getLat()) * App.deg2km);
+			p.setKmLon((p.getLon() - refPoint.getLon()) * App.deg2km * Math.cos(Math.toRadians(p.getLat())));
+		}
 
-		List<Cluster<Point>> clusters;
-		if (hasCid) {
-			System.out.println("> Using existing CID to form clusters.");
-			clusters = Points.stream()
-					.collect(Collectors.groupingBy(Point::getCid))
-					.values().stream()
-					.map(points -> {
-						Cluster<Point> cluster = new Cluster<>();
-						points.forEach(cluster::addPoint);
-						return cluster;
-					})
-					.collect(Collectors.toList());
+		if (eps <= 0) {
+			System.out.println("> Negative 'clsEps' (=" + eps + ") is set. Estimating eps...");
+			List<Double> kDistances = computeKDistance(points, minPts);
+			double estimatedEps = findElbowWithDist(kDistances);
+			System.out.println("> Estimated epsilon: " + estimatedEps + " km & min samples: " + minPts);
+
+			KDistanceGraph.displayKDistanceGraph(kDistances, estimatedEps);
+			eps = estimatedEps;
 		} else {
-			System.out.println("> CID not set for any point. Proceeding with clustering.");
-			for (Point p : Points) {
-				p.setKmLat((p.getLat() - refPoint.getLat()) * 111.32);
-				p.setKmLon((p.getLon() - refPoint.getLon()) * 111.32 * Math.cos(Math.toRadians(p.getLat())));
+			System.out.println("> Given epsilon: " + eps + " km & min samples: " + minPts);
+		}
+
+		DBSCANClusterer<Point> clusterer = new DBSCANClusterer<>(eps, minPts, new EuclideanDistance());
+		List<Cluster<Point>> clusters = clusterer.cluster(points);
+
+		int clusterId = 1;
+		for (Cluster<Point> cluster : clusters) {
+			for (Point point : cluster.getPoints()) {
+				point.setCid(clusterId);
 			}
-
-			if (eps <= 0) {
-				System.out.println("> Negative 'clsEps' (=" + eps + ") is set. Estimating eps...");
-				List<Double> kDistances = computeKDistance(Points, minPts);
-				double estimatedEps = findElbowWithDist(kDistances);
-				System.out.println("> Estimated epsilon: " + estimatedEps + " km & min samples: " + minPts);
-
-				KDistanceGraph.displayKDistanceGraph(kDistances, estimatedEps);
-				eps = estimatedEps;
-			} else {
-				System.out.println("> Given epsilon: " + eps + " km & min samples: " + minPts);
-			}
-
-			DBSCANClusterer<Point> clusterer = new DBSCANClusterer<>(eps, minPts, new EuclideanDistance());
-			clusters = clusterer.cluster(Points);
-
-			int clusterId = 0;
-			for (Cluster<Point> cluster : clusters) {
-				for (Point point : cluster.getPoints()) {
-					point.setCid(clusterId);
-				}
-				clusterId++;
-			}
+			clusterId++;
 		}
 		System.out.println("> Number of clusters: " + clusters.size());
-
-		String outputFile = catalogFile.replaceFirst("\\.[^.]+$", "_CLS$0");
-		writePointsToFile(Points, outputFile);
+		return clusters;
 	}
 
 	/**
@@ -125,15 +127,23 @@ public class SpatialClustering extends HypoUtils {
 	 * @param withLagTable if true, lagTables are also read
 	 * @return the list of loaded points
 	 */
-	 public List<Point> loadPointsFromCatalog(String catalogFile, boolean withLagTable) {
-		List<Point> points = new ArrayList<>();
+	public Cluster<Point> loadPointsFromCatalog(String catalogFile, boolean withLagTable) {
+		Cluster<Point> cluster = new Cluster<>();
 		try (BufferedReader br = new BufferedReader(new FileReader(catalogFile))) {
 			String line;
 			while ((line = br.readLine()) != null) {
 				String[] parts = line.split("\\s+");
-				PointsHandler dataHandler = new PointsHandler();
+				PointsHandler pointsHandler = new PointsHandler();
 
-				Point point = dataHandler.getMainPoint();
+				if (withLagTable) {
+					pointsHandler.readDatFile(parts[8], codeStrings, threshold);
+					if (pointsHandler.getMainPoint().getLagTable().length < 4) {
+						System.err.println("> Not enough data (< 4 pks.) to read in: " + parts[8]);
+						continue;
+					}
+				}
+				
+				Point point = pointsHandler.getMainPoint();
 				point.setTime(parts[0]);
 				point.setLat(Double.parseDouble(parts[1]));
 				point.setLon(Double.parseDouble(parts[2]));
@@ -142,24 +152,20 @@ public class SpatialClustering extends HypoUtils {
 				point.setElon(Double.parseDouble(parts[5]));
 				point.setEdep(Double.parseDouble(parts[6]));
 				point.setRes(Double.parseDouble(parts[7]));
-				point.setType(parts[8]);
-				point.setFilePath(parts[9]);
-
-				if (withLagTable) {
-					dataHandler.readDatFile(parts[9], codes, threshold);
-				}
+				point.setFilePath(parts[8]);
+				point.setType(parts[9]);
 
 				int cid = -1;
 				if (parts.length > 10) {
 					cid = Integer.parseInt(parts[10]);
 				}
 				point.setCid(cid);
-				points.add(point);
+				cluster.addPoint(point);
 			}
 		} catch (IOException e) {
 			System.err.println("> Error reading file: " + e.getMessage());
 		}
-		return points;
+		return cluster;
 	}
 
 	/**
@@ -170,8 +176,8 @@ public class SpatialClustering extends HypoUtils {
 	 * @param clusterId cluster id of events to read in
 	 * @return the list of loaded points
 	 */
-	public List<Point> loadPointsFromCatalog(String catalogFile, boolean withLagTable, int clusterId) {
-		List<Point> points = new ArrayList<>();
+	public Cluster<Point> loadPointsFromCatalog(String catalogFile, boolean withLagTable, int clusterId) {
+		Cluster<Point> cluster = new Cluster<>();
 		try (BufferedReader br = new BufferedReader(new FileReader(catalogFile))) {
 			String line;
 			while ((line = br.readLine()) != null) {
@@ -182,8 +188,17 @@ public class SpatialClustering extends HypoUtils {
 					continue;
 				}
 
-				PointsHandler dataHandler = new PointsHandler();
-				Point point = dataHandler.getMainPoint();
+				PointsHandler pointsHandler = new PointsHandler();
+
+				if (withLagTable) {
+					pointsHandler.readDatFile(parts[8], codeStrings, threshold);
+					if (pointsHandler.getMainPoint().getLagTable().length < 4) {
+						System.err.println("> Not enough data (< 4 pks.) to read in: " + parts[8]);
+						continue;
+					}
+				}
+
+				Point point = pointsHandler.getMainPoint();
 				point.setTime(parts[0]);
 				point.setLat(Double.parseDouble(parts[1]));
 				point.setLon(Double.parseDouble(parts[2]));
@@ -192,20 +207,16 @@ public class SpatialClustering extends HypoUtils {
 				point.setElon(Double.parseDouble(parts[5]));
 				point.setEdep(Double.parseDouble(parts[6]));
 				point.setRes(Double.parseDouble(parts[7]));
-				point.setType(parts[8]);
-				point.setFilePath(parts[9]);
+				point.setFilePath(parts[8]);
+				point.setType(parts[9]);
 				point.setCid(cid);
 
-				if (withLagTable) {
-					dataHandler.readDatFile(parts[9], codes, threshold);
-				}
-
-				points.add(point);
+				cluster.addPoint(point);
 			}
 		} catch (IOException e) {
 			System.err.println("> Error reading file: " + e.getMessage());
 		}
-		return points;
+		return cluster;
 	}
 
 	/**
@@ -214,7 +225,7 @@ public class SpatialClustering extends HypoUtils {
 	 * @param points     points list of to out
 	 * @param outputFile the path of the output file
 	 */
-	private static void writePointsToFile(List<Point> points, String outputFile) {
+	public void writePointsToFile(List<Point> points, String outputFile) {
 		try (PrintWriter writer = new PrintWriter(new FileWriter(outputFile))) {
 			for (Point point : points) {
 				writer.printf("%s %f %f %f %f %f %f %f %s %s %d%n", 
@@ -309,124 +320,122 @@ public class SpatialClustering extends HypoUtils {
 		}
 		return sseValues.get(elbowIndex);
 	}
+
+		/**
+	 * Calculates the triple difference for a cluster and
+	 * saves the results to a file named "triplediff.csv"
+	 *
+	 * @param cluster   the cluster of points
+	 * @param clusterId the ID of the cluster
+	 * 
+	 * @return the list of calculated triple-diff obj.
+	 */
+	private static List<Object[]> calcTripleDifferences(Cluster<Point> cluster, int clusterId) {
+		List<Point> points = cluster.getPoints();
+		List<Object[]> tripleDifferences = new ArrayList<>();
+
+		for (int eid1 = 0; eid1 < points.size(); eid1++) {
+			for (int eid2 = eid1 + 1; eid2 < points.size(); eid2++) {
+				Point p1 = points.get(eid1);
+				Point p2 = points.get(eid2);
+				double dist = getDistance2D(p1.getLat(), p1.getLon(), p2.getLat(), p2.getLon());
+				dist *= App.deg2km;
+				double[][] lagTable1 = p1.getLagTable();
+				double[][] lagTable2 = p2.getLagTable();
+
+				for (double[] row1 : lagTable1) {
+					for (double[] row2 : lagTable2) {
+						if (row1[0] == row2[0] && row1[1] == row2[1]) {
+							double diff = row2[2] - row1[2];
+							Object[] result = new Object[] {
+									eid1, eid2, (int) row1[0], (int) row1[1], diff, dist,
+									clusterId
+							};
+							tripleDifferences.add(result);
+						}
+					}
+				}
+			}
+		}
+		tripleDifferences.sort((a, b) -> Double.compare((double) a[5], (double) b[5]));
+		return tripleDifferences;
+	}
+
+	/**
+	 * Saves the triple differences to a CSV file.
+	 *
+	 * @param tripleDifferences the list of triple differences
+	 * @param clusterId         the ID of the cluster
+	 */
+	private static void saveTripleDifferences(List<Object[]> tripleDifferences, int clusterId) {
+		try (PrintWriter writer = new PrintWriter(new FileWriter("triple_diff_" + clusterId + ".csv"))) {
+			writer.println("eve0,eve1,stn0,stn1,tdTime,distKm,clusterId");
+			for (Object[] td : tripleDifferences) {
+				writer.printf("%d,%d,%d,%d,%.3f,%.3f,%d%n", td[0], td[1], td[2], td[3], td[4], td[5], td[6]);
+			}
+		} catch (IOException e) {
+			System.err.println("> Error writing triple differences: " + e.getMessage());
+		}
+	}
 }
 
-class KDistanceGraph extends JPanel {
+class KDistanceGraph {
 	private final List<Double> kDistances;
-	private final double elbowEps;
-	private final JFreeChart chart;
+	// private final double elbowEps;
 
 	public KDistanceGraph(List<Double> kDistances, double elbowEps) {
 		this.kDistances = kDistances;
-		this.elbowEps = elbowEps;
-		this.chart = createChart();
-
-		setLayout(new BorderLayout());
-		ChartPanel chartPanel = new ChartPanel(chart);
-		add(chartPanel, BorderLayout.CENTER);
+		// this.elbowEps = elbowEps;
 	}
 
-	private JFreeChart createChart() {
-		XYSeries series = new XYSeries("k-Distance");
-		XYSeries elbowSeries = new XYSeries("Elbow Point");
-
-		int elbowIndex = -1;
-		for (int i = 0; i < kDistances.size(); i++) {
-			double value = kDistances.get(i);
-			series.add(i + 1, value);
-			if (Math.abs(value - elbowEps) < 1e-6) { // Find closest point
-				elbowIndex = i + 1;
-				elbowSeries.add(elbowIndex, value);
+	public void saveKDistanceGraph(String filePath) {
+		try (PrintWriter writer = new PrintWriter(new FileWriter(filePath))) {
+			writer.println("Point,Distance");
+			for (int i = 0; i < kDistances.size(); i++) {
+				double value = kDistances.get(i);
+				writer.printf("%d,%.3f%n", i + 1, value);
 			}
+			System.out.println("> k-Distance graph data saved to " + filePath);
+		} catch (IOException e) {
+			System.err.println("> Error writing k-Distance graph data: " + e.getMessage());
 		}
+	}
 
-		XYSeriesCollection dataset = new XYSeriesCollection();
-		dataset.addSeries(series);
-		if (elbowIndex != -1) {
-			dataset.addSeries(elbowSeries); // Add an elbow pt
+	private void kDistPlotWithGnuplot(List<Double> kDistances, double elbowEps) {
+		try {
+			String plotFile = "plot_kdist.plt";
+			try (PrintWriter writer = new PrintWriter(new FileWriter(plotFile))) {
+				writer.println("set terminal pdfcairo");
+				writer.println("set datafile separator ','");
+				writer.println("set output 'kdist_plot.pdf'");
+				writer.println("set title 'k-Distance Graph'");
+				writer.println("set xlabel 'Points'");
+				writer.println("set ylabel 'Epsilon [km]'");
+				writer.println("set grid");
+				writer.println("set style line 1 lc rgb '#0060ad' lt 1 lw 2 pt 7 ps 0.5");
+				writer.println("set style line 2 lc rgb '#dd181f' lt 1 lw 2");
+				writer.println("plot 'kdist.csv' using 1:2 with points ls 1 title 'k-Distance', " + 
+							  elbowEps + " with lines ls 2 title sprintf('Elbow = %.2f', " + elbowEps + ")");
+			}
+
+			// ProcessBuilder pb = new ProcessBuilder("gnuplot", plotFile);
+			// Process p = pb.start();
+			// int exitCode = p.waitFor();
+			// if (exitCode == 0) {
+			// 	System.out.println("> k-Distance plot script saved as " + plotFile);
+			// 	System.out.println("> k-Distance plot saved as k_distance_plot.png");
+			// } else {
+			// 	System.err.println("> Error generating k-Distance plot");
+			// }
+
+		} catch (IOException e) {
+			System.err.println("> Error executing gnuplot: " + e.getMessage());
 		}
-
-		JFreeChart chart = ChartFactory.createXYLineChart(
-				"k-Distance Graph",
-				"Points",
-				"Distance",
-				dataset,
-				PlotOrientation.VERTICAL,
-				true,
-				true,
-				false);
-
-		XYPlot plot = (XYPlot) chart.getPlot();
-		XYLineAndShapeRenderer renderer = new XYLineAndShapeRenderer();
-
-		// k-Distance
-		renderer.setSeriesLinesVisible(0, true);
-		renderer.setSeriesShapesVisible(0, false);
-
-		// Elbow pt
-		if (elbowIndex != -1) {
-			renderer.setSeriesLinesVisible(1, false);
-			renderer.setSeriesShapesVisible(1, true);
-			renderer.setSeriesPaint(1, Color.RED);
-		}
-
-		plot.setRenderer(renderer);
-
-		TextTitle textTitle = new TextTitle("Estimated epsilon: " + elbowEps);
-		textTitle.setFont(new Font("SansSerif", Font.BOLD, 14));
-		textTitle.setPosition(RectangleEdge.TOP);
-		textTitle.setHorizontalAlignment(HorizontalAlignment.LEFT);
-		chart.addSubtitle(textTitle);
-
-		return chart;
 	}
 
 	public static void displayKDistanceGraph(List<Double> kDistances, double eps) {
-		SwingUtilities.invokeLater(() -> {
-			JFrame frame = new JFrame("k-Distance Graph");
-			frame.setDefaultCloseOperation(JFrame.DISPOSE_ON_CLOSE);
-			frame.setSize(600, 400);
-
-			KDistanceGraph graphPanel = new KDistanceGraph(kDistances, eps);
-			frame.add(graphPanel, BorderLayout.CENTER);
-
-			frame.setVisible(true);
-		});
-	}
-}
-
-class TripleDifference {
-	private final Point point1;
-	private final Point point2;
-	private final double diff;
-	private final double distance;
-	private final int cid;
-
-	public TripleDifference(Point point1, Point point2, double diff, double distance, int clusterId) {
-		this.point1 = point1;
-		this.point2 = point2;
-		this.diff = diff;
-		this.distance = distance;
-		this.cid = clusterId;
-	}
-
-	public Point getPoint1() {
-		return point1;
-	}
-
-	public Point getPoint2() {
-		return point2;
-	}
-
-	public double getDiff() {
-		return diff;
-	}
-
-	public double getDistance() {
-		return distance;
-	}
-
-	public int getCid() {
-		return cid;
+		KDistanceGraph graph = new KDistanceGraph(kDistances, eps);
+		graph.saveKDistanceGraph("kdist.csv");
+		graph.kDistPlotWithGnuplot(kDistances, eps);
 	}
 }

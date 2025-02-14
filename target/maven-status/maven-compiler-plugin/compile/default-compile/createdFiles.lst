@@ -1,4 +1,3 @@
-com/treloc/hypotd/TripleDifference.class
 com/treloc/hypotd/HypoViewer$1.class
 com/treloc/hypotd/HypoViewer.class
 com/treloc/hypotd/HypoTripleDiff.class
@@ -11,14 +10,13 @@ com/treloc/hypotd/HypoUtils.class
 com/treloc/hypotd/PointsHandler.class
 com/treloc/hypotd/ScipyLSQR$SparseLinearOperator.class
 com/treloc/hypotd/HypoGridSearch.class
-com/treloc/hypotd/CalcTripleDifference.class
+com/treloc/hypotd/Station.class
 com/treloc/hypotd/HypoStationPairDiff.class
 com/treloc/hypotd/App.class
-com/treloc/hypotd/CatalogHander.class
 com/treloc/hypotd/HypoStationPairDiff$2.class
 com/treloc/hypotd/SparseMatrixGenerator.class
 com/treloc/hypotd/HypoViewer$CustomRenderer.class
-com/treloc/hypotd/AppConfig.class
+com/treloc/hypotd/ConfigLoader.class
 com/treloc/hypotd/KDistanceGraph.class
 com/treloc/hypotd/SyntheticTest.class
 com/treloc/hypotd/ScipyLSQR$LSQRResult.class

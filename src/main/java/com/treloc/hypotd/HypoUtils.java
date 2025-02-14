@@ -18,7 +18,7 @@ import edu.sc.seis.TauP.VelocityModel;
 /*
  * Ray-tracing using TauP toolkit
  * @author: K.M.
- * @date: 2025/02/12
+ * @date: 2025/02/14
  * @version: 0.1
  * @description: The class is used to calculate the travel time 
  * and partial derivative matrix using TauP toolkit.
@@ -26,30 +26,27 @@ import edu.sc.seis.TauP.VelocityModel;
  */
 
  public class HypoUtils {
-	private final String modPath;
 	private final VelocityModel velMod;
 	private TauModel tauMod;
 
-	public HypoUtils (AppConfig config) {
-		modPath = config.getTaumodFile();
-		String extension = getFileExtension(modPath);
+	public HypoUtils (ConfigLoader config) {
+		String taupFile = config.getTaupFile();
+		String extension = getFileExtension(config.getTaupFile());
 		switch (extension) {
 			case "":
-				/*
-				 * 1066a, see [Gilbert & Dziewonski, 1975]
-				 * 1066b, see [Gilbert & Dziewonski, 1975]
-				 * ak135, see [Kennet, Engdahl, & Buland, 1995]
-				 * herrin, see [Herrin, 1968]
-				 * iasp91, see [Kennet & Engdah, 1991]
-				 * jb, see [Jeffreys & Bullen, 1940]
-				 * prem, see [Dziewonski, 1981]
-				 * pwdk, see [Weber & Davis, 1990]
-				 * sp6, see [Morelli & Dziewonski, 1993]
-				 */ 
 				try {
-					tauMod = TauModelLoader.load(modPath);
+					tauMod = TauModelLoader.load(taupFile);
 				} catch (TauModelException e) {
-					e.printStackTrace();
+					System.out.println("> You can use the following TauP models:");
+					System.out.println("  - 1066a, see [Gilbert & Dziewonski, 1975]");
+					System.out.println("  - 1066b, see [Gilbert & Dziewonski, 1975]");
+					System.out.println("  - ak135, see [Kennet, Engdahl, & Buland, 1995]");
+					System.out.println("  - herrin, see [Herrin, 1968]");
+					System.out.println("  - iasp91, see [Kennet & Engdah, 1991]");
+					System.out.println("  - jb, see [Jeffreys & Bullen, 1940]");
+					System.out.println("  - prem, see [Dziewonski, 1981]");
+					System.out.println("  - pwdk, see [Weber & Davis, 1990]");
+					System.out.println("  - sp6, see [Morelli & Dziewonski, 1993]");
 					System.exit(1);
 				}
 				// TauP_Time taup_time = new TauP_Time(modPath);
@@ -58,9 +55,9 @@ import edu.sc.seis.TauP.VelocityModel;
 				break;
 			case "taup":
 				try {
-					tauMod = TauModel.readModel(modPath);
+					tauMod = TauModel.readModel(taupFile);
 				} catch (Exception e) {
-					e.printStackTrace();
+					System.err.println("> Error in loading TauP model: " + e.getMessage());
 				}
 				break;
 			default:
@@ -79,6 +76,13 @@ import edu.sc.seis.TauP.VelocityModel;
 		}
 	}
 
+	/**
+	 * Returns the partial derivative matrix and travel time.
+	 * @param stnTable the station table
+	 * @param idxList the index list
+	 * @param hypoVector the hypo vector
+	 * @return the partial derivative matrix and travel time
+	 */
 	public Object[] partialDerivativeMatrix(double[][] stnTable, int[] idxList, RealVector hypoVector)
 			throws TauModelException, NoSuchLayerException, NoSuchMatPropException {
 		double hypLon = hypoVector.getEntry(0); // lon
@@ -166,7 +170,7 @@ import edu.sc.seis.TauP.VelocityModel;
 				// Theoritical travel time
 				trvTime[i] = fastestArr.getTime() + stnTable[i][4];
 			} catch (IndexOutOfBoundsException e) {
-				e.printStackTrace();
+				System.out.println("Index out of bounds: " + e.getMessage());
 			}
 		}
 		// System.out.println(Arrays.deepToString(dtdr));
@@ -174,6 +178,13 @@ import edu.sc.seis.TauP.VelocityModel;
 		return new Object[]{dtdr, trvTime};
 	}
 
+	/**
+	 * Returns the travel time.
+	 * @param stnTable the station table
+	 * @param idxList the index list
+	 * @param hyp the hypo vector
+	 * @return the travel time
+	 */
 	public double[] travelTime(double[][] stnTable, int[] idxList, double[] hyp)
 		throws TauModelException {
 		double hypLon = hyp[0];
@@ -212,6 +223,14 @@ import edu.sc.seis.TauP.VelocityModel;
 		return trvTime;
 	}
 
+	/**
+	 * Returns the azimuth angle between two points.
+	 * @param lat1 the latitude of the first point
+	 * @param lon1 the longitude of the first point
+	 * @param lat2 the latitude of the second point
+	 * @param lon2 the longitude of the second point
+	 * @return the azimuth angle
+	 */
 	public static double getAzimuth(double lat1, double lon1, double lat2, double lon2) {
 		/*
 		 * Calculate azimuth angle between two points
@@ -229,16 +248,15 @@ import edu.sc.seis.TauP.VelocityModel;
 		return azimuth;
 	}
 
+	/*
+	 * Calculate 2D distance between two points
+	 * @param lat1 the latitude of the first point
+	 * @param lon1 the longitude of the first point
+	 * @param lat2 the latitude of the second point
+	 * @param lon2 the longitude of the second point
+	 * @return the distance in degree
+	 */
 	public static double getDistance2D(double lat1, double lon1, double lat2, double lon2) {
-		/*
-		 * Calculate 2D distance between two points
-		 * 
-		 * @param lat1 Latitude val.
-		 * @param lon1 Longitude val.
-		 * @param lat2 Latitude val.
-		 * @param lon2 Longitude val.
-		 * @return Distance in degree
-		 */
 		lon1 = Math.toRadians(lon1);
 		lat1 = Math.toRadians(lat1);
 		lon2 = Math.toRadians(lon2);
@@ -248,12 +266,12 @@ import edu.sc.seis.TauP.VelocityModel;
 		return Math.toDegrees(Math.acos(dist));
 	}
 
+	/*
+	 * Convert residuals to weights
+	 * @param resDiffTime the residuals
+	 * @return the weights
+	 */
 	public static double[] residual2weight(RealVector resDiffTime) {
-		/*
-		 * Convert residuals to weights
-		 * @param resDiffTime: Residuals in sec.
-		 * @return weights: Weights
-		 */
 		double[] weight = new double[resDiffTime.getDimension()];
 		for (int i = 0; i < resDiffTime.getDimension(); i++) {
 			double w = Math.abs(1 / resDiffTime.getEntry(i));
@@ -264,12 +282,12 @@ import edu.sc.seis.TauP.VelocityModel;
 		return weight;
 	}
 
+	/*
+	 * Convert residuals to weights
+	 * @param resDiffTime the residuals
+	 * @return the weights
+	 */
 	public static double[] residual2weight(double[] resDiffTime) {
-		/*
-		 * Convert residuals to weights
-		 * @param resDiffTime: Residuals [s]
-		 * @return weights: Weights
-		 */
 		double[] weight = new double[resDiffTime.length];
 		for (int i = 0; i < resDiffTime.length; i++) {
 			double w = Math.abs(1 / resDiffTime[i]);

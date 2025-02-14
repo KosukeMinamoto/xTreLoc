@@ -9,6 +9,15 @@ import org.apache.commons.math3.linear.OpenMapRealMatrix;
 import org.apache.commons.math3.linear.RealMatrix;
 // import org.apache.commons.math3.linear.RealVector;
 
+/*
+ * ScipyLSQR
+ * @author: K.M.
+ * @date: 2025/02/14
+ * @version: 0.1
+ * @description: The class is used to solve the linear system of equations.
+ * This is the simple implementation of the LSQR algorithm
+ * based on the scipy.sparse.linalg.lsqr.
+ */
 public class ScipyLSQR {
 
 	// Define epsilon from double precision (approximately 2.220446049250313e-16)

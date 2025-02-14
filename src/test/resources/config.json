@@ -4,13 +4,10 @@
   "hypBottom" : 50.0,
   "stnBottom" : 1.0,
   "threshold" : 0.2,
-  "taumodFile" : "prem",
+  "taupFile" : "prem",
   "catalogFile" : "test.list",
-  "stnFile" : "src/test/resources/station.tbl",
-  "datPattern" : "src/test/resources/ini.dat",
-  "codes" : [ "ST01", "ST02", "ST03", "ST04", "ST05", "ST06", "ST07", "ST08", "ST09", "ST10", "ST11", "ST12" ],
+  "stationFile" : "./src/test/resources/station.tbl",
+  "datPattern" : "./src/test/resources/ini.dat",
   "clsPts" : 10,
-  "clsEps" : 0.0,
-  "stationTable" : [ [ 39.0, 142.2, 1.0, 0.4, 0.68 ], [ 39.5, 142.2, 1.67, 0.88, 1.5 ], [ 40.0, 142.2, 2.33, 0.97, 1.65 ], [ 39.0, 142.53, 3.0, 0.48, 0.81 ], [ 39.5, 142.53, 1.0, 0.16, 0.27 ], [ 40.0, 142.53, 1.67, 0.72, 1.23 ], [ 39.0, 142.87, 2.33, 0.89, 1.51 ], [ 39.5, 142.87, 3.0, 0.56, 0.95 ], [ 40.0, 142.87, 1.0, 0.35, 0.59 ], [ 39.0, 143.2, 1.67, 0.8, 1.36 ], [ 39.5, 143.2, 2.33, 0.19, 0.32 ], [ 40.0, 143.2, 3.0, 0.38, 0.64 ] ],
-  "datPaths" : [ "file:///Users/kosukeminamoto/kminamoto/java/xtreloc/src/test/resources/ini.dat" ]
+  "eps" : 0.0
 }

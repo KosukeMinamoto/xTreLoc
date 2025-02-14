@@ -12,32 +12,31 @@ import edu.sc.seis.TauP.TauModelException;
 /*
  * Synthetic data generator
  * @author: K.M.
- * @date: 2025/01/26
+ * @date: 2025/02/14
  * @version: 0.1
  * @description: The class is used to generate the synthetic data.
- * @usage: 
  */
 
 public class SyntheticTest extends HypoUtils {
-	private final double[][] stnTable;
-	private final String[] allCodes;
-	private Random rand;
+	private final double[][] stationTable;
+	private final String[] codeStrings;
 	private String catalogFile;
-	private final double phsErr, locErr;
+	private final double phsErr = 0.1;
+	private final double locErr = 0.03;
+	private final double minSelectRate = 0.2;
+	private final double maxSelectRate = 0.4;
 	private final int randomSeed = 100;
+	private Random rand = new Random(randomSeed);
 
-	public SyntheticTest(AppConfig config) {
-		super(config);
-		stnTable = config.getStationTable();
-		allCodes = config.getCodes();
-		catalogFile = config.getCatalogFile();
-
-		phsErr = 0.1; // Second
-		locErr = 0.03; // Degree
-		rand = new Random(randomSeed);
+	public SyntheticTest(ConfigLoader appConfig) {
+		super(appConfig);
+		stationTable = appConfig.getStationTable();
+		System.out.println(stationTable.toString());
+		catalogFile = appConfig.getCatalogFile();
+		codeStrings = appConfig.getCodeStrings();
 	}
 
-	public void generateDataFromCatalog(double minSelectRate, double maxSelectRate) {
+	public void generateDataFromCatalog() {
 		try (BufferedReader reader = new BufferedReader(new FileReader(catalogFile))) {
 			String line;
 			while ((line = reader.readLine()) != null) {
@@ -51,7 +50,7 @@ public class SyntheticTest extends HypoUtils {
 					Double.parseDouble(data[1]), // lat
 					Double.parseDouble(data[3]), // dep
 					LocalDateTime.parse(data[0].trim()), // time
-					data[9], // data file-path
+					data[8], // data file-path
 					minSelectRate,
 					maxSelectRate
 					);
@@ -78,7 +77,7 @@ public class SyntheticTest extends HypoUtils {
 		point.setRes(-999);
 		point.setType("SYN");
 		point.setLagTable(lagTable);
-		pointsHandler.writeDatFile(dataFilePath, allCodes);
+		pointsHandler.writeDatFile(dataFilePath, codeStrings);
 
 		System.out.println("> Generated data: " + dataFilePath);
 	}
@@ -87,10 +86,10 @@ public class SyntheticTest extends HypoUtils {
 		double[] hyp,
 		double minSelectRate,
 		double maxSelectRate) throws TauModelException {
-		int[] codeIdx = IntStream.rangeClosed(0, stnTable.length-1).toArray();
-		double[] sTravelTime = travelTime(stnTable, codeIdx, hyp);
+		int[] codeIdx = IntStream.rangeClosed(0, stationTable.length-1).toArray();
+		double[] sTravelTime = travelTime(stationTable, codeIdx, hyp);
 
-		int numAllPairs = stnTable.length * (stnTable.length - 1) / 2;
+		int numAllPairs = stationTable.length * (stationTable.length - 1) / 2;
 		double[][] allData = new double[numAllPairs][4];
 
 		int count = 0;

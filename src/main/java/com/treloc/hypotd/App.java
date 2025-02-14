@@ -3,6 +3,7 @@ package com.treloc.hypotd;
 import java.nio.file.Path;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+
 // import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -20,26 +21,14 @@ public class App {
 	public static double deg2km = 111.32;
 	public static double deg2rad = Math.PI / 180;
 	public static void main(String[] args) {
-		if (args.length == 0) {
-			// System.out.println("          ______                __");
-			// System.out.println("   _  __ /_  __/ _____  ___    / /   ____   _____");
-			// System.out.println("  | |/_/  / /   / ___/ / _ \\  / /   / __ \\ / ___/");
-			// System.out.println(" _>  <   / /   / /    /  __/ / /___/ /_/ // /__");
-			// System.out.println("/_/|_|  /_/   /_/     \\___/ /_____/\\____/ \\___/");
-			// System.out.println("");
-			System.out.println("Usage: java -jar path/to/target/xtreloc-1.0-SNAPSHOT-jar-with-dependencies.jar <mode>");
-			System.out.println("Modes:");
-			System.out.println("  GRS    - Location by grid search");
-			System.out.println("  STD    - Location by Station-pair DD");
-			System.out.println("  SYN    - Create dat files for synthetic test");
-			System.out.println("  SEE    - View location results");
-			System.out.println("  CLS    - Spatial clustering & create triple-diff");
-			System.out.println("  TRD    - Re-location by Triple Difference");
+		if (args.length == 0 || "--help".equals(args[0])) {
+			showLogo();
+			showHelp();
 			return;
 		}
 		try {
 			String configFilePath = "config.json";
-			AppConfig config = new AppConfig().readConfig(configFilePath);
+			ConfigLoader config = new ConfigLoader(configFilePath);
 
 			Object runner;
 			switch (args[0]) {
@@ -53,7 +42,7 @@ public class App {
 					break;
 				case "SYN":
 					SyntheticTest tester = new SyntheticTest(config);
-					tester.generateDataFromCatalog(0.2, 0.4);
+					tester.generateDataFromCatalog();
 					break;
 				case "SEE":
 					new HypoViewer(config);
@@ -62,9 +51,11 @@ public class App {
 					new SpatialClustering(config);
 					break;
 				case "TRD":
-					System.out.println("=== This mode is under construction ===");
+					HypoTripleDiff hypoTripleDiff = new HypoTripleDiff(config);
+					hypoTripleDiff.start();
 					break;
 				default:
+					showHelp();
 					throw new IllegalArgumentException("Invalid argument: " + args[0]);
 			}
 		} catch (Exception e) {
@@ -73,7 +64,30 @@ public class App {
 		}
 	}
 
-	public static void runLocation (AppConfig config, Object locator) {
+	private static void showHelp() {
+		System.out.println("");
+		System.out.println("Usage: java -jar path/to/target/xtreloc-1.0-SNAPSHOT-jar-with-dependencies.jar <mode>");
+		System.out.println("");
+		System.out.println("Modes:");
+		System.out.println("  GRS    - Location by grid search");
+		System.out.println("  STD    - Location by Station-pair DD");
+		System.out.println("  CLS    - Spatial clustering & create triple-diff");
+		System.out.println("  TRD    - Re-location by Triple Difference");
+		System.out.println("  SYN    - Create dat files for synthetic test");
+		System.out.println("  SEE    - View location results");
+	}
+
+	private static void showLogo() {
+		System.out.println("");
+		System.out.println("          ______                __");
+		System.out.println("   _  __ /_  __/ _____  ___    / /   ____   _____");
+		System.out.println("  | |/_/  / /   / ___/ / _ \\  / /   / __ \\ / ___/");
+		System.out.println(" _>  <   / /   / /    /  __/ / /___/ /_/ // /__");
+		System.out.println("/_/|_|  /_/   /_/     \\___/ /_____/\\____/ \\___/");
+		System.out.println("");
+	}
+
+	public static void runLocation (ConfigLoader config, Object locator) {
 		ExecutorService executor = null;
 		Path[] filePaths = config.getDatPaths();
 		AtomicInteger progress = new AtomicInteger(0);

@@ -3,14 +3,17 @@ package com.treloc.hypotd;
 import java.io.*;
 import java.util.*;
 import org.apache.commons.math3.ml.clustering.Clusterable;
+import org.apache.commons.math3.linear.RealVector;
+import org.apache.commons.math3.linear.MatrixUtils;
 
 /**
  * Handles reading and writing earthquake data from a .dat file.
  * Parses location, errors, and lag table data with a threshold filter.
  *
  * @author: K.M.
- * @date: 2025/02/12
+ * @date: 2025/02/14
  * @version: 0.1
+ * @description: The class is used to handle the points data.
  */
 public class PointsHandler {
 	private Point mainPoint;
@@ -57,21 +60,18 @@ public class PointsHandler {
 					}
 				}
 			}
-			if (lagList.size() < 4) {
-				System.err.println("> Not enough data (< 4 pks.) to read in: " + datFile);
-			} else {
-				double[][] lagTable = new double[lagList.size()][];
-				Set<Integer> activeIdxs = new HashSet<>();
-				for (int i = 0; i < lagList.size(); i++) {
-					lagTable[i] = lagList.get(i);
-					activeIdxs.add((int) lagList.get(i)[0]);
-					activeIdxs.add((int) lagList.get(i)[1]);
-				}
-				mainPoint.setUsedIdxs(activeIdxs.stream().mapToInt(Integer::intValue).toArray());
-				mainPoint.setLagTable(lagTable);
+
+			double[][] lagTable = new double[lagList.size()][];
+			Set<Integer> activeIdxs = new HashSet<>();
+			for (int i = 0; i < lagList.size(); i++) {
+				lagTable[i] = lagList.get(i);
+				activeIdxs.add((int) lagList.get(i)[0]);
+				activeIdxs.add((int) lagList.get(i)[1]);
 			}
+			mainPoint.setUsedIdxs(activeIdxs.stream().mapToInt(Integer::intValue).toArray());
+			mainPoint.setLagTable(lagTable);
 		} catch (IOException e) {
-			System.err.println("> Reading file err at " + datFile + ": " + e.getMessage());;
+			System.err.println("> Reading file err at " + datFile + ": " + e.getMessage());
 		}
 	}
 
@@ -154,6 +154,14 @@ class Point implements Clusterable {
 	@Override
 	public String toString() {
 		return "Point{lat=" + lat + ", lon=" + lon + "}";
+	}
+
+	/**
+	 * Returns the vector of the point.
+	 * @return the vector of the point
+	 */
+	public RealVector getVector() {
+		return MatrixUtils.createRealVector(new double[] { lon, lat, dep });
 	}
 
 	public void setTime (String time) {

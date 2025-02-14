@@ -43,7 +43,7 @@ import java.awt.BorderLayout;
 /*
  * Easy viwer of located results
  * @author: K.M.
- * @date: 2025/01/26
+ * @date: 2025/02/13
  * @version: 0.1
  * @description: The class is used to visualize the hypocenter location.
  * @usage: 
@@ -51,17 +51,17 @@ import java.awt.BorderLayout;
 
 public class HypoViewer extends ApplicationFrame {
 	private double[][] stationTable;
-	private final String[] allCodes;
+	private final String[] codeStrings;
 	private Path[] filePaths;
 	private JFreeChart chart;
 
 	private int height = 800;
 	private int width;
 
-	public HypoViewer (AppConfig appConfig) {
+	public HypoViewer (ConfigLoader appConfig) {
 		super("HypoViewer");
 		stationTable = appConfig.getStationTable();
-		allCodes = appConfig.getCodes();
+		codeStrings = appConfig.getCodeStrings();
 		filePaths = appConfig.getDatPaths();
 
 		XYSeriesCollection dataset = new XYSeriesCollection();
@@ -138,7 +138,7 @@ public class HypoViewer extends ApplicationFrame {
 		for (int i = 0; i < stationTable.length; i++) {
 			double x = stationTable[i][1];
 			double y = stationTable[i][0] * 1.001;
-			String stationName = allCodes[i];
+			String stationName = codeStrings[i];
 			XYTextAnnotation annotation = new XYTextAnnotation(stationName, x, y);
 			annotation.setFont(new Font("SansSerif", Font.PLAIN, 10));
 			annotation.setPaint(Color.BLACK);
@@ -150,7 +150,7 @@ public class HypoViewer extends ApplicationFrame {
 		XYSeries hypSeries = new XYSeries("Hypocenter");
 		PointsHandler pointsHandler = new PointsHandler();
 		for (Path filePath : filePaths) {
-			pointsHandler.readDatFile(filePath.toString(), allCodes, 0);
+			pointsHandler.readDatFile(filePath.toString(), codeStrings, 0);
 			Point point = pointsHandler.getMainPoint();
 			double lat = point.getLat();
 			double lon = point.getLon();

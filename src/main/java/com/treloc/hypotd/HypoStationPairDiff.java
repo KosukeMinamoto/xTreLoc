@@ -32,22 +32,22 @@ import edu.sc.seis.TauP.TauModelException;
  */
 
 public class HypoStationPairDiff extends HypoUtils {
-	private final double[][] stnTable;
-	private final String[] allCodes;
+	private final double[][] stationTable;
+	private final String[] codeStrings;
 	private final double hypBottom, stnBottom, threshold;
 
-	public HypoStationPairDiff(AppConfig appConfig) {
+	public HypoStationPairDiff(ConfigLoader appConfig) {
 		super(appConfig);
+		codeStrings = appConfig.getCodeStrings();
+		stationTable = appConfig.getStationTable();
 		hypBottom = appConfig.getHypBottom();
 		stnBottom = appConfig.getStnBottom();
-		stnTable = appConfig.getStationTable();
-		allCodes = appConfig.getCodes();
 		threshold = appConfig.getThreshold();
 	}
 
 	public void start(String datFile, String outFile) throws TauModelException {
 		PointsHandler pointsHandler = new PointsHandler();
-		pointsHandler.readDatFile(datFile, allCodes, threshold);
+		pointsHandler.readDatFile(datFile, codeStrings, threshold);
 		Point point = pointsHandler.getMainPoint();
 
 		double[][] lagTable = point.getLagTable();
@@ -181,7 +181,7 @@ public class HypoStationPairDiff extends HypoUtils {
 		point.setRes(res);
 		point.setType(method);
 		point.setLagTable(lagTable);
-		pointsHandler.writeDatFile(outFile, allCodes);
+		pointsHandler.writeDatFile(outFile, codeStrings);
 	}
 
 	public MultivariateJacobianFunction getPartialDerivativeFunction(double[][] lagTable, int[] usedIdx) {
@@ -191,7 +191,7 @@ public class HypoStationPairDiff extends HypoUtils {
 				RealMatrix jacobian = new Array2DRowRealMatrix(lagTable.length, 3);
 
 				try {
-					Object[] tmp = partialDerivativeMatrix(stnTable, usedIdx, hypoVector);
+					Object[] tmp = partialDerivativeMatrix(stationTable, usedIdx, hypoVector);
 					double[][] dtdr = (double[][]) tmp[0];
 					double[] trvTime = (double[]) tmp[1];
 
