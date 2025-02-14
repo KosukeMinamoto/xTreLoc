@@ -1,0 +1,13 @@
+{
+  "numJobs" : 2,
+  "numGrid" : 100,
+  "hypBottom" : 50.0,
+  "stnBottom" : 1.0,
+  "threshold" : 0.2,
+  "taupFile" : "prem",
+  "catalogFile" : "test.list",
+  "stationFile" : "./src/test/resources/station.tbl",
+  "datPattern" : "./src/test/resources/ini.dat",
+  "clsPts" : 10,
+  "eps" : 0.0
+}
