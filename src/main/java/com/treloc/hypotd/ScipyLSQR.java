@@ -57,7 +57,7 @@ import java.util.Random;
  * The Fortran code was translated to Python for use in CVXOPT by Jeffery
  * Kline with contributions by Mridul Aanjaneya and Bob Myhill.
  *
- * This is a Java implementation of the LSQR algorithm by K.M. Minamoto
+ * This is a Java implementation of the LSQR algorithm by K.M.
  * which is adapted for SciPy by Stefan van der Walt.
  * 
  * @author K.M.

@@ -1,13 +1,11 @@
 package com.treloc.hypotd;
 
-import java.io.FileReader;
-import java.io.BufferedReader;
 import java.util.logging.Logger;
-import java.time.LocalDateTime;
 import java.util.Random;
 import java.util.stream.IntStream;
-
 import edu.sc.seis.TauP.TauModelException;
+
+import org.apache.commons.math3.ml.clustering.Cluster;
 
 /**
  * SyntheticTest
@@ -47,79 +45,58 @@ public class SyntheticTest extends HypoUtils {
 	 * Generates synthetic data from the catalog file.
 	 * It reads each line from the catalog and generates data based on the parsed information.
 	 */
-	public void generateDataFromCatalog() {
-		try (BufferedReader reader = new BufferedReader(new FileReader(catalogFile))) {
-			String line;
-			while ((line = reader.readLine()) != null) {
-				if (line.startsWith("[A-Z]")) {
-					continue;
-				} 
-
-				String[] data = line.split(" ");
-				generateData(
-					Double.parseDouble(data[2]), // lon
-					Double.parseDouble(data[1]), // lat
-					Double.parseDouble(data[3]), // dep
-					LocalDateTime.parse(data[0].trim()), // time
-					data[8], // data file-path
-					minSelectRate,
-					maxSelectRate
-					);
-			}
-		} catch (Exception e) {
-			e.printStackTrace();
+	public void generateDataFromCatalog() throws TauModelException {
+		Cluster<Point> points = loadPointsFromCatalog(catalogFile, false);
+		for (Point point : points.getPoints()) {
+			generateData(point, minSelectRate, maxSelectRate);
 		}
 	}
 
 	/**
 	 * Generates synthetic data for a given set of parameters.
 	 *
-	 * @param lon           the longitude of the event
-	 * @param lat           the latitude of the event
-	 * @param dep           the depth of the event
-	 * @param time          the time of the event
-	 * @param dataFilePath  the file path to save the generated data
+	 * @param point         the point of the event
 	 * @param minSelectRate the minimum selection rate for phase pairs
 	 * @param maxSelectRate the maximum selection rate for phase pairs
 	 * @throws TauModelException if there is an error in the Tau model
 	 */
-	public void generateData(
-		double lon, double lat, double dep, LocalDateTime time, String dataFilePath,
-		double minSelectRate, double maxSelectRate) throws TauModelException {
-		double[] hyp = new double[] { lon, lat, dep };
-		double[][] lagTable = randomLagTime(hyp, minSelectRate, maxSelectRate);
-
+	public void generateData(Point pointTrue, double minSelectRate, double maxSelectRate) throws TauModelException {
 		PointsHandler pointsHandler = new PointsHandler();
-		Point point = pointsHandler.getMainPoint();
-		point.setLat(lat + rand.nextGaussian() * locErr);
-		point.setLon(lon + rand.nextGaussian() * locErr);
-		point.setDep(dep + rand.nextGaussian() * locErr * App.deg2km);
-		point.setElat(locErr);
-		point.setElon(locErr);
-		point.setEdep(locErr * App.deg2km);
-		point.setRes(-999);
-		point.setType("SYN");
-		point.setLagTable(lagTable);
-		pointsHandler.writeDatFile(dataFilePath, codeStrings);
+		if (pointTrue.getType().equals("REF")) {
+			double[][] lagTable = randomLagTime(pointTrue, minSelectRate, maxSelectRate, false);
+			pointTrue.setLagTable(lagTable);
+			pointsHandler.setMainPoint(pointTrue);
+			pointsHandler.writeDatFile(pointTrue.getFilePath(), codeStrings);
+		} else {
+			double[][] lagTable = randomLagTime(pointTrue, minSelectRate, maxSelectRate, true);
 
-		logger.info("Generated synthetic data: " + dataFilePath);
+			Point point_perturbed = new Point();
+			point_perturbed.setLat(pointTrue.getLat() + rand.nextGaussian() * locErr);
+			point_perturbed.setLon(pointTrue.getLon() + rand.nextGaussian() * locErr);
+			point_perturbed.setDep(pointTrue.getDep() + rand.nextGaussian() * locErr * App.deg2km);
+			point_perturbed.setElat(locErr);
+			point_perturbed.setElon(locErr);
+			point_perturbed.setEdep(locErr * App.deg2km);
+			point_perturbed.setRes(-999);
+			point_perturbed.setType("SYN");
+			point_perturbed.setLagTable(lagTable);
+			pointsHandler.setMainPoint(point_perturbed);
+			pointsHandler.writeDatFile(pointTrue.getFilePath(), codeStrings);
+		} 
+		logger.info("Generated synthetic data: " + pointTrue.getFilePath());
 	}
 
 	/**
 	 * Generates random lag times for a given hypocenter and selection rates.
 	 *
-	 * @param hyp           the hypocenter coordinates
+	 * @param point_true    the true hypocenter coordinates
 	 * @param minSelectRate the minimum selection rate for phase pairs
 	 * @param maxSelectRate the maximum selection rate for phase pairs
 	 * @return a 2D array of selected lag times
-	 * @throws TauModelException if there is an error in the Tau model
 	 */
-	private double[][] randomLagTime(
-		double[] hyp,
-		double minSelectRate,
-		double maxSelectRate) throws TauModelException {
+	private double[][] randomLagTime (Point point, double minSelectRate, double maxSelectRate, boolean addPurturb) throws TauModelException {
 		int[] codeIdx = IntStream.rangeClosed(0, stationTable.length-1).toArray();
-		double[] sTravelTime = travelTime(stationTable, codeIdx, hyp);
+		double[] sTravelTime = travelTime(stationTable, codeIdx, point);
 
 		int numAllPairs = stationTable.length * (stationTable.length - 1) / 2;
 		double[][] allData = new double[numAllPairs][4];
@@ -129,7 +106,8 @@ public class SyntheticTest extends HypoUtils {
 			for (int j = i + 1; j < sTravelTime.length; j++) {
 				allData[count][0] = i;
 				allData[count][1] = j;
-				allData[count][2] = sTravelTime[j] - sTravelTime[i] + rand.nextGaussian() * phsErr;
+				double lagErr = addPurturb ? rand.nextGaussian() * phsErr : 0;
+				allData[count][2] = sTravelTime[j] - sTravelTime[i] + lagErr;
 				allData[count][3] = 1;
 				count++;
 			}

@@ -5,6 +5,11 @@ import java.util.logging.Logger;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.Files;
+import java.io.BufferedReader;
+import java.io.FileReader;
+import java.io.FileWriter;
+import java.io.PrintWriter;
+import java.util.List;
 import org.apache.commons.math3.linear.RealVector;
 
 import edu.sc.seis.TauP.Arrival;
@@ -20,6 +25,8 @@ import edu.sc.seis.TauP.VelocityModel;
 import net.sf.geographiclib.Geodesic;
 import net.sf.geographiclib.GeodesicData;
 
+import org.apache.commons.math3.ml.clustering.Cluster;
+
 /**
  * HypoUtils
  * This class provides utility methods for ray-tracing and travel time calculations
@@ -33,15 +40,19 @@ public class HypoUtils {
 	private static final Logger logger = Logger.getLogger("com.treloc.hypotd");
 	private final VelocityModel velMod;
 	private TauModel tauMod;
+	private String[] codeStrings;
+	private double threshold;
 
 	/**
 	 * Constructs a HypoUtils object with the specified configuration.
 	 * Loads the TauP model based on the provided configuration.
 	 *
 	 * @param config the configuration loader containing necessary parameters
-	 * @throws TauModelException if there is an error loading the Tau model
 	 */
-	public HypoUtils(ConfigLoader config) throws TauModelException {
+	public HypoUtils(ConfigLoader config) {
+		codeStrings = config.getCodeStrings();
+		threshold = config.getThreshold();
+
 		String taupFile = config.getTaupFile();
 		String extension = getFileExtension(config.getTaupFile());
 		switch (extension) {
@@ -50,7 +61,7 @@ public class HypoUtils {
 					tauMod = TauModelLoader.load(taupFile);
 				} catch (TauModelException e) {
 					logger.severe("Error loading TauP model: " + e.getMessage());
-					throw e;
+					System.exit(1);
 				}
 				break;
 			case "taup":
@@ -58,13 +69,12 @@ public class HypoUtils {
 					tauMod = TauModel.readModel(taupFile);
 				} catch (Exception e) {
 					logger.severe("Error: Loading TauP model: " + e.getMessage());
-					throw new TauModelException("Error loading TauP model", e);
+					System.exit(1);
 				}
 				break;
 			default:
-				String errorMsg = "Error: Unsupported file (only .taup file are supported): " + extension;
-				logger.severe(errorMsg);
-				throw new IllegalArgumentException(errorMsg);
+				logger.severe("Error: Unsupported file (only .taup file are supported): " + extension);
+				System.exit(1);
 		}
 		velMod = tauMod.getVelocityModel();
 		logger.info("Loaded velocity model:\n" + velMod);
@@ -205,15 +215,15 @@ public class HypoUtils {
 	 *
 	 * @param stnTable the station table
 	 * @param idxList  the index list
-	 * @param hyp      the hypo vector
+	 * @param point    the hypocenter coordinates
 	 * @return an array of travel times
 	 * @throws TauModelException if there is an error in the Tau model
 	 */
-	public double[] travelTime(double[][] stnTable, int[] idxList, double[] hyp)
+	public double[] travelTime(double[][] stnTable, int[] idxList, Point point)
 		throws TauModelException {
-		double hypLon = hyp[0];
-		double hypLat = hyp[1];
-		double hypDep = hyp[2];
+		double hypLon = point.getLon();
+		double hypLat = point.getLat();
+		double hypDep = point.getDep();
 
 		TauP_Time taup_time = new TauP_Time();
 		taup_time.setTauModel(tauMod);
@@ -254,23 +264,24 @@ public class HypoUtils {
 	 * @param lat2 the latitude of the second point
 	 * @param lon2 the longitude of the second point
 	 * @return the azimuth angle
+	 * @deprecated Use Geodesic.WGS84.Inverse() instead
 	 */
-	// public static double getAzimuth(double lat1, double lon1, double lat2, double lon2) {
-	// 	/*
-	// 	 * Calculate azimuth angle between two points
-	// 	 * Return: Azimuth angle [rad]
-	// 	 */
-	// 	lon1 = Math.toRadians(lon1);
-	// 	lat1 = Math.toRadians(lat1);
-	// 	lon2 = Math.toRadians(lon2);
-	// 	lat2 = Math.toRadians(lat2);
+	public static double getAzimuth(double lat1, double lon1, double lat2, double lon2) {
+		/*
+		 * Calculate azimuth angle between two points
+		 * Return: Azimuth angle [rad]
+		 */
+		lon1 = Math.toRadians(lon1);
+		lat1 = Math.toRadians(lat1);
+		lon2 = Math.toRadians(lon2);
+		lat2 = Math.toRadians(lat2);
 
-	// 	double dLon = lon2 - lon1;
-	// 	double y = Math.sin(dLon) * Math.cos(lat2);
-	// 	double x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLon);
-	// 	double azimuth = Math.atan2(y, x);
-	// 	return azimuth;
-	// }
+		double dLon = lon2 - lon1;
+		double y = Math.sin(dLon) * Math.cos(lat2);
+		double x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLon);
+		double azimuth = Math.atan2(y, x);
+		return azimuth;
+	}
 
 	/*
 	 * Calculate 2D distance between two points
@@ -279,16 +290,17 @@ public class HypoUtils {
 	 * @param lat2 the latitude of the second point
 	 * @param lon2 the longitude of the second point
 	 * @return the distance in degree
+	 * @deprecated Use Geodesic.WGS84.Inverse() instead
 	 */
-	// public static double getDistance2D(double lat1, double lon1, double lat2, double lon2) {
-	// 	lon1 = Math.toRadians(lon1);
-	// 	lat1 = Math.toRadians(lat1);
-	// 	lon2 = Math.toRadians(lon2);
-	// 	lat2 = Math.toRadians(lat2);
-	// 	double theta = lon2 - lon1;
-	// 	double dist = Math.sin(lat1) * Math.sin(lat2) + Math.cos(lat1) * Math.cos(lat2) * Math.cos(theta);
-	// 	return Math.toDegrees(Math.acos(dist));
-	// }
+	public static double getDistance2D(double lat1, double lon1, double lat2, double lon2) {
+		lon1 = Math.toRadians(lon1);
+		lat1 = Math.toRadians(lat1);
+		lon2 = Math.toRadians(lon2);
+		lat2 = Math.toRadians(lat2);
+		double theta = lon2 - lon1;
+		double dist = Math.sin(lat1) * Math.sin(lat2) + Math.cos(lat1) * Math.cos(lat2) * Math.cos(theta);
+		return Math.toDegrees(Math.acos(dist));
+	}
 
 	/**
 	 * Converts residuals to weights for a given residual vector.
@@ -321,5 +333,132 @@ public class HypoUtils {
 			weight[i] = w;
 		}
 		return weight;
+	}
+
+
+	/**
+	 * Loads the points from the specified catalog file.
+	 *
+	 * @param catalogFile  the path to the catalog file
+	 * @param withLagTable if true, lagTables are also read
+	 * @return the cluster of loaded points
+	 */
+	public Cluster<Point> loadPointsFromCatalog(String catalogFile, boolean withLagTable) {
+		Cluster<Point> cluster = new Cluster<>();
+		try (BufferedReader br = new BufferedReader(new FileReader(catalogFile))) {
+			String line;
+			while ((line = br.readLine()) != null) {
+				String[] parts = line.split("\\s+");
+				PointsHandler pointsHandler = new PointsHandler();
+
+				if (withLagTable) {
+					pointsHandler.readDatFile(parts[8], codeStrings, threshold);
+					if (pointsHandler.getMainPoint().getLagTable().length < 4) {
+						logger.warning("Error: Not enough data (< 4 pks.) to read in: " + parts[8]);
+						continue;
+					}
+				}
+
+				Point point = pointsHandler.getMainPoint();
+				point.setTime(parts[0]);
+				point.setLat(Double.parseDouble(parts[1]));
+				point.setLon(Double.parseDouble(parts[2]));
+				point.setDep(Double.parseDouble(parts[3]));
+				point.setElat(Double.parseDouble(parts[4]));
+				point.setElon(Double.parseDouble(parts[5]));
+				point.setEdep(Double.parseDouble(parts[6]));
+				point.setRes(Double.parseDouble(parts[7]));
+				point.setFilePath(parts[8]);
+				point.setType(parts[9]);
+
+				int cid = -1;
+				if (parts.length > 10) {
+					cid = Integer.parseInt(parts[10]);
+				}
+				point.setCid(cid);
+				cluster.addPoint(point);
+			}
+		} catch (IOException e) {
+			logger.warning("Error: reading " + catalogFile + ": " + e.getMessage());
+		}
+		return cluster;
+	}
+
+	/**
+	 * Loads the points from the specified catalog file for a specific cluster ID.
+	 *
+	 * @param catalogFile  the path to the catalog file
+	 * @param withLagTable if true, lagTables are also read
+	 * @param clusterId    the cluster ID of events to read in
+	 * @return the cluster of loaded points
+	 */
+	public Cluster<Point> loadPointsFromCatalog(String catalogFile, boolean withLagTable, int clusterId) {
+		Cluster<Point> cluster = new Cluster<>();
+		try (BufferedReader br = new BufferedReader(new FileReader(catalogFile))) {
+			String line;
+			while ((line = br.readLine()) != null) {
+				String[] parts = line.split("\\s+");
+
+				int cid = Integer.parseInt(parts[10]);
+				if (cid != clusterId) {
+					continue;
+				}
+
+				PointsHandler pointsHandler = new PointsHandler();
+
+				if (withLagTable) {
+					pointsHandler.readDatFile(parts[8], codeStrings, threshold);
+					if (pointsHandler.getMainPoint().getLagTable().length < 4) {
+						logger.warning("Error: Not enough data (< 4 pks.) to read in: " + parts[8]);
+						continue;
+					}
+				}
+
+				Point point = pointsHandler.getMainPoint();
+				point.setTime(parts[0]);
+				point.setLat(Double.parseDouble(parts[1]));
+				point.setLon(Double.parseDouble(parts[2]));
+				point.setDep(Double.parseDouble(parts[3]));
+				point.setElat(Double.parseDouble(parts[4]));
+				point.setElon(Double.parseDouble(parts[5]));
+				point.setEdep(Double.parseDouble(parts[6]));
+				point.setRes(Double.parseDouble(parts[7]));
+				point.setFilePath(parts[8]);
+				point.setType(parts[9]);
+				point.setCid(cid);
+
+				cluster.addPoint(point);
+			}
+		} catch (IOException e) {
+			logger.warning("Error: reading " + catalogFile + ": " + e.getMessage());
+		}
+		return cluster;
+	}
+
+	/**
+	 * Writes the list of points to the specified output file.
+	 *
+	 * @param points     the list of points to write
+	 * @param outputFile the path of the output file
+	 */
+	public void writePointsToFile(List<Point> points, String outputFile) {
+		try (PrintWriter writer = new PrintWriter(new FileWriter(outputFile))) {
+			for (Point point : points) {
+				writer.printf("%s %f %f %f %f %f %f %f %s %s %d%n",
+						point.getTime(),
+						point.getLat(),
+						point.getLon(),
+						point.getDep(),
+						point.getElat(),
+						point.getElon(),
+						point.getEdep(),
+						point.getRes(),
+						point.getFilePath(),
+						point.getType(),
+						point.getCid());
+			}
+		} catch (IOException e) {
+			logger.warning("Error: Writing points to " + outputFile + ": " + e.getMessage());
+		}
 	}
 }

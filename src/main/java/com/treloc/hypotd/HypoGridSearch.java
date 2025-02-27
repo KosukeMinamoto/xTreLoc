@@ -72,15 +72,15 @@ public class HypoGridSearch extends HypoUtils {
 			double[] depGrids = generageRandomGrid(Math.max(stnBottom, dep - depRange * rangeFactor), Math.min(hypBottom, dep + depRange * rangeFactor), numGrid);
 
 			for (int i = 0; i < numGrid; i++) {
-				double[] hyp = new double[]{lonGrids[i], latGrids[i], depGrids[i]};
-				double[] sWaveTravelTime = travelTime(stationTable, usedIdx, hyp);
+				Point pointNew = new Point(time, latGrids[i], lonGrids[i], depGrids[i], 0, 0, 0, 0, "", "", -999);
+				double[] sWaveTravelTime = travelTime(stationTable, usedIdx, pointNew);
 				travelTimeResidual = differentialTravelTimeResidual(lagTable, sWaveTravelTime);
 				double res2 = standardDeviation(travelTimeResidual);
 				if (res2 < res) {
 					res = res2;
-					lon = hyp[0];
-					lat = hyp[1];
-					dep = hyp[2];
+					lon = pointNew.getLon();
+					lat = pointNew.getLat();
+					dep = pointNew.getDep();
 				}
 			}
 		}

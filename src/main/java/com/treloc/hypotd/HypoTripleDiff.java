@@ -24,7 +24,7 @@ import java.util.Collections;
  * This class is used to calculate the triple difference.
  * 
  * @author K.M.
- * @since 2025-02-22
+ * @since 2025-02-26
  * @version 0.1
  */
 
@@ -32,23 +32,15 @@ public class HypoTripleDiff extends HypoUtils {
 	private static final Logger logger = Logger.getLogger("com.treloc.hypotd");
 	private String catalogFile;
 	private double[][] stationTable;
+	private double stnBottom;
+	private double hypBottom;
 	private String[] codeStrings;
 	private SpatialClustering spatialCls;
-	private boolean showLSQR = true;
+	private boolean showLSQR;
 	private Path outDir;
 	private int[] iterNumArray;
 	private int[] distKmArray;
 	private int[] dampFactArray;
-
-	/**
-	 * Array to store index limits for each iteration when reading triple_diff*.csv files.
-	 * This is used to reduce the size of matrix G to avoid NumberIsTooLargeException.
-	 * For each iteration, only triple differences up to the distance threshold specified 
-	 * in distKmArray will be read, and the corresponding index is stored in this array.
-	 */
-	// private int[] limitIdxArray;
-
-	private double stnBottom;
 
 	public HypoTripleDiff (ConfigLoader appConfig) throws TauModelException {
 		super(appConfig);
@@ -56,7 +48,7 @@ public class HypoTripleDiff extends HypoUtils {
 		stationTable = appConfig.getStationTable();
 		codeStrings = appConfig.getCodeStrings();
 		stnBottom = appConfig.getStnBottom();
-
+		hypBottom = appConfig.getHypBottom();
 		spatialCls = new SpatialClustering(appConfig);
 		if (Level.INFO.intValue() <= Level.parse(appConfig.getLogLevel()).intValue()) {
 			showLSQR = true;
@@ -79,7 +71,7 @@ public class HypoTripleDiff extends HypoUtils {
 	}
 
 	public void start () {
-		String outputFile = catalogFile.replace(".list", "_TRD.list");
+		String outputFile = catalogFile.replace(".list", "_trd.list");
 
 		// Output noise points beforehand
 		Cluster<Point> clsPts = spatialCls.loadPointsFromCatalog(catalogFile, false, -1);
@@ -92,12 +84,21 @@ public class HypoTripleDiff extends HypoUtils {
 			if (clsPts.getPoints().isEmpty()) {
 				break;
 			}
-
 			List<Point> points = clsPts.getPoints();
-			boolean[] isInvalid = new boolean[points.size()]; // all false
+
+
+			// Map all event indices (including ref & err) to column indices in matrix G for
+			// target events only
+			// targetMap[i] returns the column index (divided by 3) in matrix G
+			// for event i if it's a target, or -1 if event i is not a target
+			int[] targMap = new int[points.size()];
+			int numTarget = 0;
 			for (int i = 0; i < points.size(); i++) {
-				if (points.get(i).getType().equals("ERR")) {
-					isInvalid[i] = true;
+				if (points.get(i).getType().equals("ERR") || points.get(i).getType().equals("REF")) {
+					targMap[i] = -1;
+				} else {
+					targMap[i] = numTarget;
+					numTarget++;
 				}
 			}
 
@@ -111,8 +112,8 @@ public class HypoTripleDiff extends HypoUtils {
 				Object[] filteredTripDiff = filterTripDiffByDistance(tripDiff, distKm);
 
 				for (int j = 0; j < iterNum; j++) { // Loop in each iteration
-					Object[][] partialTbl = createPartialTblArray(cluster);
-					Object[] dG = matrixDG(filteredTripDiff, cluster, partialTbl, distKm, isInvalid);
+					double[][][] partialTbl = createPartialTblArray(cluster);
+					Object[] dG = matrixDG(filteredTripDiff, cluster, partialTbl, distKm, targMap);
 					double[] d = (double[]) dG[0];
 					OpenMapRealMatrix G = (OpenMapRealMatrix) dG[1];
 
@@ -133,41 +134,36 @@ public class HypoTripleDiff extends HypoUtils {
 
 					// Update the cluster points
 					double[] dm = result.x;
-					int numPoints = points.size();
-					int numDims = 3;
 
 					// Calculate median adjustments
 					List<Double> dlonList = new ArrayList<>();
 					List<Double> dlatList = new ArrayList<>();
 					List<Double> ddepList = new ArrayList<>();
-					for (int k = 0; k < numPoints; k++) {
-						dlonList.add(dm[k * numDims]);
-						dlatList.add(dm[k * numDims + 1]);
-						ddepList.add(dm[k * numDims + 2]);
+					for (int k = 0; k < numTarget; k++) {
+						dlonList.add(dm[k * 3]);
+						dlatList.add(dm[k * 3 + 1]);
+						ddepList.add(dm[k * 3 + 2]);
 					}
 					double medianDlon = calculateMedian(dlonList);
 					double medianDlat = calculateMedian(dlatList);
 					double medianDdep = calculateMedian(ddepList);
 
-					for (int k = 0; k < numPoints; k++) {
+					for (int k = 0; k < points.size(); k++) {
+						if (targMap[k] == -1) {
+							continue;
+						}
 						Point point = points.get(k);
-						double newLon = point.getLon() + dm[k * numDims] - medianDlon;
-						double newLat = point.getLat() + dm[k * numDims + 1] - medianDlat;
-						double newDep = point.getDep() + dm[k * numDims + 2] - medianDdep;
+						double newLon = point.getLon() + dm[targMap[k] * 3] 	- medianDlon;
+						double newLat = point.getLat() + dm[targMap[k] * 3 + 1] - medianDlat;
+						double newDep = point.getDep() + dm[targMap[k] * 3 + 2] - medianDdep;
 
-						double updateDistKm = Math.sqrt(Math.pow(newLon - point.getLon(), 2) + Math.pow(newLat - point.getLat(), 2) + Math.pow(newDep - point.getDep(), 2));
-						if (updateDistKm > distKm * 3) {
+						if (newDep < stnBottom || newDep > hypBottom) {
 							point.setType("ERR");
-							isInvalid[k] = true;
+							targMap[k] = -1;
 						} else {
 							point.setLon(newLon);
 							point.setLat(newLat);
 							point.setDep(newDep);
-						}
-
-						if (point.getDep() < stnBottom) {
-							point.setType("ERR");
-							isInvalid[k] = true;
 						}
 					}
 					cluster = new Cluster<>();
@@ -249,55 +245,64 @@ public class HypoTripleDiff extends HypoUtils {
 	 * @param cluster The cluster of points
 	 * @param partialTbl The partial table
 	 * @param distanceThreshold The distance threshold in km
+	 * @param targMap The map of target points
 	 * @return The matrix DG
 	 */
-	private Object[] matrixDG(Object[] trpDiff, Cluster<Point> cluster, Object[][] partialTbl, double distanceThreshold, boolean[] isInvalid) {
-		int M = ((int[]) trpDiff[0]).length; // The number of triple-difference
-		int N = partialTbl.length;			// The number of events
-
-		double[] d = new double[M];
-		OpenMapRealMatrix G = new OpenMapRealMatrix(M, 3 * N);
-
+	private Object[] matrixDG(Object[] trpDiff, Cluster<Point> cluster, double[][][] partialTbl, double distanceThreshold, int[] targMap) {
 		int[] eids0 = (int[]) trpDiff[0];
 		int[] eids1 = (int[]) trpDiff[1];
 		int[] stns0 = (int[]) trpDiff[2];
 		int[] stns1 = (int[]) trpDiff[3];
 		double[] diffs = (double[]) trpDiff[4];
-		double[] dists = (double[]) trpDiff[5];
+		// double[] dists = (double[]) trpDiff[5];
 
-		boolean[] validIndex = new boolean[M];
-		for (int m = 0; m < M; m++) {
-			validIndex[m] = dists[m] <= distanceThreshold;
-		}
+		int M = eids0.length; 								 // The number of triple-difference
+		int N = Arrays.stream(targMap).max().getAsInt() + 1; // The number of target points
 
-		// Filter G and d using validIndex
+		double[] d = new double[M];
+		OpenMapRealMatrix G = new OpenMapRealMatrix(M, 3 * N);
+
 		for (int m = 0; m < M; m++) {
 			int eve0 = eids0[m];
 			int eve1 = eids1[m];
 			int stnk = stns0[m];
 			int stnl = stns1[m];
-			if (isInvalid[eve0] || isInvalid[eve1]) {
+
+			// Partial derivatives matrix
+			// Matrix G
+			// 	G.setEntry(m, 3 * eve1,		partialTblArray[eve1][stnl][0] - partialTblArray[eve1][stnk][0]);
+			// 	G.setEntry(m, 3 * eve1 + 1, partialTblArray[eve1][stnl][1] - partialTblArray[eve1][stnk][1]);
+			// 	G.setEntry(m, 3 * eve1 + 2, partialTblArray[eve1][stnl][2] - partialTblArray[eve1][stnk][2]);
+			// 	G.setEntry(m, 3 * eve0, 	-(partialTblArray[eve0][stnl][0] - partialTblArray[eve0][stnk][0]));
+			// 	G.setEntry(m, 3 * eve0 + 1, -(partialTblArray[eve0][stnl][1] - partialTblArray[eve0][stnk][1]));
+			// 	G.setEntry(m, 3 * eve0 + 2, -(partialTblArray[eve0][stnl][2] - partialTblArray[eve0][stnk][2]));
+
+			int nCol0 = targMap[eve0];
+			int nCol1 = targMap[eve1];
+			if (nCol0 == -1 && nCol1 == -1) {
 				continue;
 			}
 
-			// Partial derivatives matrix
-			double[][][] partialTblArray = (double[][][]) partialTbl;
+			if (nCol1 != -1) {
+				G.setEntry(m, 3 * nCol1,	 partialTbl[eve1][stnl][0] - partialTbl[eve1][stnk][0]);
+				G.setEntry(m, 3 * nCol1 + 1, partialTbl[eve1][stnl][1] - partialTbl[eve1][stnk][1]);
+				G.setEntry(m, 3 * nCol1 + 2, partialTbl[eve1][stnl][2] - partialTbl[eve1][stnk][2]);
+			}
 
-			// Matrix G
-			G.setEntry(m, 3 * eve1,		partialTblArray[eve1][stnl][0] - partialTblArray[eve1][stnk][0]);
-			G.setEntry(m, 3 * eve1 + 1, partialTblArray[eve1][stnl][1] - partialTblArray[eve1][stnk][1]);
-			G.setEntry(m, 3 * eve1 + 2, partialTblArray[eve1][stnl][2] - partialTblArray[eve1][stnk][2]);
-			G.setEntry(m, 3 * eve0, 	-(partialTblArray[eve0][stnl][0] - partialTblArray[eve0][stnk][0]));
-			G.setEntry(m, 3 * eve0 + 1, -(partialTblArray[eve0][stnl][1] - partialTblArray[eve0][stnk][1]));
-			G.setEntry(m, 3 * eve0 + 2, -(partialTblArray[eve0][stnl][2] - partialTblArray[eve0][stnk][2]));
+			if (nCol0 != -1) {
+				G.setEntry(m, 3 * nCol0,	 -(partialTbl[eve0][stnl][0] - partialTbl[eve0][stnk][0]));
+				G.setEntry(m, 3 * nCol0 + 1, -(partialTbl[eve0][stnl][1] - partialTbl[eve0][stnk][1]));
+				G.setEntry(m, 3 * nCol0 + 2, -(partialTbl[eve0][stnl][2] - partialTbl[eve0][stnk][2]));
+			}
 
 			// Vector d
-			double cal0 = partialTblArray[eve0][stnl][3] - partialTblArray[eve0][stnk][3];
-			double cal1 = partialTblArray[eve1][stnl][3] - partialTblArray[eve1][stnk][3];
+			double cal0 = partialTbl[eve0][stnl][3] - partialTbl[eve0][stnk][3];
+			double cal1 = partialTbl[eve1][stnl][3] - partialTbl[eve1][stnk][3];
 			double lagCal = cal1 - cal0;
 			double lagObs = diffs[m];
 			d[m] = lagObs - lagCal;
 		}
+
 		return new Object[] { d, G };
 	}
 

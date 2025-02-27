@@ -1,7 +1,5 @@
 package com.treloc.hypotd;
 
-import java.io.BufferedReader;
-import java.io.FileReader;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.io.PrintWriter;
@@ -41,8 +39,6 @@ public class SpatialClustering extends HypoUtils {
 	private Point refPoint;
 	private int minPts;
 	private double eps;
-	private String[] codeStrings;
-	private double threshold;
 	private String catalogFile;
 
 	/**
@@ -59,9 +55,6 @@ public class SpatialClustering extends HypoUtils {
 		double refLat = new Median().evaluate(stationTable[0]);
 		double refLon = new Median().evaluate(stationTable[1]);
 		this.refPoint = new Point("", refLat, refLon, 0, 0, 0, 0, 0, "", "REF", -999);
-	
-		this.threshold = appConfig.getThreshold();
-		this.codeStrings = appConfig.getCodeStrings();
 
 		this.minPts = appConfig.getClsPts();
 		this.eps = appConfig.getClsEps();
@@ -114,16 +107,23 @@ public class SpatialClustering extends HypoUtils {
 		List<Point> points = clsPts.getPoints();
 
 		if (eps <= 0) {
-			logger.info("Info: Negative 'clsEps' (=" + eps + ") is set. Estimating eps...");
 			List<Double> kDistances = computeKDistance(points, minPts);
 			double estimatedEps = findElbowWithDist(kDistances);
-			logger.info("Info: Estimated epsilon: " + estimatedEps + " km & min samples: " + minPts);
+
+			logger.info(
+				"Negative 'clsEps' (=" + eps + ") is set" +
+				"\nEstimated epsilon: " + estimatedEps + " km" +
+				"\nMin samples: " + minPts
+			);
 
 			KDistancePlot.setKDistances(kDistances, estimatedEps);
 			KDistancePlot.displayChart();
 			eps = estimatedEps;
 		} else {
-			logger.info("Info: Given epsilon: " + eps + " km & min samples: " + minPts);
+			logger.info(
+				"Given epsilon: " + eps + " km" +
+				"\nMin samples: " + minPts
+			);
 		}
 
 		DBSCANClusterer<Point> clusterer = new DBSCANClusterer<>(eps, minPts, new HaversineDistance());
@@ -136,136 +136,11 @@ public class SpatialClustering extends HypoUtils {
 			clusterId++;
 		}
 
-		logger.info("Info: Number of clusters: " + clusters.size());
+		logger.info("There are " + clusters.size() + " clusters.");
+		for (Cluster<Point> cluster : clusters) {
+			logger.info("CID-" + cluster.getPoints().get(0).getCid() + " has " + cluster.getPoints().size() + " events.");
+		}
 		return clusters;
-	}
-
-	/**
-	 * Loads the points from the specified catalog file.
-	 *
-	 * @param catalogFile  the path to the catalog file
-	 * @param withLagTable if true, lagTables are also read
-	 * @return the cluster of loaded points
-	 */
-	public Cluster<Point> loadPointsFromCatalog(String catalogFile, boolean withLagTable) {
-		Cluster<Point> cluster = new Cluster<>();
-		try (BufferedReader br = new BufferedReader(new FileReader(catalogFile))) {
-			String line;
-			while ((line = br.readLine()) != null) {
-				String[] parts = line.split("\\s+");
-				PointsHandler pointsHandler = new PointsHandler();
-
-				if (withLagTable) {
-					pointsHandler.readDatFile(parts[8], codeStrings, threshold);
-					if (pointsHandler.getMainPoint().getLagTable().length < 4) {
-						logger.warning("Error: Not enough data (< 4 pks.) to read in: " + parts[8]);
-						continue;
-					}
-				}
-				
-				Point point = pointsHandler.getMainPoint();
-				point.setTime(parts[0]);
-				point.setLat(Double.parseDouble(parts[1]));
-				point.setLon(Double.parseDouble(parts[2]));
-				point.setDep(Double.parseDouble(parts[3]));
-				point.setElat(Double.parseDouble(parts[4]));
-				point.setElon(Double.parseDouble(parts[5]));
-				point.setEdep(Double.parseDouble(parts[6]));
-				point.setRes(Double.parseDouble(parts[7]));
-				point.setFilePath(parts[8]);
-				point.setType(parts[9]);
-
-				int cid = -1;
-				if (parts.length > 10) {
-					cid = Integer.parseInt(parts[10]);
-				}
-				point.setCid(cid);
-				cluster.addPoint(point);
-			}
-		} catch (IOException e) {
-			logger.warning("Error: reading " + catalogFile + ": " + e.getMessage());
-		}
-		return cluster;
-	}
-
-	/**
-	 * Loads the points from the specified catalog file for a specific cluster ID.
-	 *
-	 * @param catalogFile  the path to the catalog file
-	 * @param withLagTable if true, lagTables are also read
-	 * @param clusterId    the cluster ID of events to read in
-	 * @return the cluster of loaded points
-	 */
-	public Cluster<Point> loadPointsFromCatalog(String catalogFile, boolean withLagTable, int clusterId) {
-		Cluster<Point> cluster = new Cluster<>();
-		try (BufferedReader br = new BufferedReader(new FileReader(catalogFile))) {
-			String line;
-			while ((line = br.readLine()) != null) {
-				String[] parts = line.split("\\s+");
-
-				int cid = Integer.parseInt(parts[10]);
-				if (cid != clusterId) {
-					continue;
-				}
-
-				PointsHandler pointsHandler = new PointsHandler();
-
-				if (withLagTable) {
-					pointsHandler.readDatFile(parts[8], codeStrings, threshold);
-					if (pointsHandler.getMainPoint().getLagTable().length < 4) {
-						logger.warning("Error: Not enough data (< 4 pks.) to read in: " + parts[8]);
-						continue;
-					}
-				}
-
-				Point point = pointsHandler.getMainPoint();
-				point.setTime(parts[0]);
-				point.setLat(Double.parseDouble(parts[1]));
-				point.setLon(Double.parseDouble(parts[2]));
-				point.setDep(Double.parseDouble(parts[3]));
-				point.setElat(Double.parseDouble(parts[4]));
-				point.setElon(Double.parseDouble(parts[5]));
-				point.setEdep(Double.parseDouble(parts[6]));
-				point.setRes(Double.parseDouble(parts[7]));
-				point.setFilePath(parts[8]);
-				point.setType(parts[9]);
-				point.setCid(cid);
-
-				cluster.addPoint(point);
-			}
-		} catch (IOException e) {
-			logger.warning("Error: reading " + catalogFile + ": " + e.getMessage());
-		}
-		return cluster;
-	}
-
-	/**
-	 * Writes the list of points to the specified output file.
-	 *
-	 * @param points     the list of points to write
-	 * @param outputFile the path of the output file
-	 */
-	public void writePointsToFile(List<Point> points, String outputFile) {
-		try (PrintWriter writer = new PrintWriter(new FileWriter(outputFile))) {
-			for (Point point : points) {
-				writer.printf("%s %f %f %f %f %f %f %f %s %s %d%n", 
-					point.getTime(),
-					point.getLat(),
-					point.getLon(),
-					point.getDep(),
-					point.getElat(),
-					point.getElon(),
-					point.getEdep(),
-					point.getRes(),
-					point.getFilePath(),
-					point.getType(),
-					point.getCid()
-					);
-			}
-			logger.info("Info: Points written to " + outputFile);
-		} catch (IOException e) {
-			logger.warning("Error: Writing points to " + outputFile + ": " + e.getMessage());
-		}
 	}
 
 	/**
@@ -376,6 +251,13 @@ public class SpatialClustering extends HypoUtils {
 			for (int eid2 = eid1 + 1; eid2 < points.size(); eid2++) {
 				Point p1 = points.get(eid1);
 				Point p2 = points.get(eid2);
+
+				if (p1.getType().equals("REF") && p2.getType().equals("REF")) {
+					continue;
+				} else if (p1.getType().equals("ERR") || p2.getType().equals("ERR")) {
+					continue;
+				}
+
 				GeodesicData g = Geodesic.WGS84.Inverse(p1.getLat(), p1.getLon(), p2.getLat(), p2.getLon());
 				double distKm = g.s12 / 1000.0; // Distance in km
 				double[][] lagTable1 = p1.getLagTable();
