@@ -1,64 +1,65 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://maven.apache.org/surefire/maven-surefire-plugin/xsd/surefire-test-report-3.0.xsd" version="3.0" name="com.treloc.hypotd.AppTest" time="0.586" tests="2" errors="0" skipped="0" failures="0">
+<testsuite xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="https://maven.apache.org/surefire/maven-surefire-plugin/xsd/surefire-test-report-3.0.xsd" version="3.0" name="com.treloc.hypotd.AppTest" time="0.362" tests="2" errors="0" skipped="0" failures="0">
   <properties>
-    <property name="java.specification.version" value="20"/>
+    <property name="java.specification.version" value="23"/>
     <property name="sun.jnu.encoding" value="UTF-8"/>
-    <property name="java.class.path" value="/Users/kosukeminamoto/kminamoto/java/xtreloc/target/test-classes:/Users/kosukeminamoto/kminamoto/java/xtreloc/target/classes:/Users/kosukeminamoto/.m2/repository/org/apache/commons/commons-math3/3.6.1/commons-math3-3.6.1.jar:/Users/kosukeminamoto/.m2/repository/com/fasterxml/jackson/core/jackson-databind/2.16.1/jackson-databind-2.16.1.jar:/Users/kosukeminamoto/.m2/repository/com/fasterxml/jackson/core/jackson-annotations/2.16.1/jackson-annotations-2.16.1.jar:/Users/kosukeminamoto/.m2/repository/com/fasterxml/jackson/core/jackson-core/2.16.1/jackson-core-2.16.1.jar:/Users/kosukeminamoto/.m2/repository/edu/sc/seis/seisFile/2.0.6/seisFile-2.0.6.jar:/Users/kosukeminamoto/.m2/repository/edu/sc/seis/seedCodec/1.1.1/seedCodec-1.1.1.jar:/Users/kosukeminamoto/.m2/repository/org/slf4j/slf4j-api/1.7.36/slf4j-api-1.7.36.jar:/Users/kosukeminamoto/.m2/repository/com/fasterxml/woodstox/woodstox-core/6.5.0/woodstox-core-6.5.0.jar:/Users/kosukeminamoto/.m2/repository/org/codehaus/woodstox/stax2-api/4.2.1/stax2-api-4.2.1.jar:/Users/kosukeminamoto/.m2/repository/org/apache/httpcomponents/httpclient/4.5.14/httpclient-4.5.14.jar:/Users/kosukeminamoto/.m2/repository/org/apache/httpcomponents/httpcore/4.4.16/httpcore-4.4.16.jar:/Users/kosukeminamoto/.m2/repository/commons-logging/commons-logging/1.2/commons-logging-1.2.jar:/Users/kosukeminamoto/.m2/repository/commons-codec/commons-codec/1.11/commons-codec-1.11.jar:/Users/kosukeminamoto/.m2/repository/jfree/jfreechart/1.0.13/jfreechart-1.0.13.jar:/Users/kosukeminamoto/.m2/repository/jfree/jcommon/1.0.16/jcommon-1.0.16.jar:/Users/kosukeminamoto/.m2/repository/junit/junit/4.11/junit-4.11.jar:/Users/kosukeminamoto/.m2/repository/org/hamcrest/hamcrest-core/1.3/hamcrest-core-1.3.jar:/Users/kosukeminamoto/.m2/repository/edu/sc/seis/TauP/2.6.1/TauP-2.6.1.jar:/Users/kosukeminamoto/.m2/repository/org/slf4j/slf4j-reload4j/1.7.35/slf4j-reload4j-1.7.35.jar:/Users/kosukeminamoto/.m2/repository/ch/qos/reload4j/reload4j/1.2.18.3/reload4j-1.2.18.3.jar:/Users/kosukeminamoto/.m2/repository/net/sf/geographiclib/GeographicLib-Java/1.49/GeographicLib-Java-1.49.jar:"/>
-    <property name="java.vm.vendor" value="Oracle Corporation"/>
+    <property name="java.class.path" value="/Users/kosukeminamoto/kminamoto/xTreLoc-main/target/test-classes:/Users/kosukeminamoto/kminamoto/xTreLoc-main/target/classes:/Users/kosukeminamoto/.m2/repository/org/apache/commons/commons-math3/3.6.1/commons-math3-3.6.1.jar:/Users/kosukeminamoto/.m2/repository/com/fasterxml/jackson/core/jackson-databind/2.16.1/jackson-databind-2.16.1.jar:/Users/kosukeminamoto/.m2/repository/com/fasterxml/jackson/core/jackson-annotations/2.16.1/jackson-annotations-2.16.1.jar:/Users/kosukeminamoto/.m2/repository/com/fasterxml/jackson/core/jackson-core/2.16.1/jackson-core-2.16.1.jar:/Users/kosukeminamoto/.m2/repository/edu/sc/seis/seisFile/2.0.6/seisFile-2.0.6.jar:/Users/kosukeminamoto/.m2/repository/edu/sc/seis/seedCodec/1.1.1/seedCodec-1.1.1.jar:/Users/kosukeminamoto/.m2/repository/org/slf4j/slf4j-api/1.7.36/slf4j-api-1.7.36.jar:/Users/kosukeminamoto/.m2/repository/com/fasterxml/woodstox/woodstox-core/6.5.0/woodstox-core-6.5.0.jar:/Users/kosukeminamoto/.m2/repository/org/codehaus/woodstox/stax2-api/4.2.1/stax2-api-4.2.1.jar:/Users/kosukeminamoto/.m2/repository/org/apache/httpcomponents/httpclient/4.5.14/httpclient-4.5.14.jar:/Users/kosukeminamoto/.m2/repository/org/apache/httpcomponents/httpcore/4.4.16/httpcore-4.4.16.jar:/Users/kosukeminamoto/.m2/repository/commons-logging/commons-logging/1.2/commons-logging-1.2.jar:/Users/kosukeminamoto/.m2/repository/commons-codec/commons-codec/1.11/commons-codec-1.11.jar:/Users/kosukeminamoto/.m2/repository/jfree/jfreechart/1.0.13/jfreechart-1.0.13.jar:/Users/kosukeminamoto/.m2/repository/jfree/jcommon/1.0.16/jcommon-1.0.16.jar:/Users/kosukeminamoto/.m2/repository/junit/junit/4.11/junit-4.11.jar:/Users/kosukeminamoto/.m2/repository/org/hamcrest/hamcrest-core/1.3/hamcrest-core-1.3.jar:/Users/kosukeminamoto/.m2/repository/edu/sc/seis/TauP/2.6.1/TauP-2.6.1.jar:/Users/kosukeminamoto/.m2/repository/org/slf4j/slf4j-reload4j/1.7.35/slf4j-reload4j-1.7.35.jar:/Users/kosukeminamoto/.m2/repository/ch/qos/reload4j/reload4j/1.2.18.3/reload4j-1.2.18.3.jar:/Users/kosukeminamoto/.m2/repository/net/sf/geographiclib/GeographicLib-Java/1.49/GeographicLib-Java-1.49.jar:"/>
+    <property name="java.vm.vendor" value="Homebrew"/>
     <property name="sun.arch.data.model" value="64"/>
-    <property name="java.vendor.url" value="https://java.oracle.com/"/>
+    <property name="java.vendor.url" value="https://github.com/Homebrew/homebrew-core/issues"/>
     <property name="os.name" value="Mac OS X"/>
-    <property name="java.vm.specification.version" value="20"/>
+    <property name="java.vm.specification.version" value="23"/>
     <property name="sun.java.launcher" value="SUN_STANDARD"/>
     <property name="user.country" value="JP"/>
-    <property name="sun.boot.library.path" value="/Library/Java/JavaVirtualMachines/jdk-20.jdk/Contents/Home/lib"/>
-    <property name="sun.java.command" value="/Users/kosukeminamoto/kminamoto/java/xtreloc/target/surefire/surefirebooter-20250226015500705_3.jar /Users/kosukeminamoto/kminamoto/java/xtreloc/target/surefire 2025-02-26T01-55-00_641-jvmRun1 surefire-20250226015500705_1tmp surefire_0-20250226015500705_2tmp"/>
+    <property name="sun.boot.library.path" value="/opt/homebrew/Cellar/openjdk/23.0.2/libexec/openjdk.jdk/Contents/Home/lib"/>
+    <property name="sun.java.command" value="/Users/kosukeminamoto/kminamoto/xTreLoc-main/target/surefire/surefirebooter-20250228075622560_3.jar /Users/kosukeminamoto/kminamoto/xTreLoc-main/target/surefire 2025-02-28T07-56-22_326-jvmRun1 surefire-20250228075622560_1tmp surefire_0-20250228075622560_2tmp"/>
     <property name="http.nonProxyHosts" value="local|*.local|169.254/16|*.169.254/16"/>
     <property name="jdk.debug" value="release"/>
-    <property name="surefire.test.class.path" value="/Users/kosukeminamoto/kminamoto/java/xtreloc/target/test-classes:/Users/kosukeminamoto/kminamoto/java/xtreloc/target/classes:/Users/kosukeminamoto/.m2/repository/org/apache/commons/commons-math3/3.6.1/commons-math3-3.6.1.jar:/Users/kosukeminamoto/.m2/repository/com/fasterxml/jackson/core/jackson-databind/2.16.1/jackson-databind-2.16.1.jar:/Users/kosukeminamoto/.m2/repository/com/fasterxml/jackson/core/jackson-annotations/2.16.1/jackson-annotations-2.16.1.jar:/Users/kosukeminamoto/.m2/repository/com/fasterxml/jackson/core/jackson-core/2.16.1/jackson-core-2.16.1.jar:/Users/kosukeminamoto/.m2/repository/edu/sc/seis/seisFile/2.0.6/seisFile-2.0.6.jar:/Users/kosukeminamoto/.m2/repository/edu/sc/seis/seedCodec/1.1.1/seedCodec-1.1.1.jar:/Users/kosukeminamoto/.m2/repository/org/slf4j/slf4j-api/1.7.36/slf4j-api-1.7.36.jar:/Users/kosukeminamoto/.m2/repository/com/fasterxml/woodstox/woodstox-core/6.5.0/woodstox-core-6.5.0.jar:/Users/kosukeminamoto/.m2/repository/org/codehaus/woodstox/stax2-api/4.2.1/stax2-api-4.2.1.jar:/Users/kosukeminamoto/.m2/repository/org/apache/httpcomponents/httpclient/4.5.14/httpclient-4.5.14.jar:/Users/kosukeminamoto/.m2/repository/org/apache/httpcomponents/httpcore/4.4.16/httpcore-4.4.16.jar:/Users/kosukeminamoto/.m2/repository/commons-logging/commons-logging/1.2/commons-logging-1.2.jar:/Users/kosukeminamoto/.m2/repository/commons-codec/commons-codec/1.11/commons-codec-1.11.jar:/Users/kosukeminamoto/.m2/repository/jfree/jfreechart/1.0.13/jfreechart-1.0.13.jar:/Users/kosukeminamoto/.m2/repository/jfree/jcommon/1.0.16/jcommon-1.0.16.jar:/Users/kosukeminamoto/.m2/repository/junit/junit/4.11/junit-4.11.jar:/Users/kosukeminamoto/.m2/repository/org/hamcrest/hamcrest-core/1.3/hamcrest-core-1.3.jar:/Users/kosukeminamoto/.m2/repository/edu/sc/seis/TauP/2.6.1/TauP-2.6.1.jar:/Users/kosukeminamoto/.m2/repository/org/slf4j/slf4j-reload4j/1.7.35/slf4j-reload4j-1.7.35.jar:/Users/kosukeminamoto/.m2/repository/ch/qos/reload4j/reload4j/1.2.18.3/reload4j-1.2.18.3.jar:/Users/kosukeminamoto/.m2/repository/net/sf/geographiclib/GeographicLib-Java/1.49/GeographicLib-Java-1.49.jar:"/>
+    <property name="surefire.test.class.path" value="/Users/kosukeminamoto/kminamoto/xTreLoc-main/target/test-classes:/Users/kosukeminamoto/kminamoto/xTreLoc-main/target/classes:/Users/kosukeminamoto/.m2/repository/org/apache/commons/commons-math3/3.6.1/commons-math3-3.6.1.jar:/Users/kosukeminamoto/.m2/repository/com/fasterxml/jackson/core/jackson-databind/2.16.1/jackson-databind-2.16.1.jar:/Users/kosukeminamoto/.m2/repository/com/fasterxml/jackson/core/jackson-annotations/2.16.1/jackson-annotations-2.16.1.jar:/Users/kosukeminamoto/.m2/repository/com/fasterxml/jackson/core/jackson-core/2.16.1/jackson-core-2.16.1.jar:/Users/kosukeminamoto/.m2/repository/edu/sc/seis/seisFile/2.0.6/seisFile-2.0.6.jar:/Users/kosukeminamoto/.m2/repository/edu/sc/seis/seedCodec/1.1.1/seedCodec-1.1.1.jar:/Users/kosukeminamoto/.m2/repository/org/slf4j/slf4j-api/1.7.36/slf4j-api-1.7.36.jar:/Users/kosukeminamoto/.m2/repository/com/fasterxml/woodstox/woodstox-core/6.5.0/woodstox-core-6.5.0.jar:/Users/kosukeminamoto/.m2/repository/org/codehaus/woodstox/stax2-api/4.2.1/stax2-api-4.2.1.jar:/Users/kosukeminamoto/.m2/repository/org/apache/httpcomponents/httpclient/4.5.14/httpclient-4.5.14.jar:/Users/kosukeminamoto/.m2/repository/org/apache/httpcomponents/httpcore/4.4.16/httpcore-4.4.16.jar:/Users/kosukeminamoto/.m2/repository/commons-logging/commons-logging/1.2/commons-logging-1.2.jar:/Users/kosukeminamoto/.m2/repository/commons-codec/commons-codec/1.11/commons-codec-1.11.jar:/Users/kosukeminamoto/.m2/repository/jfree/jfreechart/1.0.13/jfreechart-1.0.13.jar:/Users/kosukeminamoto/.m2/repository/jfree/jcommon/1.0.16/jcommon-1.0.16.jar:/Users/kosukeminamoto/.m2/repository/junit/junit/4.11/junit-4.11.jar:/Users/kosukeminamoto/.m2/repository/org/hamcrest/hamcrest-core/1.3/hamcrest-core-1.3.jar:/Users/kosukeminamoto/.m2/repository/edu/sc/seis/TauP/2.6.1/TauP-2.6.1.jar:/Users/kosukeminamoto/.m2/repository/org/slf4j/slf4j-reload4j/1.7.35/slf4j-reload4j-1.7.35.jar:/Users/kosukeminamoto/.m2/repository/ch/qos/reload4j/reload4j/1.2.18.3/reload4j-1.2.18.3.jar:/Users/kosukeminamoto/.m2/repository/net/sf/geographiclib/GeographicLib-Java/1.49/GeographicLib-Java-1.49.jar:"/>
     <property name="sun.cpu.endian" value="little"/>
     <property name="user.home" value="/Users/kosukeminamoto"/>
     <property name="user.language" value="en"/>
     <property name="java.specification.vendor" value="Oracle Corporation"/>
-    <property name="java.version.date" value="2023-07-18"/>
-    <property name="java.home" value="/Library/Java/JavaVirtualMachines/jdk-20.jdk/Contents/Home"/>
+    <property name="java.version.date" value="2025-01-21"/>
+    <property name="java.home" value="/opt/homebrew/Cellar/openjdk/23.0.2/libexec/openjdk.jdk/Contents/Home"/>
     <property name="file.separator" value="/"/>
-    <property name="basedir" value="/Users/kosukeminamoto/kminamoto/java/xtreloc"/>
+    <property name="basedir" value="/Users/kosukeminamoto/kminamoto/xTreLoc-main"/>
     <property name="java.vm.compressedOopsMode" value="Zero based"/>
     <property name="line.separator" value="&#10;"/>
     <property name="java.vm.specification.vendor" value="Oracle Corporation"/>
     <property name="java.specification.name" value="Java Platform API Specification"/>
     <property name="apple.awt.application.name" value="ForkedBooter"/>
-    <property name="surefire.real.class.path" value="/Users/kosukeminamoto/kminamoto/java/xtreloc/target/surefire/surefirebooter-20250226015500705_3.jar"/>
+    <property name="surefire.real.class.path" value="/Users/kosukeminamoto/kminamoto/xTreLoc-main/target/surefire/surefirebooter-20250228075622560_3.jar"/>
     <property name="sun.management.compiler" value="HotSpot 64-Bit Tiered Compilers"/>
     <property name="ftp.nonProxyHosts" value="local|*.local|169.254/16|*.169.254/16"/>
-    <property name="java.runtime.version" value="20.0.2+9-78"/>
+    <property name="java.runtime.version" value="23.0.2"/>
     <property name="user.name" value="kosukeminamoto"/>
     <property name="stdout.encoding" value="UTF-8"/>
     <property name="path.separator" value=":"/>
-    <property name="os.version" value="14.5"/>
-    <property name="java.runtime.name" value="Java(TM) SE Runtime Environment"/>
+    <property name="os.version" value="13.0.1"/>
+    <property name="java.runtime.name" value="OpenJDK Runtime Environment"/>
     <property name="file.encoding" value="UTF-8"/>
-    <property name="java.vm.name" value="Java HotSpot(TM) 64-Bit Server VM"/>
+    <property name="java.vm.name" value="OpenJDK 64-Bit Server VM"/>
+    <property name="java.vendor.version" value="Homebrew"/>
     <property name="localRepository" value="/Users/kosukeminamoto/.m2/repository"/>
-    <property name="java.vendor.url.bug" value="https://bugreport.java.com/bugreport/"/>
-    <property name="java.io.tmpdir" value="/var/folders/64/r06s54sj0k3bptf48z3z8phc0000gn/T/"/>
-    <property name="java.version" value="20.0.2"/>
-    <property name="user.dir" value="/Users/kosukeminamoto/kminamoto/java/xtreloc"/>
+    <property name="java.vendor.url.bug" value="https://github.com/Homebrew/homebrew-core/issues"/>
+    <property name="java.io.tmpdir" value="/var/folders/16/wfdpg_vs73q2rqbwc8nwj0d00000gn/T/"/>
+    <property name="java.version" value="23.0.2"/>
+    <property name="user.dir" value="/Users/kosukeminamoto/kminamoto/xTreLoc-main"/>
     <property name="os.arch" value="aarch64"/>
     <property name="java.vm.specification.name" value="Java Virtual Machine Specification"/>
     <property name="native.encoding" value="UTF-8"/>
     <property name="java.library.path" value="/Users/kosukeminamoto/Library/Java/Extensions:/Library/Java/Extensions:/Network/Library/Java/Extensions:/System/Library/Java/Extensions:/usr/lib/java:."/>
     <property name="java.vm.info" value="mixed mode, sharing"/>
     <property name="stderr.encoding" value="UTF-8"/>
-    <property name="java.vendor" value="Oracle Corporation"/>
-    <property name="java.vm.version" value="20.0.2+9-78"/>
+    <property name="java.vendor" value="Homebrew"/>
+    <property name="java.vm.version" value="23.0.2"/>
     <property name="sun.io.unicode.encoding" value="UnicodeBig"/>
     <property name="socksNonProxyHosts" value="local|*.local|169.254/16|*.169.254/16"/>
-    <property name="java.class.version" value="64.0"/>
+    <property name="java.class.version" value="67.0"/>
   </properties>
-  <testcase name="testLSQR" classname="com.treloc.hypotd.AppTest" time="0.015">
-    <system-err><![CDATA[Feb 26, 2025 1:55:01 AM com.treloc.hypotd.HypoUtils <init>
+  <testcase name="testLSQR" classname="com.treloc.hypotd.AppTest" time="0.009">
+    <system-err><![CDATA[Feb 28, 2025 7:56:22 AM com.treloc.hypotd.HypoUtils <init>
 INFO: Loaded velocity model:
 modelName=prem
 
@@ -71,12 +72,14 @@ modelName=prem
  spherical=true
 getNumLayers()=80
 
-Feb 26, 2025 1:55:01 AM com.treloc.hypotd.SyntheticTest generateData
-INFO: Generated synthetic data: src/test/resources/ini.dat
+Feb 28, 2025 7:56:22 AM com.treloc.hypotd.PointsHandler writeDatFile
+WARNING: Error: writing :  (No such file or directory)
+Feb 28, 2025 7:56:22 AM com.treloc.hypotd.SyntheticTest generateData
+INFO: Generated synthetic data: 
 ]]></system-err>
   </testcase>
-  <testcase name="testSTDLoc" classname="com.treloc.hypotd.AppTest" time="0.276">
-    <system-err><![CDATA[Feb 26, 2025 1:55:01 AM com.treloc.hypotd.HypoUtils <init>
+  <testcase name="testSTDLoc" classname="com.treloc.hypotd.AppTest" time="0.096">
+    <system-err><![CDATA[Feb 28, 2025 7:56:22 AM com.treloc.hypotd.HypoUtils <init>
 INFO: Loaded velocity model:
 modelName=prem
 
@@ -89,9 +92,11 @@ modelName=prem
  spherical=true
 getNumLayers()=80
 
-Feb 26, 2025 1:55:01 AM com.treloc.hypotd.HypoStationPairDiff start
+Feb 28, 2025 7:56:22 AM com.treloc.hypotd.HypoUtils setUpOutputDirectory
+INFO: Created output directory: src/test/resources/dat_STD
+Feb 28, 2025 7:56:23 AM com.treloc.hypotd.HypoStationPairDiff start
 INFO: 143.500 39.499 19.842 0.211 0.071 0.118 0.081
-Feb 26, 2025 1:55:01 AM com.treloc.hypotd.HypoStationPairDiff start
+Feb 28, 2025 7:56:23 AM com.treloc.hypotd.HypoStationPairDiff start
 INFO: 	(Evaluations: 4, Iterations: 3)
 ]]></system-err>
   </testcase>

@@ -4,8 +4,6 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 
-import java.time.LocalDateTime;
-
 import org.junit.Test;
 // import org.junit.Before;
 import org.junit.BeforeClass;
@@ -35,8 +33,10 @@ public class AppTest {
 	private static final double truLon = 143.5;
 	private static final double truDep = 20;
 	private static final String trTime = "2000-01-01T00:00:00";
+	private static final Point truPoint = new Point(trTime, truLat, truLon, truDep, 0, 0, 0, 0, "", "SYN", -999);
 
 	public AppTest () {
+		truPoint.setFilePath(iniFile);
 	}
 
 	@BeforeClass
@@ -54,9 +54,8 @@ public class AppTest {
 		// Generate synthetic data
 		config.setMode("SYN");
 		SyntheticTest tester = new SyntheticTest(config);
-		LocalDateTime time = LocalDateTime.parse(trTime);
 		try {
-			tester.generateData(truLon, truLat, truDep, time, iniFile, 0.4, 0.6);
+			tester.generateData(truPoint, 0.4, 0.6);
 		} catch (TauModelException e) {
 			e.printStackTrace();
 		}
