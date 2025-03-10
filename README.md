@@ -1,3 +1,4 @@
+
 # xTreLoc
 
 ## X-correlation-based Tremor Re-location Tools
@@ -31,9 +32,32 @@ We provide precompiled binaries, but you can recompile them using Maven or Gradl
 	```
 
 - Gradle
-
 	```sh
 	gradle clean build
+	```
+
+	This project uses Gradle Wrapper (gradlew) to ensure a consistent build environment. Follow the steps below to compile and run the application.	To compile the project, run:
+
+	For macOS/Linux:
+	```
+	./gradlew build
+	```
+
+	For Windows:
+	```
+	gradlew.bat build
+	```
+
+	If you run the application, execute the following command:
+
+	```
+	./gradlew run <mode>
+	```
+
+	If you prefer to run the compiled JAR file directly:
+	```
+	./gradlew jar
+	java -jar build/libs/xtreloc-1.0-SNAPSHOT.jar <mode>
 	```
 
 These commands have been confirmed to work in the following environments:
@@ -82,4 +106,3 @@ This project is licensed under the Apache License 2.0. See the LICENSE file for 
 If you have any bug reports or improvement suggestions, please feel free to contact:
 
 - **Email:** [kosuke.minamoto.s8[at]gmail.com](mailto:kosuke.minamoto.s8[at]gmail.com)
-# xTreLoc
