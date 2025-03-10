@@ -1,0 +1,11 @@
+#!/bin/bash
+
+if [ -f "../target/xtreloc-1.0-SNAPSHOT-jar-with-dependencies.jar" ]; then
+    # If compiled with maven, run the jar file
+    java -jar ../target/xtreloc-1.0-SNAPSHOT-jar-with-dependencies.jar $1
+elif [ -f "../build/libs/xtreloc-1.0-SNAPSHOT.jar" ]; then
+    # If compiled with gradle, run the jar file
+    java -jar ../build/libs/xtreloc-1.0-SNAPSHOT.jar $1
+else
+    echo "Please compile the project first"
+fi
