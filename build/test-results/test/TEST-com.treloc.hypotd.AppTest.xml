@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.treloc.hypotd.AppTest" tests="2" skipped="0" failures="0" errors="0" timestamp="2025-03-13T09:16:24.422Z" hostname="KosukeMinamotonoMacBook-Air.local" time="0.139">
+  <properties/>
+  <testcase name="testLSQR" classname="com.treloc.hypotd.AppTest" time="0.013"/>
+  <testcase name="testSTDLoc" classname="com.treloc.hypotd.AppTest" time="0.125"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[Mar 13, 2025 6:16:24 PM com.treloc.hypotd.HypoUtils <init>
+INFO: Loaded velocity model:
+modelName=prem
+
+ radiusOfEarth=6371.0
+ mohoDepth=24.4
+ cmbDepth=2891.0
+ iocbDepth=5149.5
+ minRadius=0.0
+ maxRadius=6371.0
+ spherical=true
+getNumLayers()=80
+
+Mar 13, 2025 6:16:24 PM com.treloc.hypotd.PointsHandler writeDatFile
+WARNING: Error: writing :  (No such file or directory)
+Mar 13, 2025 6:16:24 PM com.treloc.hypotd.SyntheticTest generateData
+INFO: Generated synthetic data: 
+Mar 13, 2025 6:16:24 PM com.treloc.hypotd.HypoUtils <init>
+INFO: Loaded velocity model:
+modelName=prem
+
+ radiusOfEarth=6371.0
+ mohoDepth=24.4
+ cmbDepth=2891.0
+ iocbDepth=5149.5
+ minRadius=0.0
+ maxRadius=6371.0
+ spherical=true
+getNumLayers()=80
+
+Mar 13, 2025 6:16:24 PM com.treloc.hypotd.HypoStationPairDiff start
+INFO: 143.500 39.499 19.842 0.211 0.071 0.118 0.081
+Mar 13, 2025 6:16:24 PM com.treloc.hypotd.HypoStationPairDiff start
+INFO: 	(Evaluations: 4, Iterations: 3)
+]]></system-err>
+</testsuite>

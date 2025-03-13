@@ -1,0 +1,147 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>com.treloc.hypotd</groupId>
+  <artifactId>xtreloc</artifactId>
+  <version>1.0-SNAPSHOT</version>
+
+  <name>xtreloc</name>
+  <url>https://github.com/KosukeMinamoto/xtreloc</url>
+
+  <properties>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <maven.compiler.source>11</maven.compiler.source>
+    <maven.compiler.target>11</maven.compiler.target>
+    <geotools.version>33-SNAPSHOT</geotools.version>
+  </properties>
+
+  <dependencies>
+    <!-- https://mvnrepository.com/artifact/org.apache.commons/commons-math3 -->
+    <dependency>
+        <groupId>org.apache.commons</groupId>
+        <artifactId>commons-math3</artifactId>
+        <version>3.6.1</version>
+    </dependency>
+    <!-- https://mvnrepository.com/artifact/com.fasterxml.jackson.core/jackson-databind -->
+    <dependency>
+        <groupId>com.fasterxml.jackson.core</groupId>
+        <artifactId>jackson-databind</artifactId>
+        <version>2.16.1</version>
+    </dependency>
+    <!-- https://mvnrepository.com/artifact/edu.sc.seis/seisFile -->
+    <dependency>
+        <groupId>edu.sc.seis</groupId>
+        <artifactId>seisFile</artifactId>
+        <version>2.0.6</version>
+    </dependency>
+    <!-- https://mvnrepository.com/artifact/jfree/jfreechart -->
+    <dependency>
+        <groupId>jfree</groupId>
+        <artifactId>jfreechart</artifactId>
+        <version>1.0.13</version>
+    </dependency>
+    <dependency>
+      <groupId>junit</groupId>
+      <artifactId>junit</artifactId>
+      <version>4.11</version>
+      <scope>test</scope>
+    </dependency>
+    <!-- https://mvnrepository.com/artifact/edu.sc.seis/TauP -->
+    <dependency>
+      <groupId>edu.sc.seis</groupId>
+     <artifactId>TauP</artifactId>
+      <version>2.6.1</version>
+    </dependency>
+    <!-- https://mvnrepository.com/artifact/net.sf.geographiclib/GeographicLib-Java -->
+    <dependency>
+      <groupId>net.sf.geographiclib</groupId>
+      <artifactId>GeographicLib-Java</artifactId>
+      <version>1.49</version>
+    </dependency>
+    <dependency>
+        <groupId>org.geotools</groupId>
+        <artifactId>gt-shapefile</artifactId>
+        <version>${geotools.version}</version>
+    </dependency>
+    <dependency>
+        <groupId>org.geotools</groupId>
+        <artifactId>gt-swing</artifactId>
+        <version>${geotools.version}</version>
+    </dependency>
+    <dependency>
+        <groupId>org.geotools</groupId>
+        <artifactId>gt-tile-client</artifactId>
+        <version>${geotools.version}</version>
+    </dependency>
+    <dependency>
+        <groupId>org.geotools</groupId>
+        <artifactId>gt-api</artifactId>
+        <version>${geotools.version}</version>
+    </dependency>
+    <dependency>
+        <groupId>org.geotools</groupId>
+        <artifactId>gt-grid</artifactId>
+        <version>${geotools.version}</version>
+    </dependency>
+  </dependencies>
+
+  <repositories>
+    <repository>
+        <id>osgeo</id>
+        <name>OSGeo Release Repository</name>
+        <url>https://repo.osgeo.org/repository/release/</url>
+        <snapshots><enabled>false</enabled></snapshots>
+        <releases><enabled>true</enabled></releases>
+    </repository>
+    <repository>
+        <id>osgeo-snapshot</id>
+        <name>OSGeo Snapshot Repository</name>
+        <url>https://repo.osgeo.org/repository/snapshot/</url>
+        <snapshots><enabled>true</enabled></snapshots>
+        <releases><enabled>false</enabled></releases>
+    </repository>
+  </repositories>
+
+  <build>
+    <plugins>
+      <!-- http://maven.apache.org/plugins/maven-assembly-plugin/ -->
+      <plugin>
+      <artifactId>maven-assembly-plugin</artifactId>
+      <version>3.1.1</version>
+      <executions>
+        <execution>
+        <phase>package</phase>
+        <goals>
+          <goal>single</goal>
+        </goals>
+        </execution>
+      </executions>
+      <configuration>
+        <descriptorRefs>
+        <descriptorRef>jar-with-dependencies</descriptorRef>
+        </descriptorRefs>
+        <archive>
+        <manifest>
+          <mainClass>com.treloc.hypotd.App</mainClass>
+        </manifest>
+        </archive>
+      </configuration>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-javadoc-plugin</artifactId>
+        <configuration>
+          <author>true</author>
+          <source>11</source>
+          <show>protected</show>
+          <encoding>UTF-8</encoding>
+          <charset>UTF-8</charset>
+          <docencoding>UTF-8</docencoding>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+</project>

@@ -1,0 +1,44 @@
+{
+  "logLevel": "INFO",
+  "taupFile": "prem",
+  "stationFile": "src/test/resources/station.tbl",
+  "numJobs": 2,
+  "hypBottom": 50.0,
+  "threshold": 0.2,
+  "SYN": {
+    "catalogFile": "synthetic.list"
+  },
+  "GRD": {
+    "datDirectory": "dat-SYN",
+    "numGrid": 100
+  },
+  "STD": {
+    "datDirectory": "src/test/resources/dat"
+  },
+  "CLS": {
+    "minPts": 10,
+    "eps": -1,
+    "catalogFile": "catalog.list"
+  },
+  "TRD": {
+    "catalogFile": "catalog.list",
+    "iterNum": [
+      5,
+      5,
+      5
+    ],
+    "distKm": [
+      40,
+      20,
+      10
+    ],
+    "dampFact": [
+      0.5,
+      0.75,
+      1.0
+    ]
+  },
+  "MAP": {
+    "shpFile": ""
+  }
+}

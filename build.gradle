@@ -1,0 +1,65 @@
+plugins {
+    id 'java'
+    id 'application'
+}
+
+group = 'com.treloc.hypotd'
+version = '1.0-SNAPSHOT'
+
+ext {
+    geotoolsVersion = '33-SNAPSHOT'
+}
+
+repositories {
+    mavenCentral().content {
+        excludeModule("javax.media", "jai_core")
+    }
+    maven {
+        url = 'https://repo.osgeo.org/repository/release/'
+    }
+    maven {
+        url = 'https://repo.osgeo.org/repository/snapshot/'
+    }
+    maven {
+        url = 'https://download.osgeo.org/webdav/geotools/'
+    }
+}
+
+dependencies {
+    // Commons Math 3
+    implementation 'org.apache.commons:commons-math3:3.6.1'
+    // Jackson Databind
+    implementation 'com.fasterxml.jackson.core:jackson-databind:2.16.1'
+    // seisFile
+    // implementation 'edu.sc.seis:seisFile:2.0.6'
+    // JFreeChart
+    implementation 'jfree:jfreechart:1.0.13'
+    // JUnit
+    testImplementation 'junit:junit:4.11'
+    // TauP
+    implementation 'edu.sc.seis:TauP:2.6.1'
+    // GeographicLib Java
+    implementation 'net.sf.geographiclib:GeographicLib-Java:1.49'
+    // GeoTools dependencies
+    implementation "org.geotools:gt-shapefile:${geotoolsVersion}"
+    implementation "org.geotools:gt-swing:${geotoolsVersion}"
+    implementation "org.geotools:gt-tile-client:${geotoolsVersion}"
+    implementation "org.geotools:gt-api:${geotoolsVersion}"
+    implementation "org.geotools:gt-grid:${geotoolsVersion}"
+}
+
+jar {
+    manifest {
+        attributes(
+                'Main-Class': 'com.treloc.hypotd.App'
+        )
+    }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+}
+
+application {
+    mainClass = 'com.treloc.hypotd.App'
+}
