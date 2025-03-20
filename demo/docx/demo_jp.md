@@ -25,7 +25,9 @@ demo/
 │   ├── map_njt.png
 │   ├── mat_nkt.png
 │   └── style.css
+├── map_njt.m
 ├── map_njt.plt
+├── map_njt.py
 ├── run_demo.bash
 ├── station.tbl
 ├── sumdat.py
@@ -246,6 +248,9 @@ gnuplot -e "filename='catalog_syn_TRD.list'" map_njt.plt
 <img src="catalog_syn_trd.png" title="catalog_syn_trd" alt="synthetic -> triple_difference" width=50%>
 
 <div style="page-break-after: always;"></div>
+
+!!! warning 許容桁数
+    $\bm{d} = \bm{G}\bm{m}$ における係数行列 $\bm{G} \in \mathbb{R}^{M \times 3N}$ は非常に大規模な行列になり, $M \times 3N$ がint(32bit)の最大値2,147,483,647を超えるとエラーが出る. ここでMは`triple_diff.csv`における`distance`カラムが, `config.json`内の`TRD.distKm`以下である要素数, Nはイベント数 (リファレンスを含む) に対応する. この約20億という値は容易に超えうるが, `OpenMapRealMatrix`がintを要求するため, 64bitの`long`型には書き換え不可. `la4j`などの別のライブラリを検討する必要がある. 
 
 ## Mapping
 

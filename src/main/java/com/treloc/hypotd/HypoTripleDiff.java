@@ -86,7 +86,6 @@ public class HypoTripleDiff extends HypoUtils {
 			}
 			List<Point> points = clsPts.getPoints();
 
-
 			// Map all event indices (including ref & err) to column indices in matrix G for
 			// target events only
 			// targetMap[i] returns the column index (divided by 3) in matrix G
