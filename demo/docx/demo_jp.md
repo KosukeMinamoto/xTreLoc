@@ -177,7 +177,7 @@ mkdir -p dat-SYN
 
     - `phsErr`: 走時差に与えるパータベーション (default: 0.1秒)
     - `locErr`: 震源に与えるパータベーション (default: 水平 0.03度, 深さ 3km)
-    - `minSelectRate, minSelectRate`: ランダムに選定される検測の数の幅 (default: 20-40%)
+    - `minSelectRate, minSelectRate`: ランダムに選定される検測数 (default: 20-40%)
 
       ```java
       private final double phsErr = 0.1;
@@ -216,6 +216,20 @@ gnuplot -e "filename='catalog_syn_std.list'" map_njt.plt
 
 <img src="catalog_syn_std.png" title="catalog_syn_std" alt="synthetic -> station_pair_dd" width=50%>
 
+!!! warning 非負拘束
+    Levenberg-Marquardt法では非負拘束, 正確には観測点のelevationよりも深くなるような拘束が課せられている. 観測点よりも浅い地震 (e.g., 火山性) の場合には, `HypoStationPairDiff.java`内の以下をコメントアウトする.
+    ```java
+    .parameterValidator(new ParameterValidator() {
+      @Override
+      public RealVector validate(RealVector params) {
+        if (params.getEntry(2) <= stnBottom){ // Airquake
+          params.setEntry(2, Math.random()*hypBottom);
+        }
+        return params;
+      }
+    })
+    ```
+
 続いて, Triple Difference法についても同様のテストを行う. その準備として, クラスタリングとTriple Differenceの計算を実行する. 
 
 ```bash
@@ -247,10 +261,10 @@ gnuplot -e "filename='catalog_syn_TRD.list'" map_njt.plt
 
 <img src="catalog_syn_trd.png" title="catalog_syn_trd" alt="synthetic -> triple_difference" width=50%>
 
-<div style="page-break-after: always;"></div>
-
 !!! warning 許容桁数
     $\bm{d} = \bm{G}\bm{m}$ における係数行列 $\bm{G} \in \mathbb{R}^{M \times 3N}$ は非常に大規模な行列になり, $M \times 3N$ がint(32bit)の最大値2,147,483,647を超えるとエラーが出る. ここでMは`triple_diff.csv`における`distance`カラムが, `config.json`内の`TRD.distKm`以下である要素数, Nはイベント数 (リファレンスを含む) に対応する. この約20億という値は容易に超えうるが, `OpenMapRealMatrix`がintを要求するため, 64bitの`long`型には書き換え不可. `la4j`などの別のライブラリを検討する必要がある. 
+
+<div style="page-break-after: always;"></div>
 
 ## Mapping
 
