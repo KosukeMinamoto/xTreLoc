@@ -113,7 +113,7 @@
 </ul>
 <h4 id="mavenを使用">Mavenを使用 </h4>
 <pre data-role="codeBlock" data-info="bash" class="language-bash bash"><code><span class="token comment"># リポジトリをクローン</span>
-<span class="token function">git</span> clone <span class="token operator">&lt;</span>repository-url<span class="token operator">&gt;</span>
+<span class="token function">git</span> clone https://github.com/KosukeMinamoto/xTreLoc.git
 <span class="token builtin class-name">cd</span> xTreLoc
 
 <span class="token comment"># 両方のJARをビルド</span>
@@ -396,8 +396,7 @@ SYNモードにおいては全て1.0が設定され, GRD, STD, MCMCモードに�
 <li>"▶ Execute"をクリック</li>
 </ol>
 <p><strong>CLIを使用</strong>:</p>
-<pre data-role="codeBlock" data-info="bash" class="language-bash bash"><code><span class="token comment"># プロジェクトルートディレクトリ（demo/とconfig.jsonを含むディレクトリ）にいることを確認してください</span>
-<span class="token function">java</span> <span class="token parameter variable">-jar</span> build/libs/xTreLoc-CLI-1.0-SNAPSHOT.jar SYN config.json
+<pre data-role="codeBlock" data-info="bash" class="language-bash bash"><code><span class="token function">java</span> <span class="token parameter variable">-jar</span> build/libs/xTreLoc-CLI-1.0-SNAPSHOT.jar SYN config.json
 </code></pre><ul>
 <li><code>phsErr</code>: 走時差に与えるパータベーション (Default: 0.1秒)</li>
 <li><code>locErr</code>: 震源に与えるパータベーション (Default: 水平0.03度, 深さ3km)</li>
@@ -460,8 +459,7 @@ LM法に関するパラメータの変更は基本的に非推奨.</li>
 </li>
 </ol>
 <p><strong>CLIを使用</strong>:</p>
-<pre data-role="codeBlock" data-info="bash" class="language-bash bash"><code><span class="token comment"># プロジェクトルートディレクトリにいることを確認してください</span>
-<span class="token function">mkdir</span> <span class="token parameter variable">-p</span> demo/dat-grd
+<pre data-role="codeBlock" data-info="bash" class="language-bash bash"><code><span class="token function">mkdir</span> <span class="token parameter variable">-p</span> demo/dat-grd
 <span class="token function">java</span> <span class="token parameter variable">-jar</span> build/libs/xTreLoc-CLI-1.0-SNAPSHOT.jar GRD config.json
 <span class="token function">mkdir</span> <span class="token parameter variable">-p</span> demo/dat-std
 <span class="token function">java</span> <span class="token parameter variable">-jar</span> build/libs/xTreLoc-CLI-1.0-SNAPSHOT.jar STD config.json
@@ -491,8 +489,7 @@ LM法に関するパラメータの変更は基本的に非推奨.</li>
 <li>"▶ Execute"をクリック</li>
 </ol>
 <p><strong>CLIを使用</strong>:</p>
-<pre data-role="codeBlock" data-info="bash" class="language-bash bash"><code><span class="token comment"># プロジェクトルートディレクトリにいることを確認してください</span>
-<span class="token function">mkdir</span> <span class="token parameter variable">-p</span> ./demo/dat-mcmc
+<pre data-role="codeBlock" data-info="bash" class="language-bash bash"><code><span class="token function">mkdir</span> <span class="token parameter variable">-p</span> ./demo/dat-mcmc
 <span class="token function">java</span> <span class="token parameter variable">-jar</span> build/libs/xTreLoc-CLI-1.0-SNAPSHOT.jar MCMC config.json
 </code></pre><h3 id="ステップ3-震源再決定">ステップ3: 震源再決定 </h3>
 <p>CLSモードによるクラスタリングと, 震源ペア間における走時差の差データを計算. この例では精度検証のためにSYNモードで生成された<code>dat</code>以下のファイルを用いるが, 一般的にはステップ2で決定されたGRD＆STD or MCMCによる震源をインプットすることが強く推奨される.</p>
@@ -525,8 +522,7 @@ LM法に関するパラメータの変更は基本的に非推奨.</li>
 <p><strong>K-Distanceグラフ</strong> (イプシロン推定用):<br>
 <img src="kdist.png" alt="K-Distance Graph"></p>
 <p><strong>CLIを使用</strong>:</p>
-<pre data-role="codeBlock" data-info="bash" class="language-bash bash"><code><span class="token comment"># プロジェクトルートディレクトリにいることを確認してください</span>
-<span class="token function">java</span> <span class="token parameter variable">-jar</span> build/libs/xTreLoc-CLI-1.0-SNAPSHOT.jar CLS config.json
+<pre data-role="codeBlock" data-info="bash" class="language-bash bash"><code><span class="token function">java</span> <span class="token parameter variable">-jar</span> build/libs/xTreLoc-CLI-1.0-SNAPSHOT.jar CLS config.json
 </code></pre><p><strong>注意</strong>: クラスタIDは1から始まる連番であり, 0はクラスタに分類されないイベントに対応する. なお, カタログファイルの11列目 (cid) に整数値が記載されている場合にはそのクラスタIDが使用される (走時差の差データの計算のみが実行されるため, 事前に別手法でクラスタリングを行う場合に用いられる). クラスタ番号が付与されず, 該当列が空白の場合には<code>minPts</code>と<code>eps</code>をパラメータとするDBSCANクラスタリングが実行されます. ただし, <code>eps</code>が負の場合にはk-distance graph (に加え, Data Inclusion Rateが未指定の場合にはエルボー法) によって自動推定された<code>eps</code>によりクラスタリングされる.<br>
 CLSモードはhypoDDにおける<code>dt.ct</code>に対応するファイルである<code>triple_diff_&lt;cid&gt;.bin</code>（バイナリ形式）を出力する. これを用いて相対震源決定を行う.</p>
 <p><strong>GUIを使用</strong>:</p>
@@ -610,7 +606,7 @@ Iteration Count, Distance Threshold, Damp. Factorの与え方はリストで与�
 <p><strong>GUI可視化例</strong>:<br>
 <img src="gui_njt.png" alt="GUI Map View"></p>
 <h3 id="出力結果">出力結果 </h3>
-<p>すべてのステップを完了すると, 以下が得られます:</p>
+<p>すべてのステップを完了すると, 以下が得られる:</p>
 <pre data-role="codeBlock" data-info="" class="language-text"><code>demo
 ├── catalog_ground_truth.csv
 ├── dat

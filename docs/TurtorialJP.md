@@ -95,7 +95,7 @@ cd xTreLoc
 
 ```bash
 # リポジトリをクローン
-git clone <repository-url>
+git clone https://github.com/KosukeMinamoto/xTreLoc.git
 cd xTreLoc
 
 # 両方のJARをビルド
@@ -470,7 +470,6 @@ demo/
 **CLIを使用**: 
 
 ```bash
-# プロジェクトルートディレクトリ（demo/とconfig.jsonを含むディレクトリ）にいることを確認してください
 java -jar build/libs/xTreLoc-CLI-1.0-SNAPSHOT.jar SYN config.json
 ```
 
@@ -517,7 +516,6 @@ java -jar build/libs/xTreLoc-CLI-1.0-SNAPSHOT.jar SYN config.json
 
 **CLIを使用**: 
 ```bash
-# プロジェクトルートディレクトリにいることを確認してください
 mkdir -p demo/dat-grd
 java -jar build/libs/xTreLoc-CLI-1.0-SNAPSHOT.jar GRD config.json
 mkdir -p demo/dat-std
@@ -547,7 +545,6 @@ java -jar build/libs/xTreLoc-CLI-1.0-SNAPSHOT.jar STD config.json
 **CLIを使用**: 
 
 ```bash
-# プロジェクトルートディレクトリにいることを確認してください
 mkdir -p ./demo/dat-mcmc
 java -jar build/libs/xTreLoc-CLI-1.0-SNAPSHOT.jar MCMC config.json
 ```
@@ -576,7 +573,6 @@ CLSモードによるクラスタリングと, 震源ペア間における走時
 
 **CLIを使用**: 
 ```bash
-# プロジェクトルートディレクトリにいることを確認してください
 java -jar build/libs/xTreLoc-CLI-1.0-SNAPSHOT.jar CLS config.json
 ```
 
@@ -666,7 +662,7 @@ java -jar build/libs/xTreLoc-CLI-1.0-SNAPSHOT.jar TRD config.json
 
 ### 出力結果
 
-すべてのステップを完了すると, 以下が得られます: 
+すべてのステップを完了すると, 以下が得られる: 
 
 ```
 demo

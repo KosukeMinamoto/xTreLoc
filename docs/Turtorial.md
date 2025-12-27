@@ -95,7 +95,7 @@ Built JAR files are placed in `build/libs/`:
 
 ```bash
 # Clone the repository
-git clone <repository-url>
+git clone https://github.com/KosukeMinamoto/xTreLoc.git
 cd xTreLoc
 
 # Build both GUI and CLI versions
@@ -470,7 +470,6 @@ Each location mode has roughly the following characteristics:
 **Using CLI**:
 
 ```bash
-# Make sure you are in the project root directory (containing demo/ and config.json)
 java -jar build/libs/xTreLoc-CLI-1.0-SNAPSHOT.jar SYN config.json
 ```
 
@@ -517,7 +516,6 @@ Determine hypocenter positions using STD method after focused random search.
 
 **Using CLI**:
 ```bash
-# Make sure you are in the project root directory
 mkdir -p demo/dat-grd
 java -jar build/libs/xTreLoc-CLI-1.0-SNAPSHOT.jar GRD config.json
 mkdir -p demo/dat-std
@@ -547,7 +545,6 @@ Determine hypocenter positions using Markov Chain Monte Carlo method.
 **Using CLI**:
 
 ```bash
-# Make sure you are in the project root directory
 mkdir -p ./demo/dat-mcmc
 java -jar build/libs/xTreLoc-CLI-1.0-SNAPSHOT.jar MCMC config.json
 ```
@@ -576,7 +573,6 @@ CLS mode clustering and calculation of travel time difference differences betwee
 
 **Using CLI**:
 ```bash
-# Make sure you are in the project root directory
 java -jar build/libs/xTreLoc-CLI-1.0-SNAPSHOT.jar CLS config.json
 ```
 
@@ -603,7 +599,6 @@ CLS mode outputs files corresponding to `dt.ct` in `hypoDD`, which are `triple_d
 
 **Using CLI**:
 ```bash
-# Make sure you are in the project root directory
 mkdir -p demo/dat-trd
 java -jar build/libs/xTreLoc-CLI-1.0-SNAPSHOT.jar TRD config.json
 ```
