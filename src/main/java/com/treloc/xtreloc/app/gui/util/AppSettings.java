@@ -1,0 +1,169 @@
+package com.treloc.xtreloc.app.gui.util;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+
+import java.io.File;
+import java.io.IOException;
+
+/**
+ * Manages application settings stored in ~/.xtreloc/settings.json.
+ * Handles loading and saving of user preferences including font, symbol size,
+ * color palette, log level, and log history settings.
+ * 
+ * @author xTreLoc Development Team
+ */
+public class AppSettings {
+    private static final ObjectMapper mapper = new ObjectMapper();
+    
+    private String font = "default";
+    private int symbolSize = 10;
+    private String defaultPalette = "Blue to Red";
+    private String logLevel = "INFO";
+    private int historyLines = 50;
+    
+    /**
+     * Loads application settings from the settings file.
+     * If the file does not exist or cannot be read, returns default settings.
+     * 
+     * @return AppSettings instance with loaded or default values
+     */
+    public static AppSettings load() {
+        File settingsFile = AppDirectoryManager.getSettingsFile();
+        if (settingsFile.exists()) {
+            try {
+                ObjectNode node = (ObjectNode) mapper.readTree(settingsFile);
+                AppSettings settings = new AppSettings();
+                if (node.has("font")) {
+                    settings.font = node.get("font").asText();
+                }
+                if (node.has("symbolSize")) {
+                    settings.symbolSize = node.get("symbolSize").asInt();
+                }
+                if (node.has("defaultPalette")) {
+                    settings.defaultPalette = node.get("defaultPalette").asText();
+                }
+                if (node.has("logLevel")) {
+                    settings.logLevel = node.get("logLevel").asText();
+                }
+                if (node.has("historyLines")) {
+                    settings.historyLines = node.get("historyLines").asInt();
+                }
+                return settings;
+            } catch (IOException e) {
+                System.err.println("設定ファイルの読み込みに失敗: " + e.getMessage());
+            }
+        }
+        return new AppSettings();
+    }
+    
+    /**
+     * Saves the current settings to the settings file.
+     * Creates the file if it does not exist.
+     */
+    public void save() {
+        File settingsFile = AppDirectoryManager.getSettingsFile();
+        try {
+            ObjectNode node = mapper.createObjectNode();
+            node.put("font", font);
+            node.put("symbolSize", symbolSize);
+            node.put("defaultPalette", defaultPalette);
+            node.put("logLevel", logLevel);
+            node.put("historyLines", historyLines);
+            mapper.writerWithDefaultPrettyPrinter().writeValue(settingsFile, node);
+        } catch (IOException e) {
+            System.err.println("設定ファイルの保存に失敗: " + e.getMessage());
+        }
+    }
+    
+    /**
+     * Gets the font preference.
+     * 
+     * @return font name ("default", "Sans Serif", "Serif", or "Monospaced")
+     */
+    public String getFont() {
+        return font;
+    }
+    
+    /**
+     * Sets the font preference.
+     * 
+     * @param font font name ("default", "Sans Serif", "Serif", or "Monospaced")
+     */
+    public void setFont(String font) {
+        this.font = font;
+    }
+    
+    /**
+     * Gets the symbol size for map markers.
+     * 
+     * @return symbol size in pixels (5-50)
+     */
+    public int getSymbolSize() {
+        return symbolSize;
+    }
+    
+    /**
+     * Sets the symbol size for map markers.
+     * 
+     * @param symbolSize symbol size in pixels (5-50)
+     */
+    public void setSymbolSize(int symbolSize) {
+        this.symbolSize = symbolSize;
+    }
+    
+    /**
+     * Gets the default color palette for map visualization.
+     * 
+     * @return palette name ("Blue to Red", "Viridis", "Plasma", etc.)
+     */
+    public String getDefaultPalette() {
+        return defaultPalette;
+    }
+    
+    /**
+     * Sets the default color palette for map visualization.
+     * 
+     * @param defaultPalette palette name ("Blue to Red", "Viridis", "Plasma", etc.)
+     */
+    public void setDefaultPalette(String defaultPalette) {
+        this.defaultPalette = defaultPalette;
+    }
+    
+    /**
+     * Gets the log level for application logging.
+     * 
+     * @return log level ("INFO", "DEBUG", "WARNING", or "SEVERE")
+     */
+    public String getLogLevel() {
+        return logLevel;
+    }
+    
+    /**
+     * Sets the log level for application logging.
+     * 
+     * @param logLevel log level ("INFO", "DEBUG", "WARNING", or "SEVERE")
+     */
+    public void setLogLevel(String logLevel) {
+        this.logLevel = logLevel;
+    }
+    
+    /**
+     * Gets the number of log history lines to display.
+     * 
+     * @return number of log history lines (10-1000)
+     */
+    public int getHistoryLines() {
+        return historyLines;
+    }
+    
+    /**
+     * Sets the number of log history lines to display.
+     * 
+     * @param historyLines number of log history lines (10-1000)
+     */
+    public void setHistoryLines(int historyLines) {
+        this.historyLines = historyLines;
+    }
+}
+

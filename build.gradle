@@ -3,11 +3,16 @@ plugins {
     id 'application'
 }
 
-group = 'com.treloc.hypotd'
+group = 'com.treloc.xtreloc'
 version = '1.0-SNAPSHOT'
 
+java {
+    sourceCompatibility = JavaVersion.VERSION_20
+    targetCompatibility = JavaVersion.VERSION_20
+}
+
 ext {
-    geotoolsVersion = '33-SNAPSHOT'
+    geotoolsVersion = '31.0'
 }
 
 repositories {
@@ -41,19 +46,57 @@ dependencies {
     // GeographicLib Java
     implementation 'net.sf.geographiclib:GeographicLib-Java:1.49'
     // GeoTools dependencies
+    implementation "org.geotools:gt-main:${geotoolsVersion}"
+    implementation "org.geotools:gt-api:${geotoolsVersion}"
     implementation "org.geotools:gt-shapefile:${geotoolsVersion}"
     implementation "org.geotools:gt-swing:${geotoolsVersion}"
+    implementation "org.geotools:gt-render:${geotoolsVersion}"
     implementation "org.geotools:gt-tile-client:${geotoolsVersion}"
-    implementation "org.geotools:gt-api:${geotoolsVersion}"
     implementation "org.geotools:gt-grid:${geotoolsVersion}"
+    implementation "org.geotools:gt-referencing:${geotoolsVersion}"
+    
+    // JTS for geometry operations
+    implementation 'org.locationtech.jts:jts-core:1.19.0'
 }
 
+// GUI用JAR
 jar {
     manifest {
         attributes(
-                'Main-Class': 'com.treloc.hypotd.App'
+                'Main-Class': 'com.treloc.xtreloc.app.gui.XTreLocGUI'
         )
     }
+    // Fat JARを作成（すべての依存関係を含む）
+    from {
+        configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
+    }
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    // 署名ファイルを除外（SecurityExceptionを防ぐため）
+    exclude 'META-INF/*.SF'
+    exclude 'META-INF/*.DSA'
+    exclude 'META-INF/*.RSA'
+    archiveBaseName = 'xTreLoc-GUI'
+}
+
+// CLI用JAR
+task cliJar(type: Jar) {
+    group = 'build'
+    description = 'Creates a CLI-only JAR file'
+    archiveBaseName = 'xTreLoc-CLI'
+    manifest {
+        attributes(
+                'Main-Class': 'com.treloc.xtreloc.app.cli.XTreLocCLI'
+        )
+    }
+    from {
+        configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
+    }
+    from sourceSets.main.output
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    // 署名ファイルを除外（SecurityExceptionを防ぐため）
+    exclude 'META-INF/*.SF'
+    exclude 'META-INF/*.DSA'
+    exclude 'META-INF/*.RSA'
 }
 
 tasks.withType(JavaCompile).configureEach {
@@ -61,5 +104,19 @@ tasks.withType(JavaCompile).configureEach {
 }
 
 application {
-    mainClass = 'com.treloc.hypotd.App'
+    mainClass = 'com.treloc.xtreloc.app.gui.XTreLocGUI'
+}
+
+test {
+    failOnNoDiscoveredTests = false
+    useJUnit()
+}
+
+// CLI版を実行するためのタスク
+task runCLI(type: JavaExec) {
+    group = 'application'
+    description = 'Run the CLI version of xTreLoc'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'com.treloc.xtreloc.app.cli.XTreLocCLI'
+    args = project.hasProperty('cliArgs') ? project.cliArgs.tokenize() : ['--help']
 }

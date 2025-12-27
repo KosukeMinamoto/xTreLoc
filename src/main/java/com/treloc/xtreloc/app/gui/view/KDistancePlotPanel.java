@@ -1,0 +1,231 @@
+package com.treloc.xtreloc.app.gui.view;
+
+import org.jfree.chart.ChartFactory;
+import org.jfree.chart.JFreeChart;
+import org.jfree.data.xy.XYSeries;
+import org.jfree.data.xy.XYSeriesCollection;
+import org.jfree.chart.ChartPanel;
+import org.jfree.chart.plot.PlotOrientation;
+import org.jfree.chart.plot.XYPlot;
+import org.jfree.chart.renderer.xy.XYLineAndShapeRenderer;
+import org.jfree.chart.plot.ValueMarker;
+import org.jfree.ui.RectangleAnchor;
+import org.jfree.ui.TextAnchor;
+
+import javax.swing.*;
+import java.awt.*;
+import java.awt.image.BufferedImage;
+import java.io.File;
+import java.util.List;
+
+/**
+ * Panel for displaying k-distance graph.
+ * Used for DBSCAN clustering parameter estimation.
+ * 
+ * @author K.M.
+ * @version 0.1
+ * @since 2025-02-22
+ */
+public class KDistancePlotPanel extends JPanel {
+    private ChartPanel chartPanel;
+    private JFreeChart chart;
+    private List<Double> kDistances;
+    private double elbowEps;
+    
+    public KDistancePlotPanel() {
+        setLayout(new BorderLayout());
+        setBorder(BorderFactory.createTitledBorder("k-Distance Graph"));
+        
+        // Create empty chart initially
+        createEmptyChart();
+        
+        // Add export button
+        JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
+        JButton exportButton = new JButton("画像出力");
+        exportButton.addActionListener(e -> exportChartImage());
+        buttonPanel.add(exportButton);
+        
+        add(buttonPanel, BorderLayout.NORTH);
+        add(chartPanel, BorderLayout.CENTER);
+    }
+    
+    /**
+     * Creates an empty chart.
+     */
+    private void createEmptyChart() {
+        XYSeries emptySeries = new XYSeries("No data");
+        XYSeriesCollection dataset = new XYSeriesCollection(emptySeries);
+        
+        chart = ChartFactory.createXYLineChart(
+            "k-Distance Graph",
+            "Points",
+            "Distance (km)",
+            dataset,
+            PlotOrientation.VERTICAL,
+            true,
+            true,
+            false
+        );
+        
+        chartPanel = new ChartPanel(chart);
+        chartPanel.setPreferredSize(new Dimension(800, 600));
+    }
+    
+    /**
+     * Sets k-distances and elbow epsilon value, then updates the chart.
+     * 
+     * @param distances list of k-distances
+     * @param eps elbow epsilon value
+     */
+    public void setKDistances(List<Double> distances, double eps) {
+        this.kDistances = distances;
+        this.elbowEps = eps;
+        updateChart();
+    }
+    
+    /**
+     * Updates the chart with current k-distances.
+     */
+    private void updateChart() {
+        if (kDistances == null || kDistances.isEmpty()) {
+            return;
+        }
+        
+        XYSeries series = new XYSeries("k-Distance");
+        for (int i = 0; i < kDistances.size(); i++) {
+            series.add(i + 1, kDistances.get(i));
+        }
+        
+        XYSeries elbowSeries = new XYSeries("Elbow");
+        for (int i = 0; i < kDistances.size(); i++) {
+            if (Math.abs(kDistances.get(i) - elbowEps) < 1e-6) {
+                elbowSeries.add(i + 1, kDistances.get(i));
+                break;
+            }
+        }
+        
+        XYSeriesCollection dataset = new XYSeriesCollection(series);
+        dataset.addSeries(elbowSeries);
+        
+        chart = ChartFactory.createXYLineChart(
+            "k-Distance Graph",
+            "Points",
+            "Distance (km)",
+            dataset,
+            PlotOrientation.VERTICAL,
+            true,
+            true,
+            false
+        );
+        
+        XYPlot plot = chart.getXYPlot();
+        XYLineAndShapeRenderer renderer = new XYLineAndShapeRenderer();
+        renderer.setSeriesPaint(0, Color.BLUE);
+        renderer.setSeriesPaint(1, Color.RED);
+        renderer.setSeriesShapesVisible(1, true);
+        plot.setRenderer(renderer);
+        
+        // Add percentage markers
+        double[] percentages = {0.7, 0.8, 0.9, 0.95};
+        Color[] colors = {Color.GREEN, Color.ORANGE, Color.MAGENTA, Color.CYAN};
+        Font labelFont = new Font("SansSerif", Font.PLAIN, 12);
+        for (int i = 0; i < percentages.length; i++) {
+            int index = (int) (percentages[i] * kDistances.size()) - 1;
+            if (index >= 0 && index < kDistances.size()) {
+                ValueMarker marker = new ValueMarker(index + 1);
+                marker.setPaint(colors[i]);
+                marker.setStroke(new java.awt.BasicStroke(4.0f, java.awt.BasicStroke.CAP_BUTT, 
+                    java.awt.BasicStroke.JOIN_BEVEL, 0, new float[]{5.0f}, 0));
+                plot.addDomainMarker(marker);
+                
+                marker.setLabel(String.format("%.0f%%", percentages[i] * 100));
+                marker.setLabelFont(labelFont);
+            }
+        }
+        
+        // Elbow point marker
+        int elbowIndex = -1;
+        for (int i = 0; i < kDistances.size(); i++) {
+            if (Math.abs(kDistances.get(i) - elbowEps) < 1e-6) {
+                elbowIndex = i;
+                break;
+            }
+        }
+        if (elbowIndex != -1) {
+            ValueMarker elbowMarker = new ValueMarker(elbowIndex + 1);
+            elbowMarker.setPaint(Color.RED);
+            elbowMarker.setStroke(new java.awt.BasicStroke(2.0f));
+            elbowMarker.setLabel("Elbow Epsilon");
+            elbowMarker.setLabelAnchor(RectangleAnchor.TOP_RIGHT);
+            elbowMarker.setLabelTextAnchor(TextAnchor.TOP_LEFT);
+            plot.addDomainMarker(elbowMarker);
+        }
+        
+        chart.getLegend().setPosition(org.jfree.ui.RectangleEdge.TOP);
+        
+        // Update chart panel
+        chartPanel.setChart(chart);
+        chartPanel.repaint();
+    }
+    
+    /**
+     * Exports the chart as an image file.
+     */
+    private void exportChartImage() {
+        JFileChooser fileChooser = new JFileChooser();
+        fileChooser.setDialogTitle("グラフを画像として出力");
+        fileChooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter(
+            "PNG files (*.png)", "png"));
+        fileChooser.addChoosableFileFilter(new javax.swing.filechooser.FileNameExtensionFilter(
+            "JPEG files (*.jpg, *.jpeg)", "jpg", "jpeg"));
+        fileChooser.setSelectedFile(new File("kdistance.png"));
+        
+        int result = fileChooser.showSaveDialog(this);
+        if (result == JFileChooser.APPROVE_OPTION) {
+            File outputFile = fileChooser.getSelectedFile();
+            try {
+                exportChartImageToFile(outputFile);
+                JOptionPane.showMessageDialog(this,
+                    "グラフを画像として出力しました: " + outputFile.getAbsolutePath(),
+                    "情報", JOptionPane.INFORMATION_MESSAGE);
+            } catch (Exception e) {
+                JOptionPane.showMessageDialog(this,
+                    "画像の出力に失敗しました: " + e.getMessage(),
+                    "エラー", JOptionPane.ERROR_MESSAGE);
+            }
+        }
+    }
+    
+    /**
+     * Exports the chart as an image file.
+     * 
+     * @param outputFile the output file
+     * @throws Exception if export fails
+     */
+    public void exportChartImageToFile(File outputFile) throws Exception {
+        int width = chartPanel.getWidth();
+        int height = chartPanel.getHeight();
+        if (width <= 0 || height <= 0) {
+            width = 800;
+            height = 600;
+        }
+        
+        BufferedImage image = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
+        Graphics2D g2d = image.createGraphics();
+        chartPanel.print(g2d);
+        g2d.dispose();
+        
+        String fileName = outputFile.getName().toLowerCase();
+        if (fileName.endsWith(".png")) {
+            javax.imageio.ImageIO.write(image, "PNG", outputFile);
+        } else if (fileName.endsWith(".jpg") || fileName.endsWith(".jpeg")) {
+            javax.imageio.ImageIO.write(image, "JPEG", outputFile);
+        } else {
+            // Default to PNG
+            File pngFile = new File(outputFile.getParent(), 
+                outputFile.getName() + ".png");
+            javax.imageio.ImageIO.write(image, "PNG", pngFile);
+        }
+    }
+}
+

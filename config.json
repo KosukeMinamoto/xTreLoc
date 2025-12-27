@@ -1,0 +1,59 @@
+{
+    "logLevel": "INFO",
+    "numJobs": 4,
+    "stationFile": "./demo/station.tbl",
+    "taupFile": "prem",
+    "hypBottom": 40.0,
+    "threshold": 0.0,
+    "modes": {
+        "GRD": {
+            "datDirectory": "./demo/dat",
+            "outDirectory": "./demo/dat-grd"
+        },
+        "STD": {
+            "datDirectory": "./demo/dat",
+            "outDirectory": "./demo/dat-std"
+        },
+        "MCMC": {
+            "datDirectory": "./demo/dat",
+            "outDirectory": "./demo/dat-mcmc"
+        },
+        "TRD": {
+            "catalogFile": "./demo/dat-cls/catalog.csv",
+            "datDirectory": "./demo/dat-cls",
+            "outDirectory": "./demo/dat-trd"
+        },
+        "CLS": {
+            "catalogFile": "./demo/dat/catalog.csv",
+            "outDirectory": "./demo/dat-cls",
+            "minPts": 3,
+            "eps": 30.0
+        },
+        "SYN": {
+            "catalogFile": "./demo/catalog_ground_truth.csv",
+            "outDirectory": "./demo/dat",
+            "randomSeed": 200,
+            "phsErr": 0.15,
+            "locErr": 0.05,
+            "minSelectRate": 0.3,
+            "maxSelectRate": 0.5
+        }
+    },
+    "solver": {
+        "GRD": {
+            "totalGrids": 300,
+            "numFocus": 3
+        },
+        "MCMC": {
+            "nSamples": 1000,
+            "burnIn": 200,
+            "stepSize": 0.1,
+            "temperature": 1.0
+        },
+        "TRD": {
+            "iterNum": [10, 10],
+            "distKm": [50, 20],
+            "dampFact": [0, 1]
+        }
+    }
+}
