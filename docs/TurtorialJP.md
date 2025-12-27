@@ -46,14 +46,14 @@
 
 xTreLocは, 複数の震源決定手法をサポートする震源決定ソフトウェアである: 
 
-- **GRD**: フォーカスドランダムサーチにより, 走時差の残差を最小とするグリッドを返す. STDモードの前に実行されるべきである. 
-- **STD**: Station-pair Double Difference法を用いた個々のイベントについての震源決定. Fortranで書かれた`hypoEcc` (Ide, 2010; Ohta et al., 2019) のJavaへの移植版であるが, `delaz4.f`などの軽微なバグを修正済み. TRDモードの前に実行されるべきである. 
+- **GRD**: フォーカスドランダムサーチにより, 走時差の残差を最小とするグリッドを返す. 
+- **STD**: Station-pair Double Difference法を用いた個々のイベントについての震源決定. Fortranで書かれた`hypoEcc` (Ide, 2010; Ohta et al., 2019) のJavaへの移植版であるが, `delaz4.f`などの軽微なバグを修正済み.
 - **MCMC**: マルコフ連鎖モンテカルロ法による震源決定. 不確実性の推定を提供する. 
 - **TRD**: Guo & Zhang (2016) によるTriple Difference法を用いた相対震源再決定. 
 - **CLS**: 空間クラスタリングによって震源のネットワークを構成し, 走時差についてイベント間の差分を計算する. `hypoDD` (Waldhauser & Ellsworth, 2000) における`ph2dt`と同等の役割であり, TRDモードの前に実行する必要がある. 
 - **SYN**: 震源決定モード (GRD, MCMC, STD & TRD) に直接流せるシンセティックデータを作成する. 
 
-本ソフトウェアは2つのモードで使用できます: 
+本ソフトウェアは2つのモードで使用できる: 
 
 - **GUIモード**: 対話型グラフィカルユーザーインターフェース
 - **CLIモード**: バッチ処理用のコマンドラインインターフェース
@@ -74,7 +74,7 @@ xTreLocは, 複数の震源決定手法をサポートする震源決定ソフ�
 
 ```bash
 # リポジトリをクローン
-git clone <repository-url>
+git clone https://github.com/KosukeMinamoto/xTreLoc.git
 cd xTreLoc
 
 # GUI版をビルド

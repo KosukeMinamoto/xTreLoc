@@ -74,7 +74,7 @@ The software can be used in two modes:
 
 ```bash
 # Clone the repository
-git clone <repository-url>
+git clone https://github.com/KosukeMinamoto/xTreLoc.git
 cd xTreLoc
 
 # Build GUI version
