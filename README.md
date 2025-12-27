@@ -26,7 +26,6 @@ Multi-method hypocenter location software with GUI and CLI support for earthquak
 ### Build
 
 #### Using Gradle
-
 ```bash
 git clone <repository-url>
 cd xTreLoc
@@ -56,7 +55,6 @@ Built JAR files are in `target/`:
 **Build options:**
 - Build GUI version only: `mvn clean package -Pgui`
 - Build CLI version only: `mvn clean package -Pcli`
-
 ### Run
 
 **GUI Mode:**
