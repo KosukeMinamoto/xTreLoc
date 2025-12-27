@@ -114,3 +114,10 @@ If you use xTreLoc in your research, please cite:
 ## License
 
 See [LICENSE](LICENSE) file for details.
+
+## References
+
+- Ide, S. (2010). A method for calculating earthquake source parameters from waveform data for earthquake early warning. *Geophys. Res. Lett.*, 37, L07306.
+- Ohta, Y., et al. (2019). Development of a real-time system for automatically determining earthquake source parameters. *Earth Planets Space*, 71, 87.
+- Guo, H., & Zhang, H. (2016). A stable algorithm for relative earthquake relocation using the double-difference method. *Bull. Seismol. Soc. Am.*, 106(4), 1500-1510.
+- Waldhauser, F., & Ellsworth, W. L. (2000). A double-difference earthquake location algorithm: Method and application to the northern Hayward fault, California. *Bull. Seismol. Soc. Am.*, 90(6), 1353-1368.
