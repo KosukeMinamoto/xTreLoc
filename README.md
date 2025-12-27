@@ -102,11 +102,9 @@ java -jar build/libs/xTreLoc-CLI-1.0-SNAPSHOT.jar TRD config.json
 
 ## Demo
 
-Try the demo dataset in the `demo/` directory. See the [tutorial](docs/README.md#demo-dataset-tutorial) for detailed instructions.
+Try the demo dataset in the `demo/` directory. See the [tutorial](docs/Turtorial.md#demo-dataset-tutorial) for detailed instructions.
 
 ## Citation
-
-If you use xTreLoc in your research, please cite:
 
 1. Natural Earth: https://www.naturalearthdata.com/downloads/10m-physical-vectors/10m-coastline/
 2. The Geospatial Information Authority of Japan (GSI): https://www.gsi.go.jp/kankyochiri/gm_japan_e.html
