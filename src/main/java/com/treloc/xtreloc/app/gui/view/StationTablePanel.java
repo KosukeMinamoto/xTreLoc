@@ -14,9 +14,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Scanner;
 
-/**
- * 観測点データをExcel風のテーブルで表示するパネル
- */
 public class StationTablePanel extends JPanel {
     private JTable table;
     private DefaultTableModel tableModel;
@@ -28,10 +25,9 @@ public class StationTablePanel extends JPanel {
     public StationTablePanel(MapView mapView) {
         this.mapView = mapView;
         setLayout(new BorderLayout());
-        setBorder(BorderFactory.createTitledBorder("観測点データ"));
+        setBorder(BorderFactory.createTitledBorder("Station Data"));
 
-        // テーブルモデルの作成
-        String[] columnNames = {"コード", "緯度", "経度", "深度 (km)", "P波補正", "S波補正"};
+        String[] columnNames = {"Code", "Latitude", "Longitude", "Depth (km)", "P Correction", "S Correction"};
         tableModel = new DefaultTableModel(columnNames, 0) {
             @Override
             public boolean isCellEditable(int row, int column) {
@@ -108,12 +104,10 @@ public class StationTablePanel extends JPanel {
         scrollPane.setPreferredSize(new Dimension(500, 300));
         add(scrollPane, BorderLayout.CENTER);
 
-        // ステータスラベル
-        statusLabel = new JLabel("観測点データが読み込まれていません");
+        statusLabel = new JLabel("Station data not loaded");
         add(statusLabel, BorderLayout.SOUTH);
 
-        // ファイル選択ボタン
-        JButton selectButton = new JButton("観測点ファイルを選択");
+        JButton selectButton = new JButton("Select Station File");
         selectButton.addActionListener(e -> selectStationFile());
         
         JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
@@ -134,12 +128,9 @@ public class StationTablePanel extends JPanel {
         }
     }
 
-    /**
-     * 観測点ファイルを選択して読み込む
-     */
     private void selectStationFile() {
         JFileChooser fileChooser = new JFileChooser();
-        fileChooser.setDialogTitle("観測点ファイルを選択");
+        fileChooser.setDialogTitle("Select Station File");
         fileChooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter(
             "Station files (*.tbl)", "tbl"));
         fileChooser.setCurrentDirectory(new File(System.getProperty("user.dir")));
@@ -201,7 +192,7 @@ public class StationTablePanel extends JPanel {
                 tableModel.addRow(row);
             }
             
-            statusLabel.setText(String.format("観測点数: %d", stations.size()));
+            statusLabel.setText(String.format("Number of stations: %d", stations.size()));
             
             // マップにプロット
             if (mapView != null && stations != null && !stations.isEmpty()) {
@@ -209,16 +200,16 @@ public class StationTablePanel extends JPanel {
                     mapView.showStations(stations);
                 } catch (Exception ex) {
                     JOptionPane.showMessageDialog(this,
-                        "マップへの表示に失敗しました: " + ex.getMessage(),
-                        "警告", JOptionPane.WARNING_MESSAGE);
+                        "Failed to display on map: " + ex.getMessage(),
+                        "Warning", JOptionPane.WARNING_MESSAGE);
                 }
             }
             
         } catch (Exception e) {
             JOptionPane.showMessageDialog(this,
-                "観測点ファイルの読み込みに失敗しました: " + e.getMessage(),
-                "エラー", JOptionPane.ERROR_MESSAGE);
-            statusLabel.setText("読み込みエラー: " + e.getMessage());
+                "Failed to load station file: " + e.getMessage(),
+                "Error", JOptionPane.ERROR_MESSAGE);
+            statusLabel.setText("Load error: " + e.getMessage());
         }
     }
 

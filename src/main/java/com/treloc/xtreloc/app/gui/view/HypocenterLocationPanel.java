@@ -380,14 +380,14 @@ public class HypocenterLocationPanel extends JPanel {
         });
         selectCatalogButton = new JButton();
         try {
-            Icon folderIcon = UIManager.getIcon("FileView.directoryIcon");
-            if (folderIcon != null) {
-                selectCatalogButton.setIcon(folderIcon);
+            Icon fileIcon = UIManager.getIcon("FileView.fileIcon");
+            if (fileIcon != null) {
+                selectCatalogButton.setIcon(fileIcon);
             } else {
-                selectCatalogButton.setText("📁");
+                selectCatalogButton.setText("📄");
             }
         } catch (Exception e) {
-            selectCatalogButton.setText("📁");
+            selectCatalogButton.setText("📄");
         }
         selectCatalogButton.setToolTipText("Select catalog file");
         selectCatalogButton.setBackground(new Color(70, 130, 180));
@@ -416,14 +416,14 @@ public class HypocenterLocationPanel extends JPanel {
         });
         selectStationButton = new JButton();
         try {
-            Icon folderIcon = UIManager.getIcon("FileView.directoryIcon");
-            if (folderIcon != null) {
-                selectStationButton.setIcon(folderIcon);
+            Icon fileIcon = UIManager.getIcon("FileView.fileIcon");
+            if (fileIcon != null) {
+                selectStationButton.setIcon(fileIcon);
             } else {
-                selectStationButton.setText("📁");
+                selectStationButton.setText("📄");
             }
         } catch (Exception e) {
-            selectStationButton.setText("📁");
+            selectStationButton.setText("📄");
         }
         selectStationButton.setToolTipText("Select station file");
         selectStationButton.setBackground(new Color(70, 130, 180));
@@ -567,12 +567,11 @@ public class HypocenterLocationPanel extends JPanel {
     }
     
     private void selectOutputDirectory() {
-        fileChooser.setDialogTitle("Select Output Directory");
-        fileChooser.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
-        int result = fileChooser.showOpenDialog(this);
+        File selectedDir = com.treloc.xtreloc.app.gui.util.DirectoryChooserHelper.selectDirectory(
+            this, "Select Output Directory");
         
-        if (result == JFileChooser.APPROVE_OPTION) {
-            selectedOutputDir = fileChooser.getSelectedFile();
+        if (selectedDir != null) {
+            selectedOutputDir = selectedDir;
             outputDirField.setText(selectedOutputDir.getAbsolutePath());
             
             File catalogFile = new File(selectedOutputDir, "catalog.csv");
@@ -762,12 +761,11 @@ public class HypocenterLocationPanel extends JPanel {
     }
     
     private void selectTargetDirectory() {
-        fileChooser.setDialogTitle("Select Target Directory");
-        fileChooser.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
-        int result = fileChooser.showOpenDialog(this);
+        File selectedDir = com.treloc.xtreloc.app.gui.util.DirectoryChooserHelper.selectDirectory(
+            this, "Select Target Directory");
         
-        if (result == JFileChooser.APPROVE_OPTION) {
-            selectedTargetDir = fileChooser.getSelectedFile();
+        if (selectedDir != null) {
+            selectedTargetDir = selectedDir;
             targetDirField.setText(selectedTargetDir.getAbsolutePath());
             updateExecuteButtonState();
             appendLog("Target directory selected: " + selectedTargetDir.getAbsolutePath());
@@ -1793,8 +1791,8 @@ public class HypocenterLocationPanel extends JPanel {
         File catalogFile = getCatalogFileFromField();
         if (catalogFile == null || !catalogFile.exists()) {
             JOptionPane.showMessageDialog(this,
-                "カタログファイルを選択してください",
-                "エラー", JOptionPane.ERROR_MESSAGE);
+                "Please select a catalog file",
+                "Error", JOptionPane.ERROR_MESSAGE);
             return;
         }
         
@@ -2009,8 +2007,8 @@ public class HypocenterLocationPanel extends JPanel {
         File catalogFile = getCatalogFileFromField();
         if (catalogFile == null || !catalogFile.exists()) {
             JOptionPane.showMessageDialog(this,
-                "カタログファイルを選択してください",
-                "エラー", JOptionPane.ERROR_MESSAGE);
+                "Please select a catalog file",
+                "Error", JOptionPane.ERROR_MESSAGE);
             return;
         }
         
@@ -2208,8 +2206,8 @@ public class HypocenterLocationPanel extends JPanel {
     private void cancelExecution() {
         if (currentWorker != null && !currentWorker.isDone()) {
             int result = JOptionPane.showConfirmDialog(this,
-                "実行を中断しますか？\n中断後、処理済みのデータからカタログを出力します。",
-                "中断確認",
+                "Do you want to cancel execution?\nAfter cancellation, catalog will be exported from processed data.",
+                "Cancel Confirmation",
                 JOptionPane.YES_NO_OPTION,
                 JOptionPane.QUESTION_MESSAGE);
             if (result == JOptionPane.YES_OPTION) {

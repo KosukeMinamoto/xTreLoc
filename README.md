@@ -27,7 +27,7 @@ Multi-method hypocenter location software with GUI and CLI support for earthquak
 
 #### Using Gradle
 ```bash
-git clone <repository-url>
+git clone https://github.com/KosukeMinamoto/xTreLoc.git
 cd xTreLoc
 
 # Build both GUI and CLI versions
@@ -41,7 +41,7 @@ Built JAR files are in `build/libs/`:
 #### Using Maven
 
 ```bash
-git clone <repository-url>
+git clone https://github.com/KosukeMinamoto/xTreLoc.git
 cd xTreLoc
 
 # Build both GUI and CLI versions
@@ -76,6 +76,49 @@ java -jar target/xTreLoc-CLI-1.0-SNAPSHOT.jar <MODE> config.json
 ```
 
 Available modes: `GRD`, `STD`, `MCMC`, `TRD`, `CLS`, `SYN`
+
+## Creating Native Applications
+
+### macOS (.app Bundle)
+
+macOS用のネイティブアプリケーション（`.app`バンドル）を作成できます。
+
+**前提条件:**
+- JDK 14以上（jpackageツールが含まれています）
+- macOS上で実行
+
+**手順:**
+
+1. **JARファイルをビルド:**
+```bash
+./gradlew jar
+```
+
+2. **.appバンドルを作成:**
+```bash
+./gradlew createApp
+```
+
+作成されたアプリケーションは `build/dist/xTreLoc.app` に配置されます。
+このアプリケーションは、Finderから直接起動できます。
+
+3. **DMGインストーラーを作成（オプション）:**
+```bash
+./gradlew createDmg
+```
+
+DMGファイルは `build/dist/xTreLoc-1.0-SNAPSHOT.dmg` に作成されます。
+このDMGファイルを配布することで、ユーザーは簡単にアプリケーションをインストールできます。
+
+**注意事項:**
+- 初回起動時、macOSのセキュリティ設定により警告が表示される場合があります
+- 警告を回避するには、アプリケーションにコード署名を追加する必要があります
+- コード署名には、Apple Developerアカウントが必要です
+
+### Windows/Linux
+
+WindowsやLinux用のネイティブアプリケーションも、jpackageを使用して作成できます。
+詳細は、[jpackage公式ドキュメント](https://docs.oracle.com/en/java/javase/14/docs/specs/man/jpackage.html)を参照してください。
 
 ## Example Workflow
 

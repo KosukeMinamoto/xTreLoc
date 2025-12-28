@@ -139,15 +139,12 @@ public class ControlPanel extends JPanel {
         }
         
         // 入力ディレクトリ選択（走時差データ）
-        fileChooser.setDialogTitle("Select Directory for Travel Time Difference Data");
-        fileChooser.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
-        int result = fileChooser.showOpenDialog(this);
+        File inputDir = com.treloc.xtreloc.app.gui.util.DirectoryChooserHelper.selectDirectory(
+            this, "Select Directory for Travel Time Difference Data");
         
-        if (result != JFileChooser.APPROVE_OPTION) {
+        if (inputDir == null) {
             return;
         }
-        
-        File inputDir = fileChooser.getSelectedFile();
         
         // ディレクトリ内の全ての.datファイルを取得
         java.util.List<File> datFiles = findDatFiles(inputDir);
@@ -159,15 +156,12 @@ public class ControlPanel extends JPanel {
         }
         
         // 出力ディレクトリ選択
-        fileChooser.setDialogTitle("Select Output Directory");
-        fileChooser.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
-        result = fileChooser.showOpenDialog(this);
+        File outputDir = com.treloc.xtreloc.app.gui.util.DirectoryChooserHelper.selectDirectory(
+            this, "Select Output Directory");
         
-        if (result != JFileChooser.APPROVE_OPTION) {
+        if (outputDir == null) {
             return;
         }
-        
-        File outputDir = fileChooser.getSelectedFile();
         
         // 実行
         SwingWorker<Void, String> worker = new SwingWorker<Void, String>() {

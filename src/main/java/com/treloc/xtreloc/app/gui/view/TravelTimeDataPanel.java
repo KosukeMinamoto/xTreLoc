@@ -45,7 +45,7 @@ public class TravelTimeDataPanel extends JPanel {
         tableModel.setRowCount(0);
         
         if (lagTable == null || codeStrings == null) {
-            titleLabel.setText("データがありません");
+            titleLabel.setText("No data available");
             return;
         }
         

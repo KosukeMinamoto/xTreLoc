@@ -126,4 +126,61 @@ public class StyleFactory {
             2.0f); // Thicker line
         return sb.createStyle(sb.createLineSymbolizer(stroke));
     }
+    
+    /**
+     * シンボルタイプと色に基づいてスタイルを作成
+     */
+    public static Style createSymbolStyle(com.treloc.xtreloc.app.gui.model.CatalogInfo.SymbolType symbolType, Color color, int size) {
+        StyleBuilder sb = new StyleBuilder();
+        Mark mark;
+        
+        switch (symbolType) {
+            case CIRCLE:
+                mark = sb.createMark(StyleBuilder.MARK_CIRCLE,
+                        sb.createFill(color),
+                        sb.createStroke(Color.BLACK, 1));
+                break;
+            case SQUARE:
+                mark = sb.createMark(StyleBuilder.MARK_SQUARE,
+                        sb.createFill(color),
+                        sb.createStroke(Color.BLACK, 1));
+                break;
+            case TRIANGLE:
+                mark = sb.createMark(StyleBuilder.MARK_TRIANGLE,
+                        sb.createFill(color),
+                        sb.createStroke(Color.BLACK, 1));
+                break;
+            case DIAMOND:
+                mark = sb.createMark(StyleBuilder.MARK_STAR,
+                        sb.createFill(color),
+                        sb.createStroke(Color.BLACK, 1));
+                break;
+            case CROSS:
+                mark = sb.createMark(StyleBuilder.MARK_CROSS,
+                        sb.createFill(color),
+                        sb.createStroke(Color.BLACK, 2));
+                break;
+            case STAR:
+                mark = sb.createMark(StyleBuilder.MARK_STAR,
+                        sb.createFill(color),
+                        sb.createStroke(Color.BLACK, 1));
+                break;
+            default:
+                mark = sb.createMark(StyleBuilder.MARK_CIRCLE,
+                        sb.createFill(color),
+                        sb.createStroke(Color.BLACK, 1));
+        }
+        
+        Graphic graphic = sb.createGraphic(null, new Mark[] { mark }, null, 1, size, 0);
+        return sb.createStyle(sb.createPointSymbolizer(graphic));
+    }
+    
+    /**
+     * 接続線用のスタイルを作成
+     */
+    public static Style createConnectionLineStyle(Color color, float width) {
+        StyleBuilder sb = new StyleBuilder();
+        org.geotools.api.style.Stroke stroke = sb.createStroke(color, width);
+        return sb.createStyle(sb.createLineSymbolizer(stroke));
+    }
 }

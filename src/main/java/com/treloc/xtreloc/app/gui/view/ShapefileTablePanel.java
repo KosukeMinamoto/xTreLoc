@@ -12,27 +12,25 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-/**
- * ShapefileデータをExcel風のテーブルで表示するパネル
- * 複数のshapefileを読み込み、チェックボックスで表示/非表示を切り替え可能
- */
 public class ShapefileTablePanel extends JPanel {
     private JTable table;
     private DefaultTableModel tableModel;
+    private JTable dataTable;
+    private DefaultTableModel dataTableModel;
     private JLabel statusLabel;
     private MapView mapView;
     private MapController mapController;
     private List<File> shapefiles = new ArrayList<>();
-    private Map<File, String> shapefileLayerTitles = new HashMap<>(); // File -> Layer Title
+    private Map<File, String> shapefileLayerTitles = new HashMap<>();
+    private Map<File, org.geotools.api.data.FeatureSource> shapefileFeatureSources = new HashMap<>();
 
     public ShapefileTablePanel(MapView mapView, MapController mapController) {
         this.mapView = mapView;
         this.mapController = mapController;
         setLayout(new BorderLayout());
-        setBorder(BorderFactory.createTitledBorder("Shapefileデータ"));
+        setBorder(BorderFactory.createTitledBorder("Shapefile Data"));
 
-        // テーブルモデルの作成（チェックボックス、ファイル名、状態）
-        String[] columnNames = {"表示", "ファイル名", "状態"};
+        String[] columnNames = {"Visible", "File Name", "Status"};
         tableModel = new DefaultTableModel(columnNames, 0) {
             @Override
             public boolean isCellEditable(int row, int column) {
@@ -72,37 +70,65 @@ public class ShapefileTablePanel extends JPanel {
             }
         });
         
-        // スクロールペインに追加
-        JScrollPane scrollPane = new JScrollPane(table);
-        scrollPane.setPreferredSize(new Dimension(500, 300));
-        add(scrollPane, BorderLayout.CENTER);
+        // 上下に分割
+        JSplitPane splitPane = new JSplitPane(JSplitPane.VERTICAL_SPLIT);
+        splitPane.setResizeWeight(0.3);
+        
+        // 上部：Shapefileリストテーブル
+        JScrollPane listScrollPane = new JScrollPane(table);
+        listScrollPane.setPreferredSize(new Dimension(500, 150));
+        splitPane.setTopComponent(listScrollPane);
+        
+        // 下部：Shapefile属性データテーブル
+        dataTableModel = new DefaultTableModel(new String[]{"Attribute", "Value"}, 0) {
+            @Override
+            public boolean isCellEditable(int row, int column) {
+                return false;
+            }
+        };
+        dataTable = new JTable(dataTableModel);
+        dataTable.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+        dataTable.setAutoResizeMode(JTable.AUTO_RESIZE_ALL_COLUMNS);
+        dataTable.setFillsViewportHeight(true);
+        dataTable.setRowHeight(20);
+        dataTable.getTableHeader().setReorderingAllowed(false);
+        
+        JScrollPane dataScrollPane = new JScrollPane(dataTable);
+        dataScrollPane.setPreferredSize(new Dimension(500, 300));
+        splitPane.setBottomComponent(dataScrollPane);
+        
+        add(splitPane, BorderLayout.CENTER);
 
-        // ステータスラベル
-        statusLabel = new JLabel("Shapefileが読み込まれていません");
+        statusLabel = new JLabel("No shapefile loaded");
         add(statusLabel, BorderLayout.SOUTH);
+        
+        // 行選択イベント（Shapefileを選択すると属性データを表示）
+        table.getSelectionModel().addListSelectionListener(e -> {
+            if (!e.getValueIsAdjusting()) {
+                int selectedRow = table.getSelectedRow();
+                if (selectedRow >= 0 && selectedRow < shapefiles.size()) {
+                    File selectedShapefile = shapefiles.get(selectedRow);
+                    displayShapefileData(selectedShapefile);
+                }
+            }
+        });
 
-        // ボタンパネル
         JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
         
-        // ファイル追加ボタン
-        JButton addButton = new JButton("Shapefileを追加");
+        JButton addButton = new JButton("Add Shapefile");
         addButton.addActionListener(e -> selectShapefile());
         buttonPanel.add(addButton);
         
-        // 削除ボタン
-        JButton removeButton = new JButton("選択を削除");
+        JButton removeButton = new JButton("Remove Selected");
         removeButton.addActionListener(e -> removeSelectedShapefile());
         buttonPanel.add(removeButton);
         
         add(buttonPanel, BorderLayout.NORTH);
     }
 
-    /**
-     * Shapefileを選択して読み込む
-     */
     private void selectShapefile() {
         JFileChooser fileChooser = new JFileChooser();
-        fileChooser.setDialogTitle("Shapefileを選択");
+        fileChooser.setDialogTitle("Select Shapefile");
         fileChooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter(
             "Shapefile (*.shp)", "shp"));
         fileChooser.setCurrentDirectory(new File(System.getProperty("user.dir")));
@@ -114,81 +140,142 @@ public class ShapefileTablePanel extends JPanel {
         }
     }
 
-    /**
-     * Shapefileを読み込む（複数対応）
-     */
     public void loadShapefile(File file) {
         try {
-            // 既に読み込まれているかチェック
             if (shapefiles.contains(file)) {
                 JOptionPane.showMessageDialog(this,
-                    "このShapefileは既に読み込まれています: " + file.getName(),
-                    "情報", JOptionPane.INFORMATION_MESSAGE);
+                    "This shapefile is already loaded: " + file.getName(),
+                    "Information", JOptionPane.INFORMATION_MESSAGE);
                 return;
             }
             
-            // マップにプロット
             if (mapView != null && mapController != null) {
                 try {
+                    // FeatureSourceを取得して保存
+                    var store = org.geotools.api.data.FileDataStoreFinder.getDataStore(file);
+                    org.geotools.api.data.FeatureSource featureSource = store.getFeatureSource();
+                    
                     String layerTitle = mapController.loadShapefile(file);
                     shapefiles.add(file);
                     shapefileLayerTitles.put(file, layerTitle);
+                    shapefileFeatureSources.put(file, featureSource);
                     
-                    // テーブルに行を追加（チェックボックスはデフォルトでON）
                     Object[] row = {
-                        true, // 表示
+                        true,
                         file.getName(),
-                        "読み込み済み"
+                        "Loaded"
                     };
                     tableModel.addRow(row);
                     
-                    statusLabel.setText(String.format("Shapefile: %d件読み込み済み", shapefiles.size()));
+                    statusLabel.setText(String.format("Shapefile: %d loaded", shapefiles.size()));
+                    
+                    // 最初のShapefileを選択状態にする
+                    if (shapefiles.size() == 1) {
+                        table.setRowSelectionInterval(0, 0);
+                        displayShapefileData(file);
+                    }
                 } catch (Exception ex) {
                     JOptionPane.showMessageDialog(this,
-                        "マップへの表示に失敗しました: " + ex.getMessage(),
-                        "警告", JOptionPane.WARNING_MESSAGE);
+                        "Failed to display on map: " + ex.getMessage(),
+                        "Warning", JOptionPane.WARNING_MESSAGE);
                 }
             }
             
         } catch (Exception e) {
             JOptionPane.showMessageDialog(this,
-                "Shapefileの読み込みに失敗しました: " + e.getMessage(),
-                "エラー", JOptionPane.ERROR_MESSAGE);
-            statusLabel.setText("読み込みエラー: " + e.getMessage());
+                "Failed to load shapefile: " + e.getMessage(),
+                "Error", JOptionPane.ERROR_MESSAGE);
+            statusLabel.setText("Load error: " + e.getMessage());
         }
     }
     
     /**
-     * 選択されたShapefileを削除
+     * 選択されたShapefileの属性データを表示
      */
+    private void displayShapefileData(File shapefile) {
+        if (shapefile == null) {
+            dataTableModel.setRowCount(0);
+            return;
+        }
+        
+        org.geotools.api.data.FeatureSource featureSource = shapefileFeatureSources.get(shapefile);
+        if (featureSource == null) {
+            dataTableModel.setRowCount(0);
+            return;
+        }
+        
+        try {
+            dataTableModel.setRowCount(0);
+            
+            // FeatureTypeの属性情報を取得
+            org.geotools.api.feature.type.FeatureType featureType = featureSource.getSchema();
+            java.util.Collection<org.geotools.api.feature.type.PropertyDescriptor> descriptorsCollection = featureType.getDescriptors();
+            java.util.List<org.geotools.api.feature.type.PropertyDescriptor> descriptors = new java.util.ArrayList<>(descriptorsCollection);
+            
+            // 最初のFeatureを取得して属性値を表示
+            // FeatureSourceからFeatureCollectionを取得
+            org.geotools.api.data.Query query = org.geotools.api.data.Query.ALL;
+            var features = featureSource.getFeatures(query);
+            
+            // FeatureIteratorを使用してFeatureを取得
+            try (var featureIterator = features.features()) {
+                if (featureIterator.hasNext()) {
+                    var firstFeature = featureIterator.next();
+                    
+                    // 各属性を表示
+                    for (org.geotools.api.feature.type.PropertyDescriptor descriptor : descriptors) {
+                        String name = descriptor.getName().toString();
+                        var property = firstFeature.getProperty(name);
+                        Object value = property != null ? property.getValue() : null;
+                        String valueStr = value != null ? value.toString() : "";
+                        
+                        dataTableModel.addRow(new Object[]{name, valueStr});
+                    }
+                } else {
+                    // Featureがない場合、属性名のみ表示
+                    for (org.geotools.api.feature.type.PropertyDescriptor descriptor : descriptors) {
+                        String name = descriptor.getName().toString();
+                        dataTableModel.addRow(new Object[]{name, ""});
+                    }
+                }
+            }
+            
+        } catch (Exception e) {
+            JOptionPane.showMessageDialog(this,
+                "Failed to load shapefile attributes: " + e.getMessage(),
+                "Error", JOptionPane.ERROR_MESSAGE);
+            dataTableModel.setRowCount(0);
+        }
+    }
+    
     private void removeSelectedShapefile() {
         int selectedRow = table.getSelectedRow();
         if (selectedRow < 0 || selectedRow >= shapefiles.size()) {
             JOptionPane.showMessageDialog(this,
-                "削除するShapefileを選択してください",
-                "情報", JOptionPane.INFORMATION_MESSAGE);
+                "Please select a shapefile to remove",
+                "Information", JOptionPane.INFORMATION_MESSAGE);
             return;
         }
         
         File fileToRemove = shapefiles.get(selectedRow);
         String layerTitle = shapefileLayerTitles.get(fileToRemove);
         
-        // マップからレイヤーを削除
         if (mapView != null && layerTitle != null) {
             mapView.removeShapefileLayer(layerTitle);
         }
         
-        // リストから削除
         shapefiles.remove(selectedRow);
         shapefileLayerTitles.remove(fileToRemove);
+        shapefileFeatureSources.remove(fileToRemove);
         tableModel.removeRow(selectedRow);
         
-        statusLabel.setText(String.format("Shapefile: %d件読み込み済み", shapefiles.size()));
+        if (shapefiles.isEmpty()) {
+            dataTableModel.setRowCount(0);
+        }
+        
+        statusLabel.setText(String.format("Shapefile: %d loaded", shapefiles.size()));
     }
     
-    /**
-     * Shapefileの表示/非表示を切り替え
-     */
     private void toggleShapefileVisibility(File file, boolean visible) {
         String layerTitle = shapefileLayerTitles.get(file);
         if (layerTitle != null && mapView != null) {

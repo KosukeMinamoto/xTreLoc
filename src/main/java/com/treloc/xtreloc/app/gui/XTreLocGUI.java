@@ -13,8 +13,6 @@ import org.geotools.swing.JMapFrame;
 public class XTreLocGUI {
 
     public static void main(String[] args) throws Exception {
-        // GUIモードではロゴAAは表示しない
-        
         try {
             File logFile = com.treloc.xtreloc.app.gui.util.LogHistoryManager.getLogFile();
             com.treloc.xtreloc.util.LogInitializer.setup(
@@ -31,8 +29,6 @@ public class XTreLocGUI {
             System.err.println("Failed to initialize logging: " + e.getMessage());
         }
         
-        // GUIモードではログ履歴はGUIのログパネルに表示（後で追加）
-
         SwingUtilities.invokeLater(() -> {
             try {
                 JFrame mainFrame = new JFrame("xTreLoc");
@@ -55,6 +51,8 @@ public class XTreLocGUI {
                 com.treloc.xtreloc.app.gui.util.AppSettings appSettings = 
                     com.treloc.xtreloc.app.gui.util.AppSettings.load();
                 applyAppSettings(appSettings, mainFrame, view);
+                
+                checkForUpdatesAsync(appSettings, mainFrame);
                 
                 com.treloc.xtreloc.io.AppConfig config = null;
                 try {
@@ -201,13 +199,12 @@ public class XTreLocGUI {
      */
     private static JPanel createHistogramPanel(com.treloc.xtreloc.app.gui.view.CatalogTablePanel catalogPanel) {
         JPanel histogramPanelWrapper = new JPanel(new BorderLayout());
-        histogramPanelWrapper.setBorder(javax.swing.BorderFactory.createTitledBorder("ヒストグラム"));
+        histogramPanelWrapper.setBorder(javax.swing.BorderFactory.createTitledBorder("Histogram"));
         
-        // 列選択チェックボックスパネル
         JPanel columnSelectionPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
-        columnSelectionPanel.setBorder(javax.swing.BorderFactory.createTitledBorder("表示する列を選択（複数選択可）"));
+        columnSelectionPanel.setBorder(javax.swing.BorderFactory.createTitledBorder("Select Columns to Display (Multiple Selection)"));
         
-        String[] columnNames = {"緯度", "経度", "深度 (km)", "xerr (km)", "yerr (km)", "zerr (km)", "rms"};
+        String[] columnNames = {"Latitude", "Longitude", "Depth (km)", "xerr (km)", "yerr (km)", "zerr (km)", "rms"};
         java.util.List<JCheckBox> columnCheckBoxes = new java.util.ArrayList<>();
         
         for (String columnName : columnNames) {
@@ -251,7 +248,7 @@ public class XTreLocGUI {
                 g.setColor(Color.BLACK);
                 g.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 14));
                 FontMetrics fm = g.getFontMetrics();
-                String message = "データがありません";
+                String message = "No data available";
                 int x = (g.getClipBounds().width - fm.stringWidth(message)) / 2;
                 int y = g.getClipBounds().height / 2;
                 g.drawString(message, x, y);
@@ -271,7 +268,7 @@ public class XTreLocGUI {
                 g.setColor(Color.BLACK);
                 g.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 14));
                 FontMetrics fm = g.getFontMetrics();
-                String message = "表示する列を選択してください";
+                String message = "Please select columns to display";
                 int x = (g.getClipBounds().width - fm.stringWidth(message)) / 2;
                 int y = g.getClipBounds().height / 2;
                 g.drawString(message, x, y);
@@ -414,7 +411,7 @@ public class XTreLocGUI {
                     title.append(columnNames[checkBoxIndex]);
                 }
             }
-            title.append(" のヒストグラム");
+            title.append(" Histogram");
             
             g.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 12));
             int titleWidth = fm.stringWidth(title.toString());
@@ -453,25 +450,25 @@ public class XTreLocGUI {
             double value = 0.0;
             // CatalogTablePanelの列インデックス: 0=行, 1=時刻, 2=緯度, 3=経度, 4=深度, 5=xerr, 6=yerr, 7=zerr, 8=rms
             switch (columnIndex) {
-                case 2: // 緯度
+                case 2:
                     value = h.lat;
                     break;
-                case 3: // 経度
+                case 3:
                     value = h.lon;
                     break;
-                case 4: // 深度
+                case 4:
                     value = h.depth;
                     break;
-                case 5: // xerr
+                case 5:
                     value = h.xerr;
                     break;
-                case 6: // yerr
+                case 6:
                     value = h.yerr;
                     break;
-                case 7: // zerr
+                case 7:
                     value = h.zerr;
                     break;
-                case 8: // rms
+                case 8:
                     value = h.rms;
                     break;
                 default:
@@ -487,16 +484,15 @@ public class XTreLocGUI {
      */
     private static JPanel createScatterPanel(com.treloc.xtreloc.app.gui.view.ReportPanel reportPanel) {
         JPanel scatterPanel = new JPanel(new BorderLayout());
-        scatterPanel.setBorder(javax.swing.BorderFactory.createTitledBorder("散布図"));
+        scatterPanel.setBorder(javax.swing.BorderFactory.createTitledBorder("Scatter Plot"));
         
-        // X軸とY軸の選択コンボボックス
         JPanel controlPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
-        controlPanel.add(new JLabel("X軸:"));
-        JComboBox<String> xAxisCombo = new JComboBox<>(new String[]{"緯度", "経度", "深度 (km)", "xerr (km)", "yerr (km)", "zerr (km)", "rms"});
+        controlPanel.add(new JLabel("X-axis:"));
+        JComboBox<String> xAxisCombo = new JComboBox<>(new String[]{"Latitude", "Longitude", "Depth (km)", "xerr (km)", "yerr (km)", "zerr (km)", "rms"});
         controlPanel.add(xAxisCombo);
-        controlPanel.add(new JLabel("Y軸:"));
-        JComboBox<String> yAxisCombo = new JComboBox<>(new String[]{"緯度", "経度", "深度 (km)", "xerr (km)", "yerr (km)", "zerr (km)", "rms"});
-        yAxisCombo.setSelectedIndex(2); // デフォルトで深度
+        controlPanel.add(new JLabel("Y-axis:"));
+        JComboBox<String> yAxisCombo = new JComboBox<>(new String[]{"Latitude", "Longitude", "Depth (km)", "xerr (km)", "yerr (km)", "zerr (km)", "rms"});
+        yAxisCombo.setSelectedIndex(2);
         controlPanel.add(yAxisCombo);
         
         // 散布図描画パネル
@@ -512,8 +508,7 @@ public class XTreLocGUI {
         plotPanel.setPreferredSize(new Dimension(500, 400));
         plotPanel.setBackground(Color.WHITE);
         
-        // 更新ボタン
-        JButton updateButton = new JButton("更新");
+        JButton updateButton = new JButton("Update");
         updateButton.addActionListener(e -> plotPanel.repaint());
         controlPanel.add(updateButton);
         
@@ -544,7 +539,7 @@ public class XTreLocGUI {
                 g.setColor(Color.BLACK);
                 g.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 14));
                 FontMetrics fm = g.getFontMetrics();
-                String message = "データがありません";
+                String message = "No data available";
                 int x = (g.getClipBounds().width - fm.stringWidth(message)) / 2;
                 int y = g.getClipBounds().height / 2;
                 g.drawString(message, x, y);
@@ -646,11 +641,11 @@ public class XTreLocGUI {
      */
     private static double getValueForColumn(com.treloc.xtreloc.app.gui.model.Hypocenter h, String columnName) {
         switch (columnName) {
-            case "緯度":
+            case "Latitude":
                 return h.lat;
-            case "経度":
+            case "Longitude":
                 return h.lon;
-            case "深度 (km)":
+            case "Depth (km)":
                 return h.depth;
             case "xerr (km)":
                 return h.xerr;
@@ -813,6 +808,44 @@ public class XTreLocGUI {
                 System.out.println("Selected file: " + selectedFile.getName());
             }
         }
+    }
+    
+    private static void checkForUpdatesAsync(
+            com.treloc.xtreloc.app.gui.util.AppSettings appSettings, 
+            JFrame mainFrame) {
+        
+        if (!appSettings.isAutoUpdateEnabled()) {
+            return;
+        }
+        
+        long currentTime = System.currentTimeMillis();
+        long lastCheck = appSettings.getLastUpdateCheck();
+        long oneDayInMillis = 24 * 60 * 60 * 1000;
+        
+        if (currentTime - lastCheck < oneDayInMillis) {
+            return;
+        }
+        
+        new Thread(() -> {
+            try {
+                com.treloc.xtreloc.app.gui.util.UpdateInfo updateInfo = 
+                    com.treloc.xtreloc.app.gui.service.UpdateChecker.checkForUpdates();
+                
+                appSettings.setLastUpdateCheck(System.currentTimeMillis());
+                appSettings.save();
+                
+                if (updateInfo != null && updateInfo.isUpdateAvailable()) {
+                    SwingUtilities.invokeLater(() -> {
+                        com.treloc.xtreloc.app.gui.view.UpdateDialog dialog = 
+                            new com.treloc.xtreloc.app.gui.view.UpdateDialog(mainFrame, updateInfo);
+                        dialog.setVisible(true);
+                    });
+                }
+            } catch (Exception e) {
+                java.util.logging.Logger.getLogger("com.treloc.xtreloc")
+                    .warning("Error during update check: " + e.getMessage());
+            }
+        }).start();
     }
 }
 

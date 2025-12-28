@@ -17,9 +17,6 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
-/**
- * レポート生成パネル
- */
 public class ReportPanel extends JPanel {
     private JPanel histogramPanel;
     private JButton loadCatalogButton;
@@ -27,7 +24,7 @@ public class ReportPanel extends JPanel {
     private JButton exportCatalogButton;
     private JButton exportHistogramButton;
     private List<Hypocenter> hypocenters;
-    private String[] columnNames = {"時刻", "緯度", "経度", "深度 (km)", "xerr (km)", "yerr (km)", "zerr (km)", "rms", "クラスタ番号"};
+    private String[] columnNames = {"Time", "Latitude", "Longitude", "Depth (km)", "xerr (km)", "yerr (km)", "zerr (km)", "rms", "Cluster ID"};
     private java.util.Set<Integer> selectedColumns = new java.util.HashSet<>();
     private JTable catalogTable;
     private javax.swing.table.DefaultTableModel catalogTableModel;
@@ -60,15 +57,13 @@ public class ReportPanel extends JPanel {
     
     private void initComponents() {
         setLayout(new BorderLayout());
-        setBorder(new TitledBorder("レポート生成"));
+        setBorder(new TitledBorder("Report Generation"));
         
-        // 上部パネル: カタログ読み込みと出力
         JPanel topPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
-        loadCatalogButton = new JButton("カタログファイルを読み込み");
+        loadCatalogButton = new JButton("Load Catalog File");
         loadCatalogButton.addActionListener(e -> loadCatalogFile());
         topPanel.add(loadCatalogButton);
         
-        // フォルダアイコンを左側に配置
         JButton selectDirButton = new JButton();
         try {
             Icon folderIcon = UIManager.getIcon("FileView.directoryIcon");
@@ -80,43 +75,40 @@ public class ReportPanel extends JPanel {
         } catch (Exception e) {
             selectDirButton.setText("📁");
         }
-        selectDirButton.setToolTipText("ディレクトリから.datファイルを走査してカタログを生成");
+        selectDirButton.setToolTipText("Scan directory for .dat files and generate catalog");
         selectDirButton.addActionListener(e -> generateCatalogFromDirectory());
         topPanel.add(selectDirButton);
         
-        exportCatalogButton = new JButton("カタログをCSV出力");
+        exportCatalogButton = new JButton("Export Catalog to CSV");
         exportCatalogButton.setEnabled(false);
         exportCatalogButton.addActionListener(e -> exportCatalog());
         topPanel.add(exportCatalogButton);
         
-        exportReportButton = new JButton("レポートを出力");
+        exportReportButton = new JButton("Export Report");
         exportReportButton.setEnabled(false);
         exportReportButton.addActionListener(e -> exportReport());
         topPanel.add(exportReportButton);
         
-        exportHistogramButton = new JButton("ヒストグラム画像出力");
+        exportHistogramButton = new JButton("Export Histogram Image");
         exportHistogramButton.setEnabled(false);
         exportHistogramButton.addActionListener(e -> exportHistogramImage());
         topPanel.add(exportHistogramButton);
         
         add(topPanel, BorderLayout.NORTH);
         
-        // 中央パネル: 左側にExcelテーブル、右側にヒストグラム
         JSplitPane centerSplit = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT);
         
-        // 左パネル: Excelテーブル（CatalogTablePanelと同じ形式）
         JPanel leftPanel = new JPanel(new BorderLayout());
         
-        // カタログテーブルを作成
         catalogTableModel = new javax.swing.table.DefaultTableModel(columnNames, 0) {
             @Override
             public boolean isCellEditable(int row, int column) {
-                return false; // 読み取り専用
+                return false;
             }
         };
         catalogTable = new JTable(catalogTableModel);
         catalogTable.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
-        catalogTable.setColumnSelectionAllowed(true); // 列選択を有効化
+        catalogTable.setColumnSelectionAllowed(true);
         catalogTable.setCellSelectionEnabled(true); // セル選択を有効化
         catalogTable.setAutoResizeMode(JTable.AUTO_RESIZE_ALL_COLUMNS);
         catalogTable.setFillsViewportHeight(true);
@@ -194,7 +186,7 @@ public class ReportPanel extends JPanel {
         histogramPanel.setPreferredSize(new Dimension(500, 400));
         histogramPanel.setBackground(Color.WHITE);
         rightPanel.add(histogramPanel, BorderLayout.CENTER);
-        histogramPanelWrapper = rightPanel; // ヒストグラムパネルを保存
+        histogramPanelWrapper = rightPanel;
         
         centerSplit.setLeftComponent(leftPanel);
         centerSplit.setRightComponent(rightPanel);
@@ -206,7 +198,7 @@ public class ReportPanel extends JPanel {
     
     private void loadCatalogFile() {
         JFileChooser fileChooser = new JFileChooser();
-        fileChooser.setDialogTitle("カタログファイルを選択");
+        fileChooser.setDialogTitle("Select Catalog File");
         fileChooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter(
             "Catalog files (*.csv)", "csv"));
         fileChooser.setCurrentDirectory(new File(System.getProperty("user.dir")));
@@ -216,14 +208,14 @@ public class ReportPanel extends JPanel {
             File selectedFile = fileChooser.getSelectedFile();
             try {
                 hypocenters = CatalogLoader.load(selectedFile);
-                setHypocenters(hypocenters); // テーブル更新も含む
+                setHypocenters(hypocenters);
                 JOptionPane.showMessageDialog(this,
-                    String.format("カタログファイルを読み込みました: %d件", hypocenters.size()),
-                    "情報", JOptionPane.INFORMATION_MESSAGE);
+                    String.format("Catalog file loaded: %d entries", hypocenters.size()),
+                    "Information", JOptionPane.INFORMATION_MESSAGE);
             } catch (Exception e) {
                 JOptionPane.showMessageDialog(this,
-                    "カタログファイルの読み込みに失敗しました: " + e.getMessage(),
-                    "エラー", JOptionPane.ERROR_MESSAGE);
+                    "Failed to load catalog file: " + e.getMessage(),
+                    "Error", JOptionPane.ERROR_MESSAGE);
             }
         }
     }
@@ -380,7 +372,7 @@ public class ReportPanel extends JPanel {
     
     private String calculateStatistics(List<Double> values, String columnName) {
         if (values.isEmpty()) {
-            return "データがありません";
+            return "No data available";
         }
         
         Collections.sort(values);
@@ -595,13 +587,13 @@ public class ReportPanel extends JPanel {
     private void exportCatalog() {
         if (hypocenters == null || hypocenters.isEmpty()) {
             JOptionPane.showMessageDialog(this,
-                "カタログデータがありません",
-                "エラー", JOptionPane.ERROR_MESSAGE);
+                "No catalog data available",
+                "Error", JOptionPane.ERROR_MESSAGE);
             return;
         }
         
         JFileChooser fileChooser = new JFileChooser();
-        fileChooser.setDialogTitle("カタログをCSV出力");
+        fileChooser.setDialogTitle("Export Catalog to CSV");
         fileChooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter(
             "CSV files (*.csv)", "csv"));
         fileChooser.setSelectedFile(new File("catalog.csv"));
@@ -612,12 +604,12 @@ public class ReportPanel extends JPanel {
             try {
                 CsvExporter.exportHypocenters(hypocenters, outputFile);
                 JOptionPane.showMessageDialog(this,
-                    "カタログを出力しました: " + outputFile.getAbsolutePath(),
-                    "情報", JOptionPane.INFORMATION_MESSAGE);
+                    "Catalog exported: " + outputFile.getAbsolutePath(),
+                    "Information", JOptionPane.INFORMATION_MESSAGE);
             } catch (IOException e) {
                 JOptionPane.showMessageDialog(this,
-                    "カタログの出力に失敗しました: " + e.getMessage(),
-                    "エラー", JOptionPane.ERROR_MESSAGE);
+                    "Failed to export catalog: " + e.getMessage(),
+                    "Error", JOptionPane.ERROR_MESSAGE);
             }
         }
     }
@@ -625,8 +617,8 @@ public class ReportPanel extends JPanel {
     private void exportReport() {
         if (hypocenters == null || hypocenters.isEmpty()) {
             JOptionPane.showMessageDialog(this,
-                "カタログデータがありません",
-                "エラー", JOptionPane.ERROR_MESSAGE);
+                "No catalog data available",
+                "Error", JOptionPane.ERROR_MESSAGE);
             return;
         }
         
@@ -654,8 +646,8 @@ public class ReportPanel extends JPanel {
     
     private void writeReport(File outputFile) throws IOException {
         try (FileWriter writer = new FileWriter(outputFile)) {
-            writer.write("=== xTreLoc カタログレポート ===\n\n");
-            writer.write("データ数: " + hypocenters.size() + "\n\n");
+            writer.write("=== xTreLoc Catalog Report ===\n\n");
+            writer.write("Number of data: " + hypocenters.size() + "\n\n");
             
             // 各列の統計情報
             for (int i = 0; i < columnNames.length; i++) {
@@ -669,9 +661,6 @@ public class ReportPanel extends JPanel {
         }
     }
     
-    /**
-     * カタログデータを設定（外部から呼び出し可能）
-     */
     public void setHypocenters(List<Hypocenter> hypocenters) {
         this.hypocenters = hypocenters;
         
@@ -716,21 +705,16 @@ public class ReportPanel extends JPanel {
      * ディレクトリから.datファイルを走査してカタログを生成
      */
     private void generateCatalogFromDirectory() {
-        JFileChooser fileChooser = new JFileChooser();
-        fileChooser.setDialogTitle("ディレクトリを選択（.datファイルを走査）");
-        fileChooser.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
-        fileChooser.setCurrentDirectory(new File(System.getProperty("user.dir")));
+        File selectedDir = com.treloc.xtreloc.app.gui.util.DirectoryChooserHelper.selectDirectory(
+            this, "Select Directory (.dat files will be scanned)",
+            new File(System.getProperty("user.dir")));
         
-        int result = fileChooser.showOpenDialog(this);
-        if (result != JFileChooser.APPROVE_OPTION) {
+        if (selectedDir == null) {
             return;
         }
         
-        File selectedDir = fileChooser.getSelectedFile();
-        
-        // 出力ファイルを選択
         JFileChooser saveChooser = new JFileChooser();
-        saveChooser.setDialogTitle("カタログをCSV出力");
+        saveChooser.setDialogTitle("Export Catalog to CSV");
         saveChooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter(
             "CSV files (*.csv)", "csv"));
         saveChooser.setSelectedFile(new File(selectedDir, "catalog.csv"));
@@ -742,20 +726,18 @@ public class ReportPanel extends JPanel {
         
         File outputFile = saveChooser.getSelectedFile();
         
-        // カタログ生成を実行
         SwingWorker<Void, String> worker = new SwingWorker<Void, String>() {
             @Override
             protected Void doInBackground() throws Exception {
-                publish("カタログ生成開始...");
+                publish("Starting catalog generation...");
                 
-                // .datファイルを走査
                 List<File> datFiles = findDatFiles(selectedDir);
                 if (datFiles.isEmpty()) {
-                    publish("エラー: 選択したディレクトリに.datファイルが見つかりませんでした。");
+                    publish("Error: No .dat files found in the selected directory.");
                     return null;
                 }
                 
-                publish("見つかった.datファイル数: " + datFiles.size());
+                publish("Found .dat files: " + datFiles.size());
                 
                 List<Hypocenter> allHypocenters = new ArrayList<>();
                 int processedCount = 0;
@@ -763,33 +745,31 @@ public class ReportPanel extends JPanel {
                 
                 for (File datFile : datFiles) {
                     try {
-                        publish("読み込み中: " + datFile.getName() + " (" + (processedCount + errorCount + 1) + "/" + datFiles.size() + ")");
+                        publish("Loading: " + datFile.getName() + " (" + (processedCount + errorCount + 1) + "/" + datFiles.size() + ")");
                         List<Hypocenter> hypocenters = loadHypocentersFromDatFile(datFile);
                         allHypocenters.addAll(hypocenters);
                         processedCount++;
                     } catch (Exception e) {
                         errorCount++;
-                        publish("エラー: " + datFile.getName() + " の読み込みに失敗: " + e.getMessage());
+                        publish("Error: Failed to load " + datFile.getName() + ": " + e.getMessage());
                     }
                 }
                 
-                // カタログを出力
                 if (!allHypocenters.isEmpty()) {
                     try {
                         CsvExporter.exportHypocenters(allHypocenters, outputFile);
-                        publish("カタログを出力しました: " + outputFile.getAbsolutePath() + " (" + allHypocenters.size() + "件)");
-                        // ReportPanelにデータを設定
+                        publish("Catalog exported: " + outputFile.getAbsolutePath() + " (" + allHypocenters.size() + " entries)");
                         SwingUtilities.invokeLater(() -> {
                             setHypocenters(allHypocenters);
                         });
                     } catch (Exception e) {
-                        publish("警告: カタログの出力に失敗: " + e.getMessage());
+                        publish("Warning: Failed to export catalog: " + e.getMessage());
                     }
                 } else {
-                    publish("警告: 読み込まれた震源データがありません");
+                    publish("Warning: No hypocenter data loaded");
                 }
                 
-                publish("カタログ生成完了: " + processedCount + "ファイル成功, " + errorCount + "ファイルエラー");
+                publish("Catalog generation complete: " + processedCount + " files succeeded, " + errorCount + " files failed");
                 
                 return null;
             }
@@ -807,12 +787,12 @@ public class ReportPanel extends JPanel {
                 try {
                     get(); // 例外があればスロー
                     JOptionPane.showMessageDialog(ReportPanel.this,
-                        "カタログの生成が完了しました",
-                        "情報", JOptionPane.INFORMATION_MESSAGE);
+                        "Catalog generation completed",
+                        "Information", JOptionPane.INFORMATION_MESSAGE);
                 } catch (Exception e) {
                     JOptionPane.showMessageDialog(ReportPanel.this,
-                        "エラーが発生しました: " + e.getMessage(),
-                        "エラー", JOptionPane.ERROR_MESSAGE);
+                        "Error occurred: " + e.getMessage(),
+                        "Error", JOptionPane.ERROR_MESSAGE);
                 }
             }
         };
@@ -900,8 +880,8 @@ public class ReportPanel extends JPanel {
     private void exportHistogramImage() {
         if (hypocenters == null || hypocenters.isEmpty() || selectedColumns.isEmpty()) {
             JOptionPane.showMessageDialog(this,
-                "ヒストグラムを表示するデータがありません",
-                "エラー", JOptionPane.ERROR_MESSAGE);
+                "No data available to display histogram",
+                "Error", JOptionPane.ERROR_MESSAGE);
             return;
         }
         

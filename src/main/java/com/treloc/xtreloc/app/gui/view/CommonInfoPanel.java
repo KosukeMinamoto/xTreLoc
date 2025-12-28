@@ -7,73 +7,76 @@ import java.awt.*;
 import java.io.File;
 
 /**
- * 共通情報（観測点ファイル、速度構造）を表示するパネル
+ * Panel for displaying common information (station file and velocity structure).
+ * 
+ * @author K.Minamoto
  */
 public class CommonInfoPanel extends JPanel {
     private JLabel stationFileLabel;
     private JLabel taupFileLabel;
     
+    /**
+     * Constructs a new CommonInfoPanel and initializes the UI components.
+     */
     public CommonInfoPanel() {
         setLayout(new FlowLayout(FlowLayout.LEFT));
-        setBorder(BorderFactory.createTitledBorder("共通設定"));
+        setBorder(BorderFactory.createTitledBorder("Common Settings"));
         
-        // 観測点ファイル表示
-        stationFileLabel = new JLabel("観測点ファイル: 未選択");
+        stationFileLabel = new JLabel("Station File: Not Selected");
         stationFileLabel.setForeground(Color.GRAY);
         add(stationFileLabel);
         
         add(Box.createHorizontalStrut(20));
         
-        // 速度構造表示
-        taupFileLabel = new JLabel("速度構造: 未設定");
+        taupFileLabel = new JLabel("Velocity Structure: Not Set");
         taupFileLabel.setForeground(Color.GRAY);
         add(taupFileLabel);
         
-        // 共有ファイルマネージャーのリスナーを登録
         SharedFileManager.getInstance().addStationFileListener(file -> {
             if (file != null) {
-                stationFileLabel.setText("観測点ファイル: " + file.getName());
+                stationFileLabel.setText("Station File: " + file.getName());
                 stationFileLabel.setForeground(Color.BLACK);
             } else {
-                stationFileLabel.setText("観測点ファイル: 未選択");
+                stationFileLabel.setText("Station File: Not Selected");
                 stationFileLabel.setForeground(Color.GRAY);
             }
         });
         
-        // 既に設定されている観測点ファイルがあれば表示
         File existingFile = SharedFileManager.getInstance().getStationFile();
         if (existingFile != null && existingFile.exists()) {
-            stationFileLabel.setText("観測点ファイル: " + existingFile.getName());
+            stationFileLabel.setText("Station File: " + existingFile.getName());
             stationFileLabel.setForeground(Color.BLACK);
         }
         
-        // 速度構造ファイルのリスナーを登録
         SharedFileManager.getInstance().addTaupFileListener(file -> {
             if (file != null && !file.isEmpty()) {
-                taupFileLabel.setText("速度構造: " + file);
+                taupFileLabel.setText("Velocity Structure: " + file);
                 taupFileLabel.setForeground(Color.BLACK);
             } else {
-                taupFileLabel.setText("速度構造: 未設定");
+                taupFileLabel.setText("Velocity Structure: Not Set");
                 taupFileLabel.setForeground(Color.GRAY);
             }
         });
         
-        // 既に設定されている速度構造ファイルがあれば表示
         String existingTaupFile = SharedFileManager.getInstance().getTaupFile();
         if (existingTaupFile != null && !existingTaupFile.isEmpty()) {
-            taupFileLabel.setText("速度構造: " + existingTaupFile);
+            taupFileLabel.setText("Velocity Structure: " + existingTaupFile);
             taupFileLabel.setForeground(Color.BLACK);
         }
     }
     
+    /**
+     * Sets the velocity structure file name and updates the display.
+     * 
+     * @param taupFile the velocity structure file name
+     */
     public void setTaupFile(String taupFile) {
         if (taupFile != null && !taupFile.isEmpty()) {
-            taupFileLabel.setText("速度構造: " + taupFile);
+            taupFileLabel.setText("Velocity Structure: " + taupFile);
             taupFileLabel.setForeground(Color.BLACK);
-            // 共有ファイルマネージャーにも設定
             SharedFileManager.getInstance().setTaupFile(taupFile);
         } else {
-            taupFileLabel.setText("速度構造: 未設定");
+            taupFileLabel.setText("Velocity Structure: Not Set");
             taupFileLabel.setForeground(Color.GRAY);
         }
     }

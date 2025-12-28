@@ -21,6 +21,8 @@ public class AppSettings {
     private String defaultPalette = "Blue to Red";
     private String logLevel = "INFO";
     private int historyLines = 50;
+    private boolean autoUpdateEnabled = true;
+    private long lastUpdateCheck = 0;
     
     /**
      * Loads application settings from the settings file.
@@ -49,9 +51,15 @@ public class AppSettings {
                 if (node.has("historyLines")) {
                     settings.historyLines = node.get("historyLines").asInt();
                 }
+                if (node.has("autoUpdateEnabled")) {
+                    settings.autoUpdateEnabled = node.get("autoUpdateEnabled").asBoolean();
+                }
+                if (node.has("lastUpdateCheck")) {
+                    settings.lastUpdateCheck = node.get("lastUpdateCheck").asLong();
+                }
                 return settings;
             } catch (IOException e) {
-                System.err.println("設定ファイルの読み込みに失敗: " + e.getMessage());
+                System.err.println("Failed to load settings file: " + e.getMessage());
             }
         }
         return new AppSettings();
@@ -70,9 +78,11 @@ public class AppSettings {
             node.put("defaultPalette", defaultPalette);
             node.put("logLevel", logLevel);
             node.put("historyLines", historyLines);
+            node.put("autoUpdateEnabled", autoUpdateEnabled);
+            node.put("lastUpdateCheck", lastUpdateCheck);
             mapper.writerWithDefaultPrettyPrinter().writeValue(settingsFile, node);
         } catch (IOException e) {
-            System.err.println("設定ファイルの保存に失敗: " + e.getMessage());
+            System.err.println("Failed to save settings file: " + e.getMessage());
         }
     }
     
@@ -164,6 +174,42 @@ public class AppSettings {
      */
     public void setHistoryLines(int historyLines) {
         this.historyLines = historyLines;
+    }
+    
+    /**
+     * Gets whether automatic update checking is enabled.
+     * 
+     * @return true if auto-update is enabled
+     */
+    public boolean isAutoUpdateEnabled() {
+        return autoUpdateEnabled;
+    }
+    
+    /**
+     * Sets whether automatic update checking is enabled.
+     * 
+     * @param autoUpdateEnabled true to enable auto-update
+     */
+    public void setAutoUpdateEnabled(boolean autoUpdateEnabled) {
+        this.autoUpdateEnabled = autoUpdateEnabled;
+    }
+    
+    /**
+     * Gets the timestamp of the last update check.
+     * 
+     * @return timestamp in milliseconds since epoch
+     */
+    public long getLastUpdateCheck() {
+        return lastUpdateCheck;
+    }
+    
+    /**
+     * Sets the timestamp of the last update check.
+     * 
+     * @param lastUpdateCheck timestamp in milliseconds since epoch
+     */
+    public void setLastUpdateCheck(long lastUpdateCheck) {
+        this.lastUpdateCheck = lastUpdateCheck;
     }
 }
 

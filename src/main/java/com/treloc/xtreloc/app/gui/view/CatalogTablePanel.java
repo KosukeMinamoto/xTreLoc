@@ -12,26 +12,46 @@ import java.io.File;
 import java.util.List;
 
 /**
- * CatalogデータをExcel風のテーブルで表示するパネル
+ * Panel for displaying catalog data in an Excel-like table format.
+ * Supports multiple catalogs (same structure as ShapefileTablePanel).
+ * 
+ * @author K.Minamoto
  */
 public class CatalogTablePanel extends JPanel {
-    private JTable table;
-    private DefaultTableModel tableModel;
+    private JTable catalogListTable;
+    private DefaultTableModel catalogListModel;
+    
+    private JTable dataTable;
+    private DefaultTableModel dataTableModel;
+    
     private JLabel statusLabel;
-    private List<Hypocenter> hypocenters;
     private MapView mapView;
     private java.util.List<CatalogLoadListener> catalogLoadListeners = new java.util.ArrayList<>();
-    private File currentCatalogFile; // 現在のカタログファイル
+    
+    private java.util.List<com.treloc.xtreloc.app.gui.model.CatalogInfo> catalogInfos = new java.util.ArrayList<>();
+    private java.util.Map<com.treloc.xtreloc.app.gui.model.CatalogInfo, File> catalogFiles = new java.util.HashMap<>();
+    
+    private List<Hypocenter> hypocenters;
+    private File currentCatalogFile;
+    
+    private JButton removeButton;
     
     /**
-     * カタログ読み込みリスナー
+     * Listener interface for catalog loading events.
      */
     public interface CatalogLoadListener {
+        /**
+         * Called when a catalog is loaded.
+         * 
+         * @param hypocenters the list of hypocenters from the loaded catalog
+         */
         void onCatalogLoaded(List<Hypocenter> hypocenters);
     }
     
     /**
-     * カタログ読み込みリスナーを追加
+     * Adds a catalog load listener.
+     * 
+     * @param listener the listener to add
      */
     public void addCatalogLoadListener(CatalogLoadListener listener) {
         catalogLoadListeners.add(listener);
@@ -40,58 +60,100 @@ public class CatalogTablePanel extends JPanel {
     public CatalogTablePanel(MapView mapView) {
         this.mapView = mapView;
         setLayout(new BorderLayout());
-        setBorder(BorderFactory.createTitledBorder("Catalogデータ"));
+        setBorder(BorderFactory.createTitledBorder("Catalog Data"));
 
-        // テーブルモデルの作成
-        String[] columnNames = {"行", "時刻", "緯度", "経度", "深度 (km)", "xerr (km)", "yerr (km)", "zerr (km)", "rms", "クラスタ番号", "ファイルパス"};
-        tableModel = new DefaultTableModel(columnNames, 0) {
+        JSplitPane splitPane = new JSplitPane(JSplitPane.VERTICAL_SPLIT);
+        splitPane.setResizeWeight(0.3);
+        
+        String[] catalogListColumnNames = {"Visible", "Name", "Count", "File"};
+        catalogListModel = new DefaultTableModel(catalogListColumnNames, 0) {
             @Override
             public boolean isCellEditable(int row, int column) {
-                return false; // 読み取り専用
+                return column == 0;
+            }
+            
+            @Override
+            public Class<?> getColumnClass(int column) {
+                if (column == 0) {
+                    return Boolean.class;
+                }
+                return String.class;
             }
         };
-        table = new JTable(tableModel);
-        table.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
-        table.setColumnSelectionAllowed(true); // 列選択を有効化
-        table.setCellSelectionEnabled(true); // セル選択を有効化
-        table.setAutoResizeMode(JTable.AUTO_RESIZE_ALL_COLUMNS);
-        table.setFillsViewportHeight(true);
+        catalogListTable = new JTable(catalogListModel);
+        catalogListTable.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+        catalogListTable.setRowHeight(20);
+        catalogListTable.getTableHeader().setReorderingAllowed(false);
         
-        // テーブルの見た目を改善
-        table.setRowHeight(20);
-        table.getTableHeader().setReorderingAllowed(false);
-        
-        // 列ヘッダークリックイベントリスナーを追加
-        table.getTableHeader().addMouseListener(new java.awt.event.MouseAdapter() {
-            @Override
-            public void mouseClicked(java.awt.event.MouseEvent e) {
-                int columnIndex = table.columnAtPoint(e.getPoint());
-                if (columnIndex >= 0) {
-                    // 列全体を選択
-                    table.clearSelection();
-                    table.setColumnSelectionInterval(columnIndex, columnIndex);
-                    // 列選択処理を実行
-                    if (hypocenters != null && !hypocenters.isEmpty()) {
-                        handleColumnSelection(columnIndex);
+        catalogListTable.getModel().addTableModelListener(e -> {
+            if (e.getColumn() == 0) {
+                int row = e.getFirstRow();
+                if (row >= 0 && row < catalogInfos.size()) {
+                    com.treloc.xtreloc.app.gui.model.CatalogInfo info = catalogInfos.get(row);
+                    Boolean visible = (Boolean) catalogListModel.getValueAt(row, 0);
+                    info.setVisible(visible);
+                    if (mapView != null) {
+                        mapView.setCatalogVisible(info, visible);
                     }
                 }
             }
         });
         
-        // 行選択イベントリスナーを追加
-        table.getSelectionModel().addListSelectionListener(new ListSelectionListener() {
+        catalogListTable.getSelectionModel().addListSelectionListener(e -> {
+            if (!e.getValueIsAdjusting()) {
+                int selectedRow = catalogListTable.getSelectedRow();
+                if (selectedRow >= 0 && selectedRow < catalogInfos.size()) {
+                    com.treloc.xtreloc.app.gui.model.CatalogInfo selectedCatalog = catalogInfos.get(selectedRow);
+                    displayCatalogData(selectedCatalog);
+                }
+            }
+        });
+        
+        JScrollPane catalogListScrollPane = new JScrollPane(catalogListTable);
+        catalogListScrollPane.setPreferredSize(new Dimension(500, 150));
+        splitPane.setTopComponent(catalogListScrollPane);
+        
+        // 下部：データ表示テーブル（Excel風）
+        String[] dataColumnNames = {"Row", "Time", "Latitude", "Longitude", "Depth (km)", "xerr (km)", "yerr (km)", "zerr (km)", "rms", "Cluster ID", "File Path"};
+        dataTableModel = new DefaultTableModel(dataColumnNames, 0) {
+            @Override
+            public boolean isCellEditable(int row, int column) {
+                return false;
+            }
+        };
+        dataTable = new JTable(dataTableModel);
+        dataTable.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+        dataTable.setColumnSelectionAllowed(true);
+        dataTable.setCellSelectionEnabled(true);
+        dataTable.setAutoResizeMode(JTable.AUTO_RESIZE_ALL_COLUMNS);
+        dataTable.setFillsViewportHeight(true);
+        dataTable.setRowHeight(20);
+        dataTable.getTableHeader().setReorderingAllowed(false);
+        
+        dataTable.getTableHeader().addMouseListener(new java.awt.event.MouseAdapter() {
+            @Override
+            public void mouseClicked(java.awt.event.MouseEvent e) {
+                int columnIndex = dataTable.columnAtPoint(e.getPoint());
+                if (columnIndex >= 0) {
+                    dataTable.clearSelection();
+                    dataTable.setColumnSelectionInterval(columnIndex, columnIndex);
+                    handleColumnSelection(columnIndex);
+                }
+            }
+        });
+        
+        dataTable.getSelectionModel().addListSelectionListener(new ListSelectionListener() {
             @Override
             public void valueChanged(ListSelectionEvent e) {
                 if (!e.getValueIsAdjusting()) {
-                    int selectedRow = table.getSelectedRow();
-                    
-                    // 行選択の場合
-                    if (selectedRow >= 0 && selectedRow < hypocenters.size() && mapView != null) {
-                        Hypocenter h = hypocenters.get(selectedRow);
+                    int selectedRow = dataTable.getSelectedRow();
+                    if (selectedRow >= 0 && getCurrentHypocenters() != null && 
+                        selectedRow < getCurrentHypocenters().size() && mapView != null) {
+                        Hypocenter h = getCurrentHypocenters().get(selectedRow);
                         try {
                             mapView.highlightPoint(h.lon, h.lat);
                         } catch (Exception ex) {
-                            // エラーは無視
+                            // Ignore errors
                         }
                     } else if (mapView != null) {
                         mapView.clearHighlight();
@@ -100,45 +162,151 @@ public class CatalogTablePanel extends JPanel {
             }
         });
         
-        // 列選択イベントリスナーを追加
-        table.getColumnModel().getSelectionModel().addListSelectionListener(new ListSelectionListener() {
+        dataTable.getColumnModel().getSelectionModel().addListSelectionListener(new ListSelectionListener() {
             @Override
             public void valueChanged(ListSelectionEvent e) {
                 if (!e.getValueIsAdjusting()) {
-                    int selectedColumn = table.getSelectedColumn();
-                    
-                    // 列選択の場合（数値列のみ）
-                    if (selectedColumn >= 0 && hypocenters != null && !hypocenters.isEmpty()) {
+                    int selectedColumn = dataTable.getSelectedColumn();
+                    if (selectedColumn >= 0 && getCurrentHypocenters() != null && !getCurrentHypocenters().isEmpty()) {
                         handleColumnSelection(selectedColumn);
                     }
                 }
             }
         });
         
-        // スクロールペインに追加
-        JScrollPane scrollPane = new JScrollPane(table);
-        scrollPane.setPreferredSize(new Dimension(500, 300));
-        add(scrollPane, BorderLayout.CENTER);
+        JScrollPane dataScrollPane = new JScrollPane(dataTable);
+        dataScrollPane.setPreferredSize(new Dimension(500, 300));
+        splitPane.setBottomComponent(dataScrollPane);
+        
+        add(splitPane, BorderLayout.CENTER);
 
         // ステータスラベル
-        statusLabel = new JLabel("Catalogデータが読み込まれていません");
+        statusLabel = new JLabel("No catalog loaded");
         add(statusLabel, BorderLayout.SOUTH);
 
-        // ファイル選択ボタン
-        JButton selectButton = new JButton("Catalogファイルを選択");
-        selectButton.addActionListener(e -> selectCatalogFile());
-        
         JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
-        buttonPanel.add(selectButton);
+        
+        JButton addButton = new JButton("Add Catalog");
+        addButton.addActionListener(e -> selectCatalogFile());
+        buttonPanel.add(addButton);
+        
+        removeButton = new JButton("Remove Selected");
+        removeButton.addActionListener(e -> removeSelectedCatalog());
+        removeButton.setEnabled(false);
+        buttonPanel.add(removeButton);
+        
+        JCheckBox showConnectionsCheckBox = new JCheckBox("Show Connections");
+        showConnectionsCheckBox.addActionListener(e -> {
+            if (mapView != null) {
+                mapView.setShowConnections(showConnectionsCheckBox.isSelected());
+            }
+        });
+        buttonPanel.add(showConnectionsCheckBox);
+        
         add(buttonPanel, BorderLayout.NORTH);
+    }
+    
+    /**
+     * Gets the hypocenters from the currently selected catalog.
+     * 
+     * @return the list of hypocenters, or null if no catalog is selected
+     */
+    private List<Hypocenter> getCurrentHypocenters() {
+        int selectedRow = catalogListTable.getSelectedRow();
+        if (selectedRow >= 0 && selectedRow < catalogInfos.size()) {
+            return catalogInfos.get(selectedRow).getHypocenters();
+        }
+        return hypocenters;
+    }
+    
+    /**
+     * Displays the data for the selected catalog.
+     * 
+     * @param catalogInfo the catalog information to display
+     */
+    private void displayCatalogData(com.treloc.xtreloc.app.gui.model.CatalogInfo catalogInfo) {
+        if (catalogInfo == null || catalogInfo.getHypocenters() == null) {
+            dataTableModel.setRowCount(0);
+            hypocenters = null;
+            return;
+        }
+        
+        List<Hypocenter> hypocenters = catalogInfo.getHypocenters();
+        dataTableModel.setRowCount(0);
+        
+        int rowNum = 1;
+        for (Hypocenter h : hypocenters) {
+            Object[] row = {
+                rowNum++,
+                h.time,
+                String.format("%.6f", h.lat),
+                String.format("%.6f", h.lon),
+                String.format("%.3f", h.depth),
+                String.format("%.3f", h.xerr),
+                String.format("%.3f", h.yerr),
+                String.format("%.3f", h.zerr),
+                String.format("%.4f", h.rms),
+                h.clusterId != null ? String.valueOf(h.clusterId) : "",
+                h.datFilePath != null ? h.datFilePath : ""
+            };
+            dataTableModel.addRow(row);
+        }
+        
+        this.hypocenters = hypocenters;
+        
+        for (CatalogLoadListener listener : catalogLoadListeners) {
+            listener.onCatalogLoaded(hypocenters);
+        }
+    }
+    
+    /**
+     * Removes the selected catalog from the list.
+     */
+    private void removeSelectedCatalog() {
+        int selectedRow = catalogListTable.getSelectedRow();
+        if (selectedRow < 0 || selectedRow >= catalogInfos.size()) {
+            JOptionPane.showMessageDialog(this,
+                "Please select a catalog to remove",
+                "Information", JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+        
+        com.treloc.xtreloc.app.gui.model.CatalogInfo info = catalogInfos.get(selectedRow);
+        if (mapView != null) {
+            mapView.removeCatalog(info);
+        }
+        catalogInfos.remove(selectedRow);
+        catalogFiles.remove(info);
+        catalogListModel.removeRow(selectedRow);
+        
+        if (catalogInfos.isEmpty()) {
+            dataTableModel.setRowCount(0);
+            hypocenters = null;
+            if (removeButton != null) {
+                removeButton.setEnabled(false);
+            }
+        }
+        
+        updateStatusLabel();
+    }
+    
+    /**
+     * Updates the status label with the current catalog count.
+     */
+    private void updateStatusLabel() {
+        if (catalogInfos.isEmpty()) {
+            statusLabel.setText("No catalog loaded");
+        } else {
+            statusLabel.setText(String.format("Catalogs: %d loaded", catalogInfos.size()));
+        }
     }
 
     /**
-     * Catalogファイルを選択して読み込む
+     * Opens a file chooser to select and load a catalog file.
      */
     private void selectCatalogFile() {
         JFileChooser fileChooser = new JFileChooser();
-        fileChooser.setDialogTitle("Catalogファイルを選択");
+        fileChooser.setDialogTitle("Select Catalog File");
         fileChooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter(
             "Catalog files (*.csv)", "csv"));
         fileChooser.setCurrentDirectory(new File(System.getProperty("user.dir")));
@@ -151,83 +319,106 @@ public class CatalogTablePanel extends JPanel {
     }
 
     /**
-     * Catalogファイルを読み込む
+     * Loads a catalog file and adds it to the list of catalogs.
+     * 
+     * @param file the catalog file to load
      */
     public void loadCatalogFile(File file) {
         try {
-            currentCatalogFile = file;
-            hypocenters = CatalogLoader.load(file);
-            
-            // テーブルにデータを表示
-            tableModel.setRowCount(0);
-            int rowNum = 1;
-            for (Hypocenter h : hypocenters) {
-                Object[] row = {
-                    rowNum++,
-                    h.time,
-                    String.format("%.6f", h.lat),
-                    String.format("%.6f", h.lon),
-                    String.format("%.3f", h.depth),
-                    String.format("%.3f", h.xerr),
-                    String.format("%.3f", h.yerr),
-                    String.format("%.3f", h.zerr),
-                    String.format("%.4f", h.rms),
-                    h.clusterId != null ? String.valueOf(h.clusterId) : "",
-                    h.datFilePath != null ? h.datFilePath : ""
-                };
-                tableModel.addRow(row);
+            if (catalogFiles.containsValue(file)) {
+                JOptionPane.showMessageDialog(this,
+                    "This catalog is already loaded: " + file.getName(),
+                    "Information", JOptionPane.INFORMATION_MESSAGE);
+                return;
             }
             
-            statusLabel.setText(String.format("Catalogデータ数: %d", hypocenters.size()));
+            List<Hypocenter> hypocenters = CatalogLoader.load(file);
             
-            // リスナーに通知
+            String name = file.getName();
+            if (name.endsWith(".csv")) {
+                name = name.substring(0, name.length() - 4);
+            }
+            
+            java.awt.Color[] defaultColors = {
+                java.awt.Color.BLUE, java.awt.Color.RED, java.awt.Color.GREEN,
+                java.awt.Color.ORANGE, java.awt.Color.MAGENTA, java.awt.Color.CYAN,
+                java.awt.Color.YELLOW, java.awt.Color.PINK
+            };
+            java.awt.Color color = defaultColors[catalogInfos.size() % defaultColors.length];
+            
+            com.treloc.xtreloc.app.gui.model.CatalogInfo.SymbolType symbolType = 
+                com.treloc.xtreloc.app.gui.model.CatalogInfo.SymbolType.values()[
+                    catalogInfos.size() % com.treloc.xtreloc.app.gui.model.CatalogInfo.SymbolType.values().length];
+            
+            com.treloc.xtreloc.app.gui.model.CatalogInfo catalogInfo = 
+                new com.treloc.xtreloc.app.gui.model.CatalogInfo(name, color, symbolType, hypocenters, file);
+            catalogInfos.add(catalogInfo);
+            catalogFiles.put(catalogInfo, file);
+            
+            Object[] row = {
+                true,
+                name,
+                String.valueOf(hypocenters.size()),
+                file.getName()
+            };
+            catalogListModel.addRow(row);
+            
+            if (mapView != null) {
+                mapView.addCatalog(catalogInfo);
+            }
+            
             for (CatalogLoadListener listener : catalogLoadListeners) {
                 listener.onCatalogLoaded(hypocenters);
             }
             
-            // マップにプロット
-            if (mapView != null && hypocenters != null && !hypocenters.isEmpty()) {
-                try {
-                    mapView.showHypocenters(hypocenters);
-                } catch (Exception ex) {
-                    JOptionPane.showMessageDialog(this,
-                        "マップへの表示に失敗しました: " + ex.getMessage(),
-                        "警告", JOptionPane.WARNING_MESSAGE);
-                }
+            currentCatalogFile = file;
+            this.hypocenters = hypocenters;
+            
+            if (catalogInfos.size() == 1) {
+                catalogListTable.setRowSelectionInterval(0, 0);
+                displayCatalogData(catalogInfo);
             }
+            
+            if (removeButton != null) {
+                removeButton.setEnabled(true);
+            }
+            
+            updateStatusLabel();
             
         } catch (Exception e) {
             JOptionPane.showMessageDialog(this,
-                "Catalogファイルの読み込みに失敗しました: " + e.getMessage(),
-                "エラー", JOptionPane.ERROR_MESSAGE);
-            statusLabel.setText("読み込みエラー: " + e.getMessage());
+                "Failed to load catalog file: " + e.getMessage(),
+                "Error", JOptionPane.ERROR_MESSAGE);
+            updateStatusLabel();
         }
     }
 
     /**
-     * Catalogデータを取得
+     * Gets the hypocenters from the currently selected catalog.
+     * 
+     * @return the list of hypocenters, or null if no catalog is selected
      */
     public List<Hypocenter> getHypocenters() {
-        return hypocenters;
+        return getCurrentHypocenters();
     }
     
     /**
-     * 列選択を処理（数値列の場合、色付けを適用）
+     * Handles column selection and applies color coding for numeric columns.
+     * 
+     * @param columnIndex the index of the selected column
      */
     private void handleColumnSelection(int columnIndex) {
-        if (hypocenters == null || hypocenters.isEmpty() || mapView == null) {
+        List<Hypocenter> currentHypocenters = getCurrentHypocenters();
+        if (currentHypocenters == null || currentHypocenters.isEmpty() || mapView == null) {
             return;
         }
         
-        // 列名を取得
-        String columnName = tableModel.getColumnName(columnIndex);
+        String columnName = dataTableModel.getColumnName(columnIndex);
         
-        // ファイルパス列（10）をクリックした場合、走時差データを表示
         if (columnIndex == 10) {
-            // ファイルパス列がクリックされた場合、選択された行のファイルパスを取得
-            int selectedRow = table.getSelectedRow();
-            if (selectedRow >= 0 && selectedRow < hypocenters.size()) {
-                Hypocenter h = hypocenters.get(selectedRow);
+            int selectedRow = dataTable.getSelectedRow();
+            if (selectedRow >= 0 && selectedRow < currentHypocenters.size()) {
+                Hypocenter h = currentHypocenters.get(selectedRow);
                 if (h.datFilePath != null && !h.datFilePath.isEmpty()) {
                     showTravelTimeData(h.datFilePath);
                 }
@@ -235,42 +426,41 @@ public class CatalogTablePanel extends JPanel {
             return;
         }
         
-        // 数値列かどうかを判定（行番号、緯度、経度、深度、エラー列、クラスタ番号）
-        boolean isNumeric = columnIndex == 0 || // 0:行番号
-                           (columnIndex >= 2 && columnIndex <= 4) || // 2:緯度, 3:経度, 4:深度
-                           (columnIndex >= 5 && columnIndex <= 8) || // 5:xerr, 6:yerr, 7:zerr, 8:rms
-                           columnIndex == 9; // 9:クラスタ番号
+        boolean isNumeric = columnIndex == 0 ||
+                           (columnIndex >= 2 && columnIndex <= 4) ||
+                           (columnIndex >= 5 && columnIndex <= 8) ||
+                           columnIndex == 9;
         
         if (isNumeric) {
-            double[] values = new double[hypocenters.size()];
-            for (int i = 0; i < hypocenters.size(); i++) {
-                Hypocenter h = hypocenters.get(i);
+            double[] values = new double[currentHypocenters.size()];
+            for (int i = 0; i < currentHypocenters.size(); i++) {
+                Hypocenter h = currentHypocenters.get(i);
                 switch (columnIndex) {
-                    case 0: // 行番号
+                    case 0:
                         values[i] = i + 1;
                         break;
-                    case 2: // 緯度
+                    case 2:
                         values[i] = h.lat;
                         break;
-                    case 3: // 経度
+                    case 3:
                         values[i] = h.lon;
                         break;
-                    case 4: // 深度
+                    case 4:
                         values[i] = h.depth;
                         break;
-                    case 5: // xerr
+                    case 5:
                         values[i] = h.xerr;
                         break;
-                    case 6: // yerr
+                    case 6:
                         values[i] = h.yerr;
                         break;
-                    case 7: // zerr
+                    case 7:
                         values[i] = h.zerr;
                         break;
-                    case 8: // rms
+                    case 8:
                         values[i] = h.rms;
                         break;
-                    case 9: // クラスタ番号
+                    case 9:
                         values[i] = h.clusterId != null ? h.clusterId : -1;
                         break;
                     default:
@@ -278,93 +468,100 @@ public class CatalogTablePanel extends JPanel {
                 }
             }
             
-            // マップに色付けを適用
             try {
-                mapView.showHypocenters(hypocenters, columnName, values);
+                if (catalogInfos.size() > 1) {
+                    int selectedCatalogRow = catalogListTable.getSelectedRow();
+                    if (selectedCatalogRow >= 0 && selectedCatalogRow < catalogInfos.size()) {
+                        com.treloc.xtreloc.app.gui.model.CatalogInfo selectedCatalog = catalogInfos.get(selectedCatalogRow);
+                        mapView.applyColorMapToCatalog(selectedCatalog, columnName, values);
+                    }
+                } else {
+                    mapView.showHypocenters(currentHypocenters, columnName, values);
+                }
             } catch (Exception e) {
-                System.err.println("色付けの適用に失敗: " + e.getMessage());
+                System.err.println("Failed to apply coloring: " + e.getMessage());
             }
         } else {
-            // 数値列でない場合は通常の表示
             try {
-                mapView.showHypocenters(hypocenters);
+                if (catalogInfos.size() > 1) {
+                    mapView.clearColorMap();
+                    mapView.updateMultipleCatalogsDisplay();
+                } else {
+                    mapView.showHypocenters(currentHypocenters);
+                }
             } catch (Exception e) {
-                System.err.println("表示の更新に失敗: " + e.getMessage());
+                System.err.println("Failed to update display: " + e.getMessage());
             }
         }
     }
     
     /**
-     * 走時差データを表示
+     * Displays travel time data for the selected hypocenter.
+     * 
+     * @param datFilePath the path to the dat file containing travel time data
      */
     private void showTravelTimeData(String datFilePath) {
         try {
-            // カタログファイルのディレクトリを基準にdatファイルのパスを解決
             File catalogFile = getCurrentCatalogFile();
             File datFile = null;
             if (catalogFile != null && catalogFile.getParentFile() != null) {
-                // 相対パスの場合
                 File parentDir = catalogFile.getParentFile();
                 datFile = new File(parentDir, datFilePath);
                 if (!datFile.exists()) {
-                    // 絶対パスの場合
                     datFile = new File(datFilePath);
                 }
             } else {
-                // 絶対パスの場合
                 datFile = new File(datFilePath);
             }
             
             if (!datFile.exists()) {
                 JOptionPane.showMessageDialog(this,
-                    "ファイルが見つかりません: " + datFilePath,
-                    "エラー", JOptionPane.ERROR_MESSAGE);
+                    "File not found: " + datFilePath,
+                    "Error", JOptionPane.ERROR_MESSAGE);
                 return;
             }
             
-            // 走時差データを読み込む
             com.treloc.xtreloc.solver.PointsHandler handler = new com.treloc.xtreloc.solver.PointsHandler();
-            // 観測点ファイルを取得（SharedFileManagerから）
             File stationFile = com.treloc.xtreloc.app.gui.util.SharedFileManager.getInstance().getStationFile();
             if (stationFile == null || !stationFile.exists()) {
                 JOptionPane.showMessageDialog(this,
-                    "観測点ファイルが設定されていません",
-                    "エラー", JOptionPane.ERROR_MESSAGE);
+                    "Station file is not set",
+                    "Error", JOptionPane.ERROR_MESSAGE);
                 return;
             }
             
-            // 観測点コードを読み込む
             String[] codeStrings = loadStationCodes(stationFile);
             if (codeStrings == null || codeStrings.length == 0) {
                 JOptionPane.showMessageDialog(this,
-                    "観測点コードの読み込みに失敗しました",
-                    "エラー", JOptionPane.ERROR_MESSAGE);
+                    "Failed to load station codes",
+                    "Error", JOptionPane.ERROR_MESSAGE);
                 return;
             }
             
-            // datファイルを読み込む
             handler.readDatFile(datFile.getAbsolutePath(), codeStrings, 0.0);
             com.treloc.xtreloc.solver.Point point = handler.getMainPoint();
             if (point == null || point.getLagTable() == null) {
                 JOptionPane.showMessageDialog(this,
-                    "走時差データが見つかりません",
-                    "エラー", JOptionPane.ERROR_MESSAGE);
+                    "Travel time data not found",
+                    "Error", JOptionPane.ERROR_MESSAGE);
                 return;
             }
             
-            // 走時差データをExcel形式で表示
             showTravelTimeDataTable(point.getLagTable(), codeStrings);
             
         } catch (Exception e) {
             JOptionPane.showMessageDialog(this,
-                "走時差データの読み込みに失敗しました: " + e.getMessage(),
-                "エラー", JOptionPane.ERROR_MESSAGE);
+                "Failed to load travel time data: " + e.getMessage(),
+                "Error", JOptionPane.ERROR_MESSAGE);
             e.printStackTrace();
         }
     }
     
     /**
-     * 観測点コードを読み込む
+     * Loads station codes from a station file.
+     * 
+     * @param stationFile the station file to read
+     * @return an array of station codes, or null if an error occurs
      */
     private String[] loadStationCodes(File stationFile) {
         try {
@@ -389,16 +586,17 @@ public class CatalogTablePanel extends JPanel {
     }
     
     /**
-     * 走時差データをExcel形式で表示
+     * Displays travel time data in an Excel-like table format.
+     * 
+     * @param lagTable the travel time data table
+     * @param codeStrings the station codes
      */
     private void showTravelTimeDataTable(double[][] lagTable, String[] codeStrings) {
-        // 走時差データ表示パネルを取得（XTreLocGUIから設定される）
         if (travelTimeDataPanel != null) {
             travelTimeDataPanel.setData(lagTable, codeStrings);
         } else {
-            // パネルが設定されていない場合は別ウィンドウで表示
-            JFrame frame = new JFrame("走時差データ: " + (hypocenters != null && table.getSelectedRow() >= 0 ? 
-                hypocenters.get(table.getSelectedRow()).datFilePath : ""));
+            JFrame frame = new JFrame("Travel Time Data: " + (hypocenters != null && dataTable.getSelectedRow() >= 0 ? 
+                hypocenters.get(dataTable.getSelectedRow()).datFilePath : ""));
             frame.setSize(600, 400);
             frame.setLocationRelativeTo(this);
             
@@ -439,7 +637,9 @@ public class CatalogTablePanel extends JPanel {
     }
     
     /**
-     * 走時差データ表示パネルを設定
+     * Sets the travel time data panel for displaying travel time data.
+     * 
+     * @param panel the travel time data panel
      */
     public void setTravelTimeDataPanel(TravelTimeDataPanel panel) {
         this.travelTimeDataPanel = panel;
@@ -448,7 +648,9 @@ public class CatalogTablePanel extends JPanel {
     private TravelTimeDataPanel travelTimeDataPanel;
     
     /**
-     * 現在のカタログファイルを取得
+     * Gets the current catalog file.
+     * 
+     * @return the current catalog file, or null if no file is loaded
      */
     private File getCurrentCatalogFile() {
         return currentCatalogFile;

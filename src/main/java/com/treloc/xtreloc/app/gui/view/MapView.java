@@ -44,6 +44,18 @@ public class MapView {
 	
 	private JButton exportImageButton;
 	
+	// 複数カタログ管理
+	private java.util.List<com.treloc.xtreloc.app.gui.model.CatalogInfo> catalogInfos = new java.util.ArrayList<>();
+	private boolean showConnections = false;
+	
+	// Color map mode for multiple catalogs
+	private com.treloc.xtreloc.app.gui.model.CatalogInfo colorMapCatalog = null;
+	private String colorMapColumn = null;
+	private double[] colorMapValues = null;
+	
+	// Legend panel
+	private JPanel legendPanel;
+	
 	/**
 	 * Color palette types
 	 */
@@ -92,7 +104,7 @@ public class MapView {
 				frame.getToolBar().add(logoLabel, 0);
 			}
 		} catch (Exception e) {
-			System.err.println("ロゴの読み込みに失敗: " + e.getMessage());
+			System.err.println("Failed to load logo: " + e.getMessage());
 		}
 		
 		// ツールバーに情報ラベルを追加
@@ -108,6 +120,9 @@ public class MapView {
 		
 		// Add color bar as overlay on the map pane
 		setupMapOverlays();
+		
+		// Setup legend panel
+		setupLegendPanel();
 		
 		// 画像出力ボタンをステータスバーの右上に追加
 		setupStatusBarExportButton();
@@ -244,16 +259,16 @@ public class MapView {
 				double yCoord = mapBounds.getMaxY() - (mapBounds.getMaxY() - mapBounds.getMinY()) * y / paneHeight;
 				
 				DecimalFormat df = new DecimalFormat("#.######");
-				coordLabel.setText(String.format("経度: %s, 緯度: %s", df.format(xCoord), df.format(yCoord)));
+				coordLabel.setText(String.format("Longitude: %s, Latitude: %s", df.format(xCoord), df.format(yCoord)));
 			}
 		} catch (Exception ex) {
-			coordLabel.setText("座標取得エラー");
+			coordLabel.setText("Coordinate Error");
 		}
 	}
 	
 	
 	public void setDepthRange(double min, double max) {
-		setColorRange(min, max, "深度 (km)");
+		setColorRange(min, max, "Depth (km)");
 	}
 	
 	public void setColorRange(double min, double max, String label) {
@@ -274,11 +289,11 @@ public class MapView {
 	public String addShapefile(File shp) throws Exception {
 		var store = org.geotools.api.data.FileDataStoreFinder.getDataStore(shp);
 		String layerTitle = "ShapefileLayer_" + shp.getName() + "_" + System.currentTimeMillis();
-		// Use custom style with thicker line width
 		Style shapefileStyle = StyleFactory.createShapefileStyle();
 		FeatureLayer layer = new FeatureLayer(store.getFeatureSource(), shapefileStyle);
 		layer.setTitle(layerTitle);
 		map.addLayer(layer);
+		forceMapRepaint();
 		return layerTitle;
 	}
 	
@@ -291,28 +306,7 @@ public class MapView {
 		for (Layer layer : map.layers()) {
 			if (layerTitle.equals(layer.getTitle())) {
 				layer.setVisible(visible);
-				// マップを再描画（エラーハンドリングを追加）
-				try {
-					SwingUtilities.invokeLater(() -> {
-						try {
-							frame.getMapPane().repaint();
-						} catch (Exception e) {
-							// GeoToolsのレンダリングエラーを抑制（NullPointerExceptionなど）
-							if (e instanceof NullPointerException && 
-								(e.getMessage() == null || e.getMessage().contains("loops"))) {
-								// GeoToolsの既知のバグを無視
-								return;
-							}
-							// その他のエラーはログに記録
-							java.util.logging.Logger.getLogger(MapView.class.getName())
-								.warning("マップの再描画に失敗: " + e.getMessage());
-						}
-					});
-				} catch (Exception e) {
-					// エラーを無視（GeoToolsの既知のバグ）
-					java.util.logging.Logger.getLogger(MapView.class.getName())
-						.warning("マップ更新のスケジューリングに失敗: " + e.getMessage());
-				}
+				forceMapRepaint();
 				break;
 			}
 		}
@@ -337,32 +331,480 @@ public class MapView {
 			}
 			map.removeLayer(layer);
 		}
-		// マップを再描画（エラーハンドリングを追加）
-		try {
-			SwingUtilities.invokeLater(() -> {
-				try {
-					frame.getMapPane().repaint();
-				} catch (Exception e) {
-					// GeoToolsのレンダリングエラーを抑制（NullPointerExceptionなど）
-					if (e instanceof NullPointerException && 
-						(e.getMessage() == null || e.getMessage().contains("loops"))) {
-						// GeoToolsの既知のバグを無視
-						return;
-					}
-					// その他のエラーはログに記録
-					java.util.logging.Logger.getLogger(MapView.class.getName())
-						.warning("マップの再描画に失敗: " + e.getMessage());
-				}
-			});
-		} catch (Exception e) {
-			// エラーを無視（GeoToolsの既知のバグ）
-			java.util.logging.Logger.getLogger(MapView.class.getName())
-				.warning("マップ更新のスケジューリングに失敗: " + e.getMessage());
-		}
+		forceMapRepaint();
 	}
 
 	public void showHypocenters(List<Hypocenter> hypos) throws Exception {
 		showHypocenters(hypos, null, null);
+	}
+	
+	/**
+	 * 複数カタログを追加
+	 */
+	public void addCatalog(com.treloc.xtreloc.app.gui.model.CatalogInfo catalogInfo) {
+		catalogInfos.add(catalogInfo);
+		updateMultipleCatalogsDisplay();
+	}
+	
+	/**
+	 * カタログを削除
+	 */
+	public void removeCatalog(com.treloc.xtreloc.app.gui.model.CatalogInfo catalogInfo) {
+		catalogInfos.remove(catalogInfo);
+		updateMultipleCatalogsDisplay();
+	}
+	
+	/**
+	 * すべてのカタログをクリア
+	 */
+	public void clearAllCatalogs() {
+		catalogInfos.clear();
+		updateMultipleCatalogsDisplay();
+	}
+	
+	/**
+	 * Sets the visibility of a catalog.
+	 * 
+	 * @param catalogInfo the catalog information
+	 * @param visible true to make the catalog visible, false to hide it
+	 */
+	public void setCatalogVisible(com.treloc.xtreloc.app.gui.model.CatalogInfo catalogInfo, boolean visible) {
+		catalogInfo.setVisible(visible);
+		updateMultipleCatalogsDisplay();
+	}
+	
+	/**
+	 * Sets whether to show connection lines between corresponding events.
+	 * 
+	 * @param show true to show connections, false to hide them
+	 */
+	public void setShowConnections(boolean show) {
+		showConnections = show;
+		updateMultipleCatalogsDisplay();
+	}
+	
+	/**
+	 * Updates the display of multiple catalogs.
+	 */
+	public void updateMultipleCatalogsDisplay() {
+		java.util.List<Layer> layersToRemove = new java.util.ArrayList<>();
+		for (Layer layer : map.layers()) {
+			if (layer.getTitle() != null && 
+				(layer.getTitle().startsWith("HypoLayer") || 
+				 layer.getTitle().startsWith("ConnectionLayer") ||
+				 layer.getTitle().startsWith("ErrorBarLayer"))) {
+				layersToRemove.add(layer);
+			}
+		}
+		for (Layer layer : layersToRemove) {
+			try {
+				layer.dispose();
+			} catch (Exception e) {
+				// Ignore dispose errors
+			}
+			map.removeLayer(layer);
+		}
+		
+		if (catalogInfos.isEmpty()) {
+			return;
+		}
+		
+		GeometryFactory gf = new GeometryFactory();
+		SimpleFeatureType hypoType;
+		SimpleFeatureType connectionType;
+		
+		try {
+			hypoType = DataUtilities.createType("Hypo", 
+				"geom:Point,time:String,depth:Double");
+			connectionType = DataUtilities.createType("Connection", 
+				"geom:LineString");
+		} catch (Exception e) {
+			java.util.logging.Logger.getLogger(MapView.class.getName())
+				.severe("Failed to create feature types: " + e.getMessage());
+			return;
+		}
+		
+		DefaultFeatureCollection connectionCollection = new DefaultFeatureCollection("ConnectionLayer", connectionType);
+		
+		// カラーマップ表示用のデータを準備
+		double minValue = Double.MAX_VALUE;
+		double maxValue = Double.MIN_VALUE;
+		java.util.Map<Hypocenter, Color> colorMap = new java.util.HashMap<>();
+		
+		if (colorMapCatalog != null && colorMapValues != null && 
+		    colorMapCatalog.getHypocenters() != null && 
+		    colorMapCatalog.getHypocenters().size() == colorMapValues.length) {
+			// カラーマップ用の最小値・最大値を計算
+			for (double val : colorMapValues) {
+				if (val < minValue) minValue = val;
+				if (val > maxValue) maxValue = val;
+			}
+			
+			// 各イベントの色を計算
+			java.util.List<Hypocenter> catalogHypocenters = colorMapCatalog.getHypocenters();
+			for (int i = 0; i < catalogHypocenters.size() && i < colorMapValues.length; i++) {
+				double colorValue = colorMapValues[i];
+				double normalized = (maxValue > minValue) 
+					? (colorValue - minValue) / (maxValue - minValue) 
+					: 0.0;
+				Color color = getColorFromPalette((float) normalized);
+				colorMap.put(catalogHypocenters.get(i), color);
+			}
+			
+			// カラーバーを更新
+			String label = (colorMapColumn != null) ? colorMapColumn : "Value";
+			setColorRange(minValue, maxValue, label);
+		}
+		
+		// 各カタログを表示
+		for (com.treloc.xtreloc.app.gui.model.CatalogInfo catalogInfo : catalogInfos) {
+			if (!catalogInfo.isVisible() || catalogInfo.getHypocenters() == null || catalogInfo.getHypocenters().isEmpty()) {
+				continue;
+			}
+			
+			// カラーマップ表示対象のカタログかどうか
+			boolean isColorMapCatalog = (catalogInfo == colorMapCatalog);
+			
+			if (isColorMapCatalog && !colorMap.isEmpty()) {
+				// カラーマップ表示：色ごとにFeatureCollectionを分割
+				java.util.Map<Color, DefaultFeatureCollection> colorCollections = new java.util.HashMap<>();
+				final String catalogName = catalogInfo.getName();
+				
+				for (Hypocenter h : catalogInfo.getHypocenters()) {
+					Color color = colorMap.get(h);
+					if (color == null) {
+						color = catalogInfo.getColor(); // フォールバック
+					}
+					final Color finalColor = color;
+					
+					DefaultFeatureCollection col = colorCollections.computeIfAbsent(finalColor, 
+						k -> new DefaultFeatureCollection("HypoLayer_" + catalogName + "_" + finalColor.hashCode(), hypoType));
+					
+					SimpleFeature f = DataUtilities.template(hypoType);
+					f.setDefaultGeometry(gf.createPoint(new Coordinate(h.lon, h.lat)));
+					f.setAttribute("time", h.time);
+					f.setAttribute("depth", h.depth);
+					col.add(f);
+				}
+				
+				// 色ごとにレイヤーを作成
+				com.treloc.xtreloc.app.gui.model.CatalogInfo.SymbolType symbolType = catalogInfo.getSymbolType();
+				for (java.util.Map.Entry<Color, DefaultFeatureCollection> entry : colorCollections.entrySet()) {
+					Color color = entry.getKey();
+					DefaultFeatureCollection col = entry.getValue();
+					Style style = com.treloc.xtreloc.app.gui.service.StyleFactory.createSymbolStyle(
+						symbolType, color, symbolSize);
+					FeatureLayer layer = new FeatureLayer(col, style);
+					layer.setTitle("HypoLayer_" + catalogInfo.getName() + "_ColorMap");
+					map.addLayer(layer);
+				}
+			} else {
+				// 通常表示：カタログの色とシンボルを使用
+				DefaultFeatureCollection hypoCollection = new DefaultFeatureCollection(
+					"HypoLayer_" + catalogInfo.getName(), hypoType);
+				
+				Color color = catalogInfo.getColor();
+				com.treloc.xtreloc.app.gui.model.CatalogInfo.SymbolType symbolType = catalogInfo.getSymbolType();
+				
+				for (Hypocenter h : catalogInfo.getHypocenters()) {
+					SimpleFeature f = DataUtilities.template(hypoType);
+					f.setDefaultGeometry(gf.createPoint(new Coordinate(h.lon, h.lat)));
+					f.setAttribute("time", h.time);
+					f.setAttribute("depth", h.depth);
+					hypoCollection.add(f);
+				}
+				
+				Style style = com.treloc.xtreloc.app.gui.service.StyleFactory.createSymbolStyle(
+					symbolType, color, symbolSize);
+				FeatureLayer layer = new FeatureLayer(hypoCollection, style);
+				layer.setTitle("HypoLayer_" + catalogInfo.getName());
+				map.addLayer(layer);
+			}
+		}
+		
+		if (showConnections && catalogInfos.size() >= 2) {
+			java.util.List<com.treloc.xtreloc.app.gui.model.CatalogInfo> visibleCatalogs = new java.util.ArrayList<>();
+			for (com.treloc.xtreloc.app.gui.model.CatalogInfo info : catalogInfos) {
+				if (info.isVisible() && info.getHypocenters() != null && !info.getHypocenters().isEmpty()) {
+					visibleCatalogs.add(info);
+				}
+			}
+			
+			if (visibleCatalogs.size() >= 2) {
+				java.util.Map<String, java.util.Map<com.treloc.xtreloc.app.gui.model.CatalogInfo, Hypocenter>> timeToCatalogHypocenter = new java.util.HashMap<>();
+				
+				for (com.treloc.xtreloc.app.gui.model.CatalogInfo catalog : visibleCatalogs) {
+					for (Hypocenter h : catalog.getHypocenters()) {
+						String normalizedTime = com.treloc.xtreloc.app.gui.model.CatalogInfo.normalizeTime(h.time);
+						java.util.Map<com.treloc.xtreloc.app.gui.model.CatalogInfo, Hypocenter> catalogHypocenterMap = 
+							timeToCatalogHypocenter.computeIfAbsent(normalizedTime, k -> new java.util.HashMap<>());
+						if (!catalogHypocenterMap.containsKey(catalog)) {
+							catalogHypocenterMap.put(catalog, h);
+						}
+					}
+				}
+				
+				for (java.util.Map.Entry<String, java.util.Map<com.treloc.xtreloc.app.gui.model.CatalogInfo, Hypocenter>> entry : timeToCatalogHypocenter.entrySet()) {
+					java.util.Map<com.treloc.xtreloc.app.gui.model.CatalogInfo, Hypocenter> catalogHypocenterMap = entry.getValue();
+					if (catalogHypocenterMap.size() >= 2) {
+						java.util.List<com.treloc.xtreloc.app.gui.model.CatalogInfo> catalogsForTime = new java.util.ArrayList<>(catalogHypocenterMap.keySet());
+						
+						for (int i = 0; i < catalogsForTime.size() - 1; i++) {
+							com.treloc.xtreloc.app.gui.model.CatalogInfo catalog1 = catalogsForTime.get(i);
+							com.treloc.xtreloc.app.gui.model.CatalogInfo catalog2 = catalogsForTime.get(i + 1);
+							Hypocenter h1 = catalogHypocenterMap.get(catalog1);
+							Hypocenter h2 = catalogHypocenterMap.get(catalog2);
+							
+							Coordinate[] coords = new Coordinate[] {
+								new Coordinate(h1.lon, h1.lat),
+								new Coordinate(h2.lon, h2.lat)
+							};
+							org.locationtech.jts.geom.LineString line = gf.createLineString(coords);
+							SimpleFeature connectionFeature = DataUtilities.template(connectionType);
+							connectionFeature.setDefaultGeometry(line);
+							connectionCollection.add(connectionFeature);
+						}
+					}
+				}
+			}
+			
+			if (!connectionCollection.isEmpty()) {
+				Color connectionColor = new Color(128, 128, 128, 128);
+				Style connectionStyle = com.treloc.xtreloc.app.gui.service.StyleFactory.createConnectionLineStyle(
+					connectionColor, 1.0f);
+				FeatureLayer connectionLayer = new FeatureLayer(connectionCollection, connectionStyle);
+				connectionLayer.setTitle("ConnectionLayer");
+				map.addLayer(connectionLayer);
+			}
+		}
+		
+		updateLegend();
+		forceMapRepaint();
+	}
+	
+	/**
+	 * Forces a complete repaint of the map pane.
+	 */
+	private void forceMapRepaint() {
+		try {
+			SwingUtilities.invokeLater(() -> {
+				try {
+					MapPane mapPane = frame.getMapPane();
+					if (mapPane != null) {
+						Component mapPaneComponent = (Component) mapPane;
+						mapPaneComponent.revalidate();
+						mapPaneComponent.repaint();
+					}
+				} catch (Exception e) {
+					java.util.logging.Logger.getLogger(MapView.class.getName())
+						.warning("Failed to repaint map: " + e.getMessage());
+				}
+			});
+		} catch (Exception e) {
+			java.util.logging.Logger.getLogger(MapView.class.getName())
+				.warning("Failed to schedule map update: " + e.getMessage());
+		}
+	}
+	
+	/**
+	 * Sets up the legend panel to display catalog information.
+	 */
+	private void setupLegendPanel() {
+		legendPanel = new JPanel();
+		legendPanel.setLayout(new BoxLayout(legendPanel, BoxLayout.Y_AXIS));
+		legendPanel.setBorder(BorderFactory.createTitledBorder("Legend"));
+		legendPanel.setOpaque(true);
+		legendPanel.setBackground(new Color(255, 255, 255, 220));
+		legendPanel.setVisible(false);
+		
+		Component mapPaneComponent = (Component) frame.getMapPane();
+		if (mapPaneComponent instanceof Container) {
+			((Container) mapPaneComponent).setLayout(null);
+			((Container) mapPaneComponent).add(legendPanel);
+		}
+	}
+	
+	/**
+	 * Updates the legend panel with current catalog information.
+	 */
+	private void updateLegend() {
+		if (legendPanel == null) {
+			return;
+		}
+		
+		legendPanel.removeAll();
+		
+		boolean hasVisibleCatalogs = false;
+		for (com.treloc.xtreloc.app.gui.model.CatalogInfo catalogInfo : catalogInfos) {
+			if (catalogInfo.isVisible() && catalogInfo.getHypocenters() != null && !catalogInfo.getHypocenters().isEmpty()) {
+				hasVisibleCatalogs = true;
+				
+				JPanel itemPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 2));
+				itemPanel.setOpaque(false);
+				
+				Color color = catalogInfo.getColor();
+				com.treloc.xtreloc.app.gui.model.CatalogInfo.SymbolType symbolType = catalogInfo.getSymbolType();
+				
+				JLabel symbolLabel = new JLabel() {
+					@Override
+					protected void paintComponent(Graphics g) {
+						super.paintComponent(g);
+						Graphics2D g2 = (Graphics2D) g.create();
+						g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+						g2.setColor(color);
+						int size = 12;
+						int x = (getWidth() - size) / 2;
+						int y = (getHeight() - size) / 2;
+						
+						switch (symbolType) {
+							case CIRCLE:
+								g2.fillOval(x, y, size, size);
+								break;
+							case SQUARE:
+								g2.fillRect(x, y, size, size);
+								break;
+							case TRIANGLE:
+								int[] xPoints = {x + size/2, x, x + size};
+								int[] yPoints = {y, y + size, y + size};
+								g2.fillPolygon(xPoints, yPoints, 3);
+								break;
+							case DIAMOND:
+								int[] dxPoints = {x + size/2, x + size, x + size/2, x};
+								int[] dyPoints = {y, y + size/2, y + size, y + size/2};
+								g2.fillPolygon(dxPoints, dyPoints, 4);
+								break;
+							case CROSS:
+								g2.setStroke(new BasicStroke(2));
+								g2.drawLine(x, y + size/2, x + size, y + size/2);
+								g2.drawLine(x + size/2, y, x + size/2, y + size);
+								break;
+							case STAR:
+								int centerX = x + size/2;
+								int centerY = y + size/2;
+								int outerRadius = size/2;
+								int innerRadius = size/4;
+								int points = 5;
+								int[] sxPoints = new int[points * 2];
+								int[] syPoints = new int[points * 2];
+								for (int i = 0; i < points * 2; i++) {
+									double angle = Math.PI * i / points;
+									int radius = (i % 2 == 0) ? outerRadius : innerRadius;
+									sxPoints[i] = centerX + (int)(radius * Math.cos(angle - Math.PI/2));
+									syPoints[i] = centerY + (int)(radius * Math.sin(angle - Math.PI/2));
+								}
+								g2.fillPolygon(sxPoints, syPoints, points * 2);
+								break;
+						}
+						g2.dispose();
+					}
+				};
+				symbolLabel.setPreferredSize(new java.awt.Dimension(20, 20));
+				itemPanel.add(symbolLabel);
+				
+				JLabel nameLabel = new JLabel(catalogInfo.getName());
+				nameLabel.setFont(nameLabel.getFont().deriveFont(Font.PLAIN, 11f));
+				itemPanel.add(nameLabel);
+				
+				legendPanel.add(itemPanel);
+			}
+		}
+		
+		if (showConnections && catalogInfos.size() >= 2) {
+			boolean hasConnections = false;
+			for (com.treloc.xtreloc.app.gui.model.CatalogInfo info : catalogInfos) {
+				if (info.isVisible() && info.getHypocenters() != null && !info.getHypocenters().isEmpty()) {
+					hasConnections = true;
+					break;
+				}
+			}
+			
+			if (hasConnections) {
+				JPanel connectionPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 2));
+				connectionPanel.setOpaque(false);
+				
+				JLabel connectionSymbol = new JLabel() {
+					@Override
+					protected void paintComponent(Graphics g) {
+						super.paintComponent(g);
+						Graphics2D g2 = (Graphics2D) g.create();
+						g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+						g2.setColor(new Color(128, 128, 128, 128));
+						g2.setStroke(new BasicStroke(2));
+						g2.drawLine(5, getHeight()/2, getWidth()-5, getHeight()/2);
+						g2.dispose();
+					}
+				};
+				connectionSymbol.setPreferredSize(new java.awt.Dimension(20, 20));
+				connectionPanel.add(connectionSymbol);
+				
+				JLabel connectionLabel = new JLabel("Connections");
+				connectionLabel.setFont(connectionLabel.getFont().deriveFont(Font.PLAIN, 11f));
+				connectionPanel.add(connectionLabel);
+				
+				legendPanel.add(connectionPanel);
+			}
+		}
+		
+		legendPanel.setVisible(hasVisibleCatalogs);
+		legendPanel.revalidate();
+		legendPanel.repaint();
+		updateOverlayPositions();
+	}
+	
+	/**
+	 * Gets the list of currently registered catalog information.
+	 * 
+	 * @return a list of catalog information
+	 */
+	public java.util.List<com.treloc.xtreloc.app.gui.model.CatalogInfo> getCatalogInfos() {
+		return new java.util.ArrayList<>(catalogInfos);
+	}
+	
+	/**
+	 * Finds the catalog that contains the given hypocenter.
+	 * 
+	 * @param hypocenter the hypocenter to search for
+	 * @param catalogs the list of catalogs to search in
+	 * @return the catalog containing the hypocenter, or null if not found
+	 */
+	private com.treloc.xtreloc.app.gui.model.CatalogInfo findCatalogForHypocenter(
+			Hypocenter hypocenter, 
+			java.util.List<com.treloc.xtreloc.app.gui.model.CatalogInfo> catalogs) {
+		for (com.treloc.xtreloc.app.gui.model.CatalogInfo catalog : catalogs) {
+			if (catalog.getHypocenters() != null && catalog.getHypocenters().contains(hypocenter)) {
+				return catalog;
+			}
+		}
+		return null;
+	}
+	
+	/**
+	 * Applies color map display to a specific catalog while keeping other catalogs in normal display mode.
+	 * 
+	 * @param catalogInfo the catalog to apply color map to
+	 * @param columnName the name of the column used for coloring
+	 * @param values the values for each hypocenter in the catalog
+	 */
+	public void applyColorMapToCatalog(com.treloc.xtreloc.app.gui.model.CatalogInfo catalogInfo, String columnName, double[] values) {
+		if (catalogInfo == null || values == null) {
+			clearColorMap();
+			return;
+		}
+		
+		colorMapCatalog = catalogInfo;
+		colorMapColumn = columnName;
+		colorMapValues = values.clone();
+		updateMultipleCatalogsDisplay();
+	}
+	
+	/**
+	 * Clears the color map display and returns to normal catalog display mode.
+	 */
+	public void clearColorMap() {
+		colorMapCatalog = null;
+		colorMapColumn = null;
+		colorMapValues = null;
+		updateMultipleCatalogsDisplay();
 	}
 	
 	public void showHypocenters(List<Hypocenter> hypos, String colorColumn, double[] colorValues) throws Exception {
@@ -480,28 +922,7 @@ public class MapView {
 			map.addLayer(layer);
 		}
 		
-		// マップを再描画（エラーハンドリングを追加）
-		try {
-			SwingUtilities.invokeLater(() -> {
-				try {
-					frame.getMapPane().repaint();
-				} catch (Exception e) {
-					// GeoToolsのレンダリングエラーを抑制（NullPointerExceptionなど）
-					if (e instanceof NullPointerException && 
-						(e.getMessage() == null || e.getMessage().contains("loops"))) {
-						// GeoToolsの既知のバグを無視
-						return;
-					}
-					// その他のエラーはログに記録
-					java.util.logging.Logger.getLogger(MapView.class.getName())
-						.warning("マップの再描画に失敗: " + e.getMessage());
-				}
-			});
-		} catch (Exception e) {
-			// エラーを無視（GeoToolsの既知のバグ）
-			java.util.logging.Logger.getLogger(MapView.class.getName())
-				.warning("マップ更新のスケジューリングに失敗: " + e.getMessage());
-		}
+		forceMapRepaint();
 	}
 	
 	/**
@@ -579,12 +1000,10 @@ public class MapView {
 			try {
 				showHypocenters(lastHypocenters, lastColorColumn, lastColorValues);
 			} catch (Exception e) {
-				// If re-display fails, just repaint
-				frame.getMapPane().repaint();
+				forceMapRepaint();
 			}
 		} else {
-			// Trigger repaint to update colors with new palette
-			frame.getMapPane().repaint();
+			forceMapRepaint();
 		}
 	}
 	
@@ -670,53 +1089,38 @@ public class MapView {
 		}
 	}
 	
-	/**
-	 * ステータスバーの右上に画像出力ボタンを追加
-	 */
 	private void setupStatusBarExportButton() {
 		SwingUtilities.invokeLater(() -> {
 			try {
-				// Create image export button
-				try {
-					File saveIconFile = new File("save.png");
-					if (saveIconFile.exists()) {
-						ImageIcon saveIcon = new ImageIcon(saveIconFile.getAbsolutePath());
-						Image img = saveIcon.getImage();
-						Image scaledImg = img.getScaledInstance(20, 20, Image.SCALE_SMOOTH);
-						ImageIcon scaledIcon = new ImageIcon(scaledImg);
-						exportImageButton = new JButton(scaledIcon);
-						exportImageButton.setToolTipText("画像出力");
-						exportImageButton.setBorderPainted(false);
-						exportImageButton.setContentAreaFilled(false);
-						exportImageButton.setFocusPainted(false);
-						exportImageButton.addActionListener(e -> exportMapImage());
-					} else {
-						// save.pngが見つからない場合はテキストボタン
-						exportImageButton = new JButton("保存");
-						exportImageButton.addActionListener(e -> exportMapImage());
-					}
-				} catch (Exception e) {
-					// エラー時はテキストボタン
-					exportImageButton = new JButton("保存");
-					exportImageButton.addActionListener(ev -> exportMapImage());
+				File saveIconFile = new File("docs/save.png");
+				if (!saveIconFile.exists()) {
+					saveIconFile = new File("save.png");
+				}
+				if (saveIconFile.exists()) {
+					ImageIcon saveIcon = new ImageIcon(saveIconFile.getAbsolutePath());
+					Image img = saveIcon.getImage();
+					Image scaledImg = img.getScaledInstance(20, 20, Image.SCALE_SMOOTH);
+					ImageIcon scaledIcon = new ImageIcon(scaledImg);
+					exportImageButton = new JButton(scaledIcon);
+					exportImageButton.setToolTipText("Export Map Image");
+					exportImageButton.setBorderPainted(false);
+					exportImageButton.setContentAreaFilled(false);
+					exportImageButton.setFocusPainted(false);
+					exportImageButton.addActionListener(e -> exportMapImage());
+				} else {
+					exportImageButton = new JButton("Save");
+					exportImageButton.addActionListener(e -> exportMapImage());
 				}
 				
-				// ステータスバーを取得
 				Container contentPane = frame.getContentPane();
 				JPanel statusBar = findStatusBarPanel(contentPane);
 				
 				if (statusBar != null) {
-					// ステータスバーのレイアウトを確認（通常はFlowLayoutまたはBoxLayout）
 					LayoutManager layout = statusBar.getLayout();
-					if (layout instanceof FlowLayout) {
-						// FlowLayoutの場合は右寄せにするため、Glueを追加
-						statusBar.add(Box.createHorizontalGlue());
-					} else if (layout instanceof BoxLayout) {
-						// BoxLayoutの場合はGlueを追加
+					if (layout instanceof FlowLayout || layout instanceof BoxLayout) {
 						statusBar.add(Box.createHorizontalGlue());
 					}
 					
-					// ボタンをステータスバーに追加
 					statusBar.add(exportImageButton);
 					statusBar.revalidate();
 					statusBar.repaint();
@@ -973,28 +1377,8 @@ public class MapView {
 	 */
 	public void setSymbolSize(int size) {
 		this.symbolSize = Math.max(5, Math.min(50, size));
-		// 既存のレイヤーを再描画（エラーハンドリングを追加）
-		try {
-			SwingUtilities.invokeLater(() -> {
-				try {
-					frame.getMapPane().repaint();
-				} catch (Exception e) {
-					// GeoToolsのレンダリングエラーを抑制（NullPointerExceptionなど）
-					if (e instanceof NullPointerException && 
-						(e.getMessage() == null || e.getMessage().contains("loops"))) {
-						// GeoToolsの既知のバグを無視
-						return;
-					}
-					// その他のエラーはログに記録
-					java.util.logging.Logger.getLogger(MapView.class.getName())
-						.warning("マップの再描画に失敗: " + e.getMessage());
-				}
-			});
-		} catch (Exception e) {
-			// エラーを無視（GeoToolsの既知のバグ）
-			java.util.logging.Logger.getLogger(MapView.class.getName())
-				.warning("マップ更新のスケジューリングに失敗: " + e.getMessage());
-		}
+		updateLegend();
+		forceMapRepaint();
 	}
 	
 	/**
@@ -1037,7 +1421,7 @@ public class MapView {
 	 */
 	private void exportMapImage() {
 		JFileChooser fileChooser = new JFileChooser();
-		fileChooser.setDialogTitle("地図を画像として出力");
+		fileChooser.setDialogTitle("Export Map as Image");
 		fileChooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter(
 			"PNG files (*.png)", "png"));
 		fileChooser.addChoosableFileFilter(new javax.swing.filechooser.FileNameExtensionFilter(
@@ -1050,12 +1434,12 @@ public class MapView {
 			try {
 				exportMapImageToFile(outputFile);
 				JOptionPane.showMessageDialog(frame,
-					"地図を画像として出力しました: " + outputFile.getAbsolutePath(),
-					"情報", JOptionPane.INFORMATION_MESSAGE);
+					"Map exported as image: " + outputFile.getAbsolutePath(),
+					"Information", JOptionPane.INFORMATION_MESSAGE);
 			} catch (Exception e) {
 				JOptionPane.showMessageDialog(frame,
-					"画像の出力に失敗しました: " + e.getMessage(),
-					"エラー", JOptionPane.ERROR_MESSAGE);
+					"Failed to export image: " + e.getMessage(),
+					"Error", JOptionPane.ERROR_MESSAGE);
 			}
 		}
 	}

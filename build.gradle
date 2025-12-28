@@ -63,7 +63,8 @@ dependencies {
 jar {
     manifest {
         attributes(
-                'Main-Class': 'com.treloc.xtreloc.app.gui.XTreLocGUI'
+                'Main-Class': 'com.treloc.xtreloc.app.gui.XTreLocGUI',
+                'Implementation-Version': project.version
         )
     }
     // Fat JARを作成（すべての依存関係を含む）
@@ -119,4 +120,235 @@ task runCLI(type: JavaExec) {
     classpath = sourceSets.main.runtimeClasspath
     mainClass = 'com.treloc.xtreloc.app.cli.XTreLocCLI'
     args = project.hasProperty('cliArgs') ? project.cliArgs.tokenize() : ['--help']
+}
+
+// PNGから.icnsファイルを生成するタスク（macOS用）
+task createIcons {
+    group = 'distribution'
+    description = 'Creates .icns file from PNG for macOS app icon'
+    onlyIf { System.getProperty('os.name').toLowerCase().contains('mac') }
+    
+    def pngFile = "${project.projectDir}/docs/logo.png"
+    def iconsetDir = "${project.buildDir}/logo.iconset"
+    def icnsFile = "${project.buildDir}/logo.icns"
+    
+    doLast {
+        def png = new File(pngFile)
+        if (!png.exists()) {
+            throw new GradleException("Logo file not found: ${pngFile}")
+        }
+        
+        // iconsetディレクトリを作成
+        def iconset = new File(iconsetDir)
+        if (iconset.exists()) {
+            iconset.deleteDir()
+        }
+        iconset.mkdirs()
+        
+        // 必要なサイズのアイコンを生成（macOSの.iconset形式）
+        def iconSizes = [
+            [16, 'icon_16x16.png', 'icon_16x16@2x.png'],
+            [32, 'icon_32x32.png', 'icon_32x32@2x.png'],
+            [128, 'icon_128x128.png', 'icon_128x128@2x.png'],
+            [256, 'icon_256x256.png', 'icon_256x256@2x.png'],
+            [512, 'icon_512x512.png', 'icon_512x512@2x.png']
+        ]
+        
+        iconSizes.each { sizeInfo ->
+            def size = sizeInfo[0]
+            def name1x = sizeInfo[1]
+            def name2x = sizeInfo[2]
+            def size2x = size * 2
+            
+            // 1xサイズ
+            def proc1x = new ProcessBuilder('sips', '-z', size.toString(), size.toString(), pngFile, '--out', "${iconsetDir}/${name1x}").start()
+            proc1x.waitFor()
+            if (proc1x.exitValue() != 0) {
+                throw new GradleException("Failed to create icon ${name1x}")
+            }
+            
+            // 2xサイズ
+            def proc2x = new ProcessBuilder('sips', '-z', size2x.toString(), size2x.toString(), pngFile, '--out', "${iconsetDir}/${name2x}").start()
+            proc2x.waitFor()
+            if (proc2x.exitValue() != 0) {
+                throw new GradleException("Failed to create icon ${name2x}")
+            }
+        }
+        
+        // iconutilで.icnsファイルを生成
+        def procIconutil = new ProcessBuilder('iconutil', '-c', 'icns', iconsetDir, '-o', icnsFile).start()
+        procIconutil.waitFor()
+        if (procIconutil.exitValue() != 0) {
+            throw new GradleException("Failed to create .icns file")
+        }
+        
+        // iconsetディレクトリを削除
+        iconset.deleteDir()
+    }
+}
+
+// macOS用.appバンドルを作成するタスク
+task createApp(type: Exec) {
+    group = 'distribution'
+    description = 'Creates a macOS .app bundle using jpackage'
+    dependsOn jar, createIcons
+    
+    def jpackageExec = "${System.getProperty('java.home')}/bin/jpackage"
+    def jarFile = "${project.buildDir}/libs/${project.jar.archiveBaseName.get()}-${project.version}.jar"
+    def appName = 'xTreLoc'
+    def pngIconFile = "${project.projectDir}/docs/logo.png"
+    def icnsIconFile = "${project.buildDir}/logo.icns"
+    
+    // jpackageが利用可能かチェックし、コマンドラインを構築
+    doFirst {
+        def jpackageFile = new File(jpackageExec)
+        if (!jpackageFile.exists()) {
+            throw new GradleException("jpackage not found at ${jpackageExec}. Please ensure you are using JDK 14 or higher.")
+        }
+        
+        def jar = new File(jarFile)
+        if (!jar.exists()) {
+            throw new GradleException("JAR file not found: ${jarFile}. Please run 'gradle jar' first.")
+        }
+        
+        // 既存の.appバンドルを削除
+        def existingApp = new File("${project.buildDir}/dist/${appName}.app")
+        if (existingApp.exists()) {
+            existingApp.deleteDir()
+        }
+        
+        // jpackage用の有効なバージョン番号を生成（-SNAPSHOTを削除し、3つの数字形式に変換）
+        def appVersion = project.version.toString().replace('-SNAPSHOT', '')
+        // バージョンが2つの数字のみの場合は、3つ目の数字を追加
+        if (appVersion.split('\\.').length == 2) {
+            appVersion = "${appVersion}.0"
+        }
+        
+        // コマンドラインを構築
+        def cmd = [
+            jpackageExec,
+            '--type', 'app-image',
+            '--input', "${project.buildDir}/libs",
+            '--name', appName,
+            '--main-jar', "${project.jar.archiveBaseName.get()}-${project.version}.jar",
+            '--main-class', 'com.treloc.xtreloc.app.gui.XTreLocGUI',
+            '--dest', "${project.buildDir}/dist",
+            '--app-version', appVersion,
+            '--vendor', 'xTreLoc',
+            '--description', 'Multi-method hypocenter location software with GUI and CLI support',
+            '--copyright', 'Copyright © 2024 xTreLoc'
+        ]
+        
+        // アイコンを設定（.icnsファイルが存在する場合は優先、なければPNGを使用）
+        def iconToUse = null
+        if (System.getProperty('os.name').toLowerCase().contains('mac')) {
+            def icnsFile = new File(icnsIconFile)
+            if (icnsFile.exists()) {
+                iconToUse = icnsIconFile
+            } else {
+                // .icnsファイルが存在しない場合はPNGを使用
+                def pngFile = new File(pngIconFile)
+                if (pngFile.exists()) {
+                    iconToUse = pngIconFile
+                }
+            }
+        } else {
+            def pngFile = new File(pngIconFile)
+            if (pngFile.exists()) {
+                iconToUse = pngIconFile
+            }
+        }
+        
+        if (iconToUse != null) {
+            cmd.addAll(['--icon', iconToUse])
+        }
+        
+        // macOS固有のオプション
+        if (System.getProperty('os.name').toLowerCase().contains('mac')) {
+            cmd.addAll([
+                '--mac-package-identifier', 'com.treloc.xtreloc',
+                '--mac-package-name', appName
+            ])
+        }
+        
+        commandLine = cmd
+    }
+}
+
+// DMGファイルを作成するタスク（macOS用）
+task createDmg(type: Exec) {
+    group = 'distribution'
+    description = 'Creates a macOS .dmg installer using jpackage'
+    dependsOn jar, createIcons
+    
+    def jpackageExec = "${System.getProperty('java.home')}/bin/jpackage"
+    def jarFile = "${project.buildDir}/libs/${project.jar.archiveBaseName.get()}-${project.version}.jar"
+    def appName = 'xTreLoc'
+    def pngIconFile = "${project.projectDir}/docs/logo.png"
+    def icnsIconFile = "${project.buildDir}/logo.icns"
+    
+    doFirst {
+        def jpackageFile = new File(jpackageExec)
+        if (!jpackageFile.exists()) {
+            throw new GradleException("jpackage not found at ${jpackageExec}. Please ensure you are using JDK 14 or higher.")
+        }
+        
+        if (!System.getProperty('os.name').toLowerCase().contains('mac')) {
+            throw new GradleException("DMG creation is only supported on macOS.")
+        }
+        
+        def jar = new File(jarFile)
+        if (!jar.exists()) {
+            throw new GradleException("JAR file not found: ${jarFile}. Please run 'gradle jar' first.")
+        }
+        
+        // 既存のDMGファイルを削除
+        def existingDmg = new File("${project.buildDir}/dist/${appName}-${project.version.toString().replace('-SNAPSHOT', '')}.dmg")
+        if (existingDmg.exists()) {
+            existingDmg.delete()
+        }
+        
+        // jpackage用の有効なバージョン番号を生成（-SNAPSHOTを削除し、3つの数字形式に変換）
+        def appVersion = project.version.toString().replace('-SNAPSHOT', '')
+        // バージョンが2つの数字のみの場合は、3つ目の数字を追加
+        if (appVersion.split('\\.').length == 2) {
+            appVersion = "${appVersion}.0"
+        }
+        
+        // コマンドラインを構築
+        def cmd = [
+            jpackageExec,
+            '--type', 'dmg',
+            '--input', "${project.buildDir}/libs",
+            '--name', appName,
+            '--main-jar', "${project.jar.archiveBaseName.get()}-${project.version}.jar",
+            '--main-class', 'com.treloc.xtreloc.app.gui.XTreLocGUI',
+            '--dest', "${project.buildDir}/dist",
+            '--app-version', appVersion,
+            '--vendor', 'xTreLoc',
+            '--description', 'Multi-method hypocenter location software with GUI and CLI support',
+            '--copyright', 'Copyright © 2024 xTreLoc',
+            '--mac-package-identifier', 'com.treloc.xtreloc',
+            '--mac-package-name', appName
+        ]
+        
+        // アイコンを設定（.icnsファイルが存在する場合は優先、なければPNGを使用）
+        def iconToUse = null
+        def icnsFile = new File(icnsIconFile)
+        if (icnsFile.exists()) {
+            iconToUse = icnsIconFile
+        } else {
+            // .icnsファイルが存在しない場合はPNGを使用
+            def pngFile = new File(pngIconFile)
+            if (pngFile.exists()) {
+                iconToUse = pngIconFile
+            }
+        }
+        
+        if (iconToUse != null) {
+            cmd.addAll(['--icon', iconToUse])
+        }
+        
+        commandLine = cmd
+    }
 }

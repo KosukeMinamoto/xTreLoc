@@ -102,24 +102,23 @@ public class SyntheticTestPanel extends JPanel {
     
     private JPanel createCatalogPanel() {
         JPanel panel = new JPanel(new BorderLayout());
-        panel.setBorder(BorderFactory.createTitledBorder("カタログファイル"));
+        panel.setBorder(BorderFactory.createTitledBorder("Catalog File"));
         
         catalogFileField = new JTextField();
         catalogFileField.setEditable(true); // 手動入力も可能にする
         
-        // フォルダアイコンをボタンに設定（左側に配置）
         selectCatalogButton = new JButton();
         try {
-            Icon folderIcon = UIManager.getIcon("FileView.directoryIcon");
-            if (folderIcon != null) {
-                selectCatalogButton.setIcon(folderIcon);
+            Icon fileIcon = UIManager.getIcon("FileView.fileIcon");
+            if (fileIcon != null) {
+                selectCatalogButton.setIcon(fileIcon);
             } else {
-                selectCatalogButton.setText("選択");
+                selectCatalogButton.setText("📄");
             }
         } catch (Exception e) {
-            selectCatalogButton.setText("選択");
+            selectCatalogButton.setText("📄");
         }
-        selectCatalogButton.setToolTipText("カタログファイルを選択");
+        selectCatalogButton.setToolTipText("Select catalog file");
         selectCatalogButton.addActionListener(e -> selectCatalogFile());
         
         JPanel fieldPanel = new JPanel(new BorderLayout());
@@ -223,7 +222,7 @@ public class SyntheticTestPanel extends JPanel {
     }
     
     private void selectCatalogFile() {
-        fileChooser.setDialogTitle("カタログファイルを選択");
+        fileChooser.setDialogTitle("Select Catalog File");
         fileChooser.setFileSelectionMode(JFileChooser.FILES_ONLY);
         fileChooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter(
             "Catalog files (*.csv)", "csv"));
@@ -247,29 +246,30 @@ public class SyntheticTestPanel extends JPanel {
             selectedCatalogFile = fileChooser.getSelectedFile();
             catalogFileField.setText(selectedCatalogFile.getAbsolutePath());
             updateExecuteButtonState();
-            appendLog("カタログファイルを選択: " + selectedCatalogFile.getAbsolutePath());
+            appendLog("Catalog file selected: " + selectedCatalogFile.getAbsolutePath());
         }
     }
     
     private void selectOutputDirectory() {
-        fileChooser.setDialogTitle("出力ディレクトリを選択");
-        fileChooser.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
-        
         // 現在のテキストフィールドのパスを初期ディレクトリとして設定
+        File currentDir = null;
         String currentPath = outputDirField.getText().trim();
         if (!currentPath.isEmpty()) {
-            File currentDir = new File(currentPath);
+            currentDir = new File(currentPath);
             if (currentDir.exists() && currentDir.isDirectory()) {
-                fileChooser.setCurrentDirectory(currentDir);
+                // currentDirをそのまま使用
             } else if (currentDir.getParentFile() != null && currentDir.getParentFile().exists()) {
-                fileChooser.setCurrentDirectory(currentDir.getParentFile());
+                currentDir = currentDir.getParentFile();
+            } else {
+                currentDir = null;
             }
         }
         
-        int result = fileChooser.showOpenDialog(this);
+        File selectedDir = com.treloc.xtreloc.app.gui.util.DirectoryChooserHelper.selectDirectory(
+            this, "Select Output Directory", currentDir);
         
-        if (result == JFileChooser.APPROVE_OPTION) {
-            selectedOutputDir = fileChooser.getSelectedFile();
+        if (selectedDir != null) {
+            selectedOutputDir = selectedDir;
             outputDirField.setText(selectedOutputDir.getAbsolutePath());
             updateExecuteButtonState();
             appendLog("出力ディレクトリを選択: " + selectedOutputDir.getAbsolutePath());
@@ -284,7 +284,7 @@ public class SyntheticTestPanel extends JPanel {
     private void executeSyntheticTest() {
         if (selectedCatalogFile == null || selectedOutputDir == null || config == null) {
             JOptionPane.showMessageDialog(this,
-                "カタログファイルと出力ディレクトリを選択してください",
+                "Please select catalog file and output directory",
                 "エラー", JOptionPane.ERROR_MESSAGE);
             return;
         }

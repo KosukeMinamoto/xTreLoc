@@ -6,7 +6,9 @@ import javax.swing.*;
 import java.awt.*;
 
 /**
- * 観測点データ、Catalogデータ、Shapefileデータをタブで切り替えて表示するパネル
+ * Panel for displaying various data views in tabs.
+ * 
+ * @author K.Minamoto
  */
 public class DataViewPanel extends JPanel {
     private StationTablePanel stationPanel;
@@ -15,61 +17,71 @@ public class DataViewPanel extends JPanel {
     private HypocenterLocationPanel locationPanel;
     private JTabbedPane tabbedPane;
 
+    /**
+     * Constructs a new DataViewPanel.
+     * 
+     * @param mapView the map view component
+     * @param mapController the map controller
+     */
     public DataViewPanel(MapView mapView, MapController mapController) {
         setLayout(new BorderLayout());
         
-        // タブパネルの作成
         tabbedPane = new JTabbedPane();
         
-        // 観測点データタブ
         stationPanel = new StationTablePanel(mapView);
-        tabbedPane.addTab("観測点データ", stationPanel);
+        tabbedPane.addTab("Station Data", stationPanel);
         
-        // Catalogデータタブ
         catalogPanel = new CatalogTablePanel(mapView);
-        tabbedPane.addTab("Catalogデータ", catalogPanel);
+        tabbedPane.addTab("Catalog Data", catalogPanel);
         
-        // Shapefileデータタブ
         shapefilePanel = new ShapefileTablePanel(mapView, mapController);
         tabbedPane.addTab("Shapefile", shapefilePanel);
         
-        // 震源決定パネル（外部で使用されるため保持）
         locationPanel = new HypocenterLocationPanel(mapView);
         
-        // このパネルはタブパネルのみを表示（震源決定パネルは外部で配置）
         add(tabbedPane, BorderLayout.CENTER);
     }
 
     /**
-     * 観測点データパネルを取得
+     * Gets the station data panel.
+     * 
+     * @return the station data panel
      */
     public StationTablePanel getStationPanel() {
         return stationPanel;
     }
 
     /**
-     * Catalogデータパネルを取得
+     * Gets the catalog data panel.
+     * 
+     * @return the catalog data panel
      */
     public CatalogTablePanel getCatalogPanel() {
         return catalogPanel;
     }
     
     /**
-     * 震源決定パネルを取得
+     * Gets the hypocenter location panel.
+     * 
+     * @return the hypocenter location panel
      */
     public HypocenterLocationPanel getLocationPanel() {
         return locationPanel;
     }
     
     /**
-     * タブパネルを取得
+     * Gets the tabbed pane.
+     * 
+     * @return the tabbed pane
      */
     public JTabbedPane getTabbedPane() {
         return tabbedPane;
     }
     
     /**
-     * Shapefileパネルを取得
+     * Gets the shapefile panel.
+     * 
+     * @return the shapefile panel
      */
     public ShapefileTablePanel getShapefilePanel() {
         return shapefilePanel;

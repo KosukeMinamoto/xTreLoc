@@ -43,25 +43,25 @@ public class SettingsPanel extends JPanel {
      */
     private void initComponents() {
         setLayout(new GridBagLayout());
-        setBorder(BorderFactory.createTitledBorder("設定"));
+        setBorder(BorderFactory.createTitledBorder("Settings"));
         GridBagConstraints gbc = new GridBagConstraints();
         gbc.insets = new Insets(5, 5, 5, 5);
         gbc.anchor = GridBagConstraints.WEST;
         
         gbc.gridx = 0; gbc.gridy = 0;
-        add(new JLabel("フォント:"), gbc);
+        add(new JLabel("Font:"), gbc);
         gbc.gridx = 1;
         fontCombo = new JComboBox<>(new String[]{"default", "Sans Serif", "Serif", "Monospaced"});
         add(fontCombo, gbc);
         
         gbc.gridx = 0; gbc.gridy = 1;
-        add(new JLabel("シンボルサイズ:"), gbc);
+        add(new JLabel("Symbol Size:"), gbc);
         gbc.gridx = 1;
         symbolSizeSpinner = new JSpinner(new SpinnerNumberModel(10, 5, 50, 1));
         add(symbolSizeSpinner, gbc);
         
         gbc.gridx = 0; gbc.gridy = 2;
-        add(new JLabel("デフォルトカラーパレット:"), gbc);
+        add(new JLabel("Default Color Palette:"), gbc);
         gbc.gridx = 1;
         defaultPaletteCombo = new JComboBox<>(new String[]{
             "Blue to Red", "Viridis", "Plasma", "Cool to Warm", "Rainbow", "Grayscale"
@@ -69,13 +69,13 @@ public class SettingsPanel extends JPanel {
         add(defaultPaletteCombo, gbc);
         
         gbc.gridx = 0; gbc.gridy = 3;
-        add(new JLabel("ログレベル:"), gbc);
+        add(new JLabel("Log Level:"), gbc);
         gbc.gridx = 1;
         logLevelCombo = new JComboBox<>(new String[]{"INFO", "DEBUG", "WARNING", "SEVERE"});
         add(logLevelCombo, gbc);
         
         gbc.gridx = 0; gbc.gridy = 4;
-        add(new JLabel("ログ履歴行数:"), gbc);
+        add(new JLabel("Log History Lines:"), gbc);
         gbc.gridx = 1;
         logHistorySpinner = new JSpinner(new SpinnerNumberModel(50, 10, 1000, 10));
         add(logHistorySpinner, gbc);
@@ -83,7 +83,7 @@ public class SettingsPanel extends JPanel {
         gbc.gridx = 0; gbc.gridy = 5;
         gbc.gridwidth = 2;
         gbc.anchor = GridBagConstraints.CENTER;
-        applyButton = new JButton("適用");
+        applyButton = new JButton("Apply");
         applyButton.addActionListener(e -> applySettings());
         add(applyButton, gbc);
     }
@@ -128,8 +128,8 @@ public class SettingsPanel extends JPanel {
         }
         
         JOptionPane.showMessageDialog(this,
-            "設定を適用しました。",
-            "設定",
+            "Settings applied.",
+            "Settings",
             JOptionPane.INFORMATION_MESSAGE);
     }
     
