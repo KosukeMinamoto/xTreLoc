@@ -1,9 +1,11 @@
 package com.treloc.xtreloc.app.gui.view;
 
 import com.treloc.xtreloc.app.gui.util.AppSettings;
+import com.treloc.xtreloc.app.gui.util.VersionInfo;
 
 import javax.swing.*;
 import java.awt.*;
+import java.io.File;
 
 /**
  * Settings panel for configuring application preferences.
@@ -17,6 +19,8 @@ public class SettingsPanel extends JPanel {
     private JComboBox<String> defaultPaletteCombo;
     private JComboBox<String> logLevelCombo;
     private JSpinner logHistorySpinner;
+    private JTextField homeDirectoryField;
+    private JButton browseHomeDirButton;
     private JButton applyButton;
     private MapView mapView;
     private Window parentWindow;
@@ -81,11 +85,48 @@ public class SettingsPanel extends JPanel {
         add(logHistorySpinner, gbc);
         
         gbc.gridx = 0; gbc.gridy = 5;
-        gbc.gridwidth = 2;
+        add(new JLabel("Home Directory:"), gbc);
+        gbc.gridx = 1;
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+        gbc.weightx = 1.0;
+        homeDirectoryField = new JTextField(30);
+        add(homeDirectoryField, gbc);
+        gbc.gridx = 2;
+        gbc.fill = GridBagConstraints.NONE;
+        gbc.weightx = 0.0;
+        browseHomeDirButton = new JButton("Browse...");
+        browseHomeDirButton.addActionListener(e -> browseHomeDirectory());
+        add(browseHomeDirButton, gbc);
+        
+        gbc.gridx = 0; gbc.gridy = 6;
+        gbc.gridwidth = 3;
         gbc.anchor = GridBagConstraints.CENTER;
         applyButton = new JButton("Apply");
         applyButton.addActionListener(e -> applySettings());
         add(applyButton, gbc);
+        
+        // Version information
+        gbc.gridx = 0; gbc.gridy = 7;
+        gbc.gridwidth = 3;
+        gbc.anchor = GridBagConstraints.CENTER;
+        gbc.insets = new Insets(20, 5, 5, 5);
+        JLabel versionLabel = new JLabel("Version: " + VersionInfo.getVersion());
+        versionLabel.setFont(versionLabel.getFont().deriveFont(Font.PLAIN, 10f));
+        add(versionLabel, gbc);
+        
+        // About button
+        gbc.gridx = 0; gbc.gridy = 8;
+        gbc.gridwidth = 3;
+        gbc.anchor = GridBagConstraints.CENTER;
+        gbc.insets = new Insets(5, 5, 5, 5);
+        JButton aboutButton = new JButton("About");
+        aboutButton.addActionListener(e -> {
+            AboutDialog dialog = new AboutDialog(
+                parentWindow instanceof JFrame ? (JFrame) parentWindow : null
+            );
+            dialog.setVisible(true);
+        });
+        add(aboutButton, gbc);
     }
     
     /**
@@ -97,6 +138,24 @@ public class SettingsPanel extends JPanel {
         defaultPaletteCombo.setSelectedItem(currentSettings.getDefaultPalette());
         logLevelCombo.setSelectedItem(currentSettings.getLogLevel());
         logHistorySpinner.setValue(currentSettings.getHistoryLines());
+        homeDirectoryField.setText(currentSettings.getHomeDirectory());
+    }
+    
+    /**
+     * Opens a directory chooser to select the home directory.
+     */
+    private void browseHomeDirectory() {
+        File currentDir = new File(homeDirectoryField.getText());
+        if (!currentDir.exists() || !currentDir.isDirectory()) {
+            currentDir = new File(System.getProperty("user.home"));
+        }
+        
+        File selectedDir = com.treloc.xtreloc.app.gui.util.DirectoryChooserHelper.selectDirectory(
+            this, "Select Home Directory", currentDir);
+        
+        if (selectedDir != null) {
+            homeDirectoryField.setText(selectedDir.getAbsolutePath());
+        }
     }
     
     /**
@@ -109,6 +168,7 @@ public class SettingsPanel extends JPanel {
         currentSettings.setDefaultPalette((String) defaultPaletteCombo.getSelectedItem());
         currentSettings.setLogLevel((String) logLevelCombo.getSelectedItem());
         currentSettings.setHistoryLines((Integer) logHistorySpinner.getValue());
+        currentSettings.setHomeDirectory(homeDirectoryField.getText());
         
         currentSettings.save();
         

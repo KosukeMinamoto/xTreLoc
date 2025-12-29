@@ -2,30 +2,27 @@ package com.treloc.xtreloc.app.gui.util;
 
 import java.io.File;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
 
-/**
- * アプリケーションディレクトリとリソースファイルの管理
- */
 public class AppDirectoryManager {
     private static final String APP_DIR_NAME = ".xtreloc";
+    private static final String RESOURCES_DIR = "images";
     private static final String LOGO_FILE_NAME = "logo.png";
+    private static final String SAVE_ICON_FILE_NAME = "save.png";
     private static final String SETTINGS_FILE_NAME = "settings.json";
     
     private static File appDir;
     private static File logoFile;
+    private static File saveIconFile;
     private static File settingsFile;
     
     static {
         initializeAppDirectory();
     }
     
-    /**
-     * アプリケーションディレクトリを初期化
-     */
     private static void initializeAppDirectory() {
-        // ユーザーのホームディレクトリ配下にアプリケーションディレクトリを作成
         String userHome = System.getProperty("user.home");
         appDir = new File(userHome, APP_DIR_NAME);
         
@@ -33,49 +30,60 @@ public class AppDirectoryManager {
             appDir.mkdirs();
         }
         
-        // logo.pngのパスを設定
         logoFile = new File(appDir, LOGO_FILE_NAME);
+        copyResourceIfNotExists(RESOURCES_DIR + "/" + LOGO_FILE_NAME, logoFile);
         
-        // 現在のディレクトリにlogo.pngがある場合はコピー
-        File currentLogo = new File(LOGO_FILE_NAME);
-        if (currentLogo.exists() && !logoFile.exists()) {
-            try {
-                Files.copy(currentLogo.toPath(), logoFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
-            } catch (IOException e) {
-                System.err.println("ロゴファイルのコピーに失敗: " + e.getMessage());
-            }
-        }
+        saveIconFile = new File(appDir, SAVE_ICON_FILE_NAME);
+        copyResourceIfNotExists(RESOURCES_DIR + "/" + SAVE_ICON_FILE_NAME, saveIconFile);
         
-        // 設定ファイルのパスを設定
         settingsFile = new File(appDir, SETTINGS_FILE_NAME);
     }
     
-    /**
-     * アプリケーションディレクトリを取得
-     */
+    private static void copyResourceIfNotExists(String resourcePath, File targetFile) {
+        if (targetFile.exists()) {
+            return;
+        }
+        
+        try (InputStream is = AppDirectoryManager.class.getClassLoader().getResourceAsStream(resourcePath)) {
+            if (is != null) {
+                Files.copy(is, targetFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
+            } else {
+                File fallbackFile = new File("docs/" + targetFile.getName());
+                if (fallbackFile.exists()) {
+                    Files.copy(fallbackFile.toPath(), targetFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
+                } else {
+                    File currentDirFile = new File(targetFile.getName());
+                    if (currentDirFile.exists()) {
+                        Files.copy(currentDirFile.toPath(), targetFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
+                    }
+                }
+            }
+        } catch (IOException e) {
+            System.err.println("Failed to copy resource file " + resourcePath + ": " + e.getMessage());
+        }
+    }
+    
     public static File getAppDirectory() {
         return appDir;
     }
     
-    /**
-     * ロゴファイルのパスを取得
-     */
     public static File getLogoFile() {
         return logoFile;
     }
     
-    /**
-     * 設定ファイルのパスを取得
-     */
     public static File getSettingsFile() {
         return settingsFile;
     }
     
-    /**
-     * ロゴファイルが存在するか確認
-     */
     public static boolean logoFileExists() {
         return logoFile != null && logoFile.exists();
+    }
+    
+    public static File getSaveIconFile() {
+        if (saveIconFile != null && saveIconFile.exists()) {
+            return saveIconFile;
+        }
+        return saveIconFile;
     }
 }
 

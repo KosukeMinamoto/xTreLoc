@@ -263,6 +263,11 @@ public class ScipyLSQR {
 
 	public static LSQRResult lsqr(OpenMapRealMatrix A, double[] b, double damp, double atol, double btol,
 			double conlim, Integer iter_lim, boolean show, boolean calc_var, double[] x0) {
+		return lsqr(A, b, damp, atol, btol, conlim, iter_lim, show, calc_var, x0, null);
+	}
+	
+	public static LSQRResult lsqr(OpenMapRealMatrix A, double[] b, double damp, double atol, double btol,
+			double conlim, Integer iter_lim, boolean show, boolean calc_var, double[] x0, java.util.function.Consumer<String> logConsumer) {
 		SparseLinearOperator Aop = convertToSparseOperator(A);
 		int m = Aop.getRowDimension();
 		int n = Aop.getColumnDimension();
@@ -282,16 +287,26 @@ public class ScipyLSQR {
 		};
 
 		if (show) {
-			System.out.println(" ");
-			System.out.println("LSQR            Least-squares solution of  Ax = b");
+			String line1 = " ";
+			String line2 = "LSQR            Least-squares solution of  Ax = b";
 			String str1 = "The matrix A has " + m + " rows and " + n + " columns";
 			String str2 = String.format("damp = %20.14e   calc_var = %8b", damp, calc_var);
 			String str3 = String.format("atol = %8.2e                 conlim = %8.2e", atol, conlim);
 			String str4 = String.format("btol = %8.2e               iter_lim = %8d", btol, iter_lim);
+			System.out.println(line1);
+			System.out.println(line2);
 			System.out.println(str1);
 			System.out.println(str2);
 			System.out.println(str3);
 			System.out.println(str4);
+			if (logConsumer != null) {
+				logConsumer.accept(line1);
+				logConsumer.accept(line2);
+				logConsumer.accept(str1);
+				logConsumer.accept(str2);
+				logConsumer.accept(str3);
+				logConsumer.accept(str4);
+			}
 		}
 
 		int itn = 0;
@@ -356,6 +371,9 @@ public class ScipyLSQR {
 		if (arnorm == 0) {
 			if (show) {
 				System.out.println(msg[0]);
+				if (logConsumer != null) {
+					logConsumer.accept(msg[0]);
+				}
 			}
 			return new LSQRResult(x, istop, itn, r1norm, r2norm, anorm, acond, arnorm, xnorm, var);
 		}
@@ -364,14 +382,22 @@ public class ScipyLSQR {
 		String head2 = " Compatible    LS      Norm A   Cond A";
 
 		if (show) {
-			System.out.println(" ");
-			System.out.println(head1 + head2);
+			String line1 = " ";
+			String line2 = head1 + head2;
 			double test1 = 1;
 			double test2 = alfa / beta;
 			String str1 = String.format("%6d %12.5e", itn, x[0]);
 			String str2 = String.format(" %10.3e %10.3e", r1norm, r2norm);
 			String str3 = String.format("  %8.1e %8.1e", test1, test2);
-			System.out.println(str1 + str2 + str3);
+			String line3 = str1 + str2 + str3;
+			System.out.println(line1);
+			System.out.println(line2);
+			System.out.println(line3);
+			if (logConsumer != null) {
+				logConsumer.accept(line1);
+				logConsumer.accept(line2);
+				logConsumer.accept(line3);
+			}
 		}
 
 		// Main iteration loop.
@@ -552,7 +578,11 @@ public class ScipyLSQR {
 					String str2 = String.format(" %10.3e %10.3e", r1norm, r2norm);
 					String str3 = String.format("  %8.1e %8.1e", test1, test2);
 					String str4 = String.format(" %8.1e %8.1e", anorm, acond);
-					System.out.println(str1 + str2 + str3 + str4);
+					String line = str1 + str2 + str3 + str4;
+					System.out.println(line);
+					if (logConsumer != null) {
+						logConsumer.accept(line);
+					}
 				}
 			}
 
@@ -561,28 +591,42 @@ public class ScipyLSQR {
 			}
 		}
 
-		// End of iteration loop.
-		// Print the stopping condition.
 		if (show) {
-			System.out.println(" ");
-			System.out.println("LSQR finished");
-			System.out.println(msg[istop]);
-			System.out.println(" ");
+			String line1 = " ";
+			String line2 = "LSQR finished";
+			String line3 = msg[istop];
+			String line4 = " ";
 			String str1 = String.format("istop =%8d   r1norm =%8.1e", istop, r1norm);
 			String str2 = String.format("anorm =%8.1e   arnorm =%8.1e", anorm, arnorm);
 			String str3 = String.format("itn   =%8d   r2norm =%8.1e", itn, r2norm);
 			String str4 = String.format("acond =%8.1e   xnorm  =%8.1e", acond, xnorm);
-			System.out.println(str1 + "   " + str2);
-			System.out.println(str3 + "   " + str4);
-			System.out.println(" ");
+			String line5 = str1 + "   " + str2;
+			String line6 = str3 + "   " + str4;
+			String line7 = " ";
+			System.out.println(line1);
+			System.out.println(line2);
+			System.out.println(line3);
+			System.out.println(line4);
+			System.out.println(line5);
+			System.out.println(line6);
+			System.out.println(line7);
+			if (logConsumer != null) {
+				logConsumer.accept(line1);
+				logConsumer.accept(line2);
+				logConsumer.accept(line3);
+				logConsumer.accept(line4);
+				logConsumer.accept(line5);
+				logConsumer.accept(line6);
+				logConsumer.accept(line7);
+			}
 		}
 		return new LSQRResult(x, istop, itn, r1norm, r2norm, anorm, acond, arnorm, xnorm, var);
 	}
 
 	public static void main(String[] args) {
-		int m = 20; // 行数
-		int n = 10; // 列数
-		double sparsity = 0.1; // 非ゼロ要素の割合（10%）
+		int m = 20;
+		int n = 10;
+		double sparsity = 0.1;
 		OpenMapRealMatrix A = SparseMatrixGenerator.generateSparseMatrix(m, n, sparsity);
 		double[] b = SparseMatrixGenerator.generateVector(m);
 

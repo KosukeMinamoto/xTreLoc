@@ -95,7 +95,6 @@ public class HypocenterLocationPanel extends JPanel {
     
     private JPanel leftPanel;
     private JPanel inputDataPanel;
-    private JPanel dirPanel;
     
     public HypocenterLocationPanel(MapView mapView) {
         this.mapView = mapView;
@@ -124,7 +123,6 @@ public class HypocenterLocationPanel extends JPanel {
     private void initComponents() {
         setLayout(new BorderLayout());
         setBorder(new TitledBorder("Hypocenter Location"));
-        // 背景色はテーマから取得（UIManagerから）
         Color bgColor = UIManager.getColor("Panel.background");
         if (bgColor != null) {
             setBackground(bgColor);
@@ -134,7 +132,6 @@ public class HypocenterLocationPanel extends JPanel {
         
         leftPanel = new JPanel();
         leftPanel.setLayout(new BoxLayout(leftPanel, BoxLayout.Y_AXIS));
-        // 背景色はテーマから取得（UIManagerから）
         Color leftBgColor = UIManager.getColor("Panel.background");
         if (leftBgColor != null) {
             leftPanel.setBackground(leftBgColor);
@@ -210,11 +207,13 @@ public class HypocenterLocationPanel extends JPanel {
     
     private void updateInputDataPanelForMode(String mode) {
         boolean isSynOrClsMode = "SYN".equals(mode) || "CLS".equals(mode);
+        boolean isTrdMode = "TRD".equals(mode);
+        boolean isSynOrClsOrTrdMode = isSynOrClsMode || isTrdMode;
         boolean isOtherMode = !isSynOrClsMode;
         
         if (targetDirField != null) {
-            targetDirField.setEnabled(isOtherMode);
-            if (!isOtherMode) {
+            targetDirField.setEnabled(isOtherMode || isTrdMode);
+            if (!(isOtherMode || isTrdMode)) {
                 targetDirField.setBackground(new Color(240, 240, 240));
                 targetDirField.setForeground(new Color(150, 150, 150));
             } else {
@@ -223,11 +222,11 @@ public class HypocenterLocationPanel extends JPanel {
             }
         }
         if (selectDirButton != null) {
-            selectDirButton.setEnabled(isOtherMode);
+            selectDirButton.setEnabled(isOtherMode || isTrdMode);
         }
         if (targetDirLabel != null) {
-            targetDirLabel.setEnabled(isOtherMode);
-            if (!isOtherMode) {
+            targetDirLabel.setEnabled(isOtherMode || isTrdMode);
+            if (!(isOtherMode || isTrdMode)) {
                 targetDirLabel.setForeground(new Color(150, 150, 150));
             } else {
                 targetDirLabel.setForeground(null); // Reset to default color
@@ -235,8 +234,8 @@ public class HypocenterLocationPanel extends JPanel {
         }
         
         if (catalogFileField != null) {
-            catalogFileField.setEnabled(isSynOrClsMode);
-            if (!isSynOrClsMode) {
+            catalogFileField.setEnabled(isSynOrClsOrTrdMode);
+            if (!isSynOrClsOrTrdMode) {
                 catalogFileField.setBackground(new Color(240, 240, 240));
                 catalogFileField.setForeground(new Color(150, 150, 150));
             } else {
@@ -245,14 +244,14 @@ public class HypocenterLocationPanel extends JPanel {
             }
         }
         if (selectCatalogButton != null) {
-            selectCatalogButton.setEnabled(isSynOrClsMode);
+            selectCatalogButton.setEnabled(isSynOrClsOrTrdMode);
         }
         if (catalogFileLabel != null) {
-            catalogFileLabel.setEnabled(isSynOrClsMode);
-            if (!isSynOrClsMode) {
+            catalogFileLabel.setEnabled(isSynOrClsOrTrdMode);
+            if (!isSynOrClsOrTrdMode) {
                 catalogFileLabel.setForeground(new Color(150, 150, 150));
             } else {
-                catalogFileLabel.setForeground(null); // デフォルト色に戻す
+                catalogFileLabel.setForeground(null); // Reset to default color
             }
         }
         
@@ -272,7 +271,7 @@ public class HypocenterLocationPanel extends JPanel {
             if (isClsMode) {
                 taupModelLabel.setForeground(new Color(150, 150, 150));
             } else {
-                taupModelLabel.setForeground(null); // デフォルト色に戻す
+                taupModelLabel.setForeground(null);
             }
         }
         
@@ -280,9 +279,6 @@ public class HypocenterLocationPanel extends JPanel {
     }
     
     private void updateOutputPanelForMode(String mode) {
-        boolean isSynOrClsMode = "SYN".equals(mode) || "CLS".equals(mode);
-        boolean isOtherMode = !isSynOrClsMode;
-        
         if (outputDirField != null) {
             outputDirField.setEnabled(true);
         }
@@ -301,15 +297,6 @@ public class HypocenterLocationPanel extends JPanel {
         }
         if (outputFileLabel != null) {
             outputFileLabel.setEnabled(true);
-        }
-    }
-    
-    private void setEnabledRecursive(Container container, boolean enabled) {
-        for (Component comp : container.getComponents()) {
-            comp.setEnabled(enabled);
-            if (comp instanceof Container) {
-                setEnabledRecursive((Container) comp, enabled);
-            }
         }
     }
     
@@ -850,10 +837,15 @@ public class HypocenterLocationPanel extends JPanel {
             if (currentFile.exists()) {
                 if (currentFile.isFile()) {
                     fileChooser.setSelectedFile(currentFile);
+                    fileChooser.setCurrentDirectory(currentFile.getParentFile());
                 } else {
                     fileChooser.setCurrentDirectory(currentFile);
                 }
+            } else {
+                com.treloc.xtreloc.app.gui.util.FileChooserHelper.setDefaultDirectory(fileChooser);
             }
+        } else {
+            com.treloc.xtreloc.app.gui.util.FileChooserHelper.setDefaultDirectory(fileChooser);
         }
         
         int result = fileChooser.showOpenDialog(this);
@@ -1425,19 +1417,22 @@ public class HypocenterLocationPanel extends JPanel {
         if ("TRD".equals(currentMode)) {
             File catalogFile = getCatalogFileFromField();
             if (catalogFile == null || !catalogFile.exists()) {
-                if (selectedTargetDir == null || findDatFiles(selectedTargetDir).isEmpty()) {
-                    appendLog("Error: Catalog file or target directory (dat files) not found.");
-                    JOptionPane.showMessageDialog(this,
-                        "Catalog file or target directory (dat files) not found.",
-                        "Error", JOptionPane.ERROR_MESSAGE);
-                    return;
-                }
-                appendLog("Target directory: " + selectedTargetDir.getAbsolutePath());
-            } else {
-                appendLog("Catalog file: " + catalogFile.getAbsolutePath());
+                appendLog("Error: Catalog file is required for TRD mode.");
+                JOptionPane.showMessageDialog(this,
+                    "Catalog file is required for TRD mode.\nPlease select a catalog file.",
+                    "Error", JOptionPane.ERROR_MESSAGE);
+                return;
             }
+            if (selectedTargetDir == null) {
+                appendLog("Error: Target directory (dat files) is required for TRD mode.");
+                JOptionPane.showMessageDialog(this,
+                    "Target directory (dat files) is required for TRD mode.\nPlease select a target directory.",
+                    "Error", JOptionPane.ERROR_MESSAGE);
+                return;
+            }
+            appendLog("Catalog file: " + catalogFile.getAbsolutePath());
+            appendLog("Target directory: " + selectedTargetDir.getAbsolutePath());
         } else {
-            // その他のモード: ディレクトリ内の全ての.datファイルを取得
             List<File> datFiles = findDatFiles(selectedTargetDir);
             if (datFiles.isEmpty()) {
                 appendLog("Error: No .dat files found in the selected directory.");
@@ -1459,25 +1454,23 @@ public class HypocenterLocationPanel extends JPanel {
                 if ("TRD".equals(currentMode)) {
                     try {
                         var trdMode = config.modes.get("TRD");
-                        if (trdMode != null && (trdMode.catalogFile == null || trdMode.catalogFile.isEmpty())) {
-                            if (selectedTargetDir != null) {
-                                File catalogInTargetDir = new File(selectedTargetDir, "catalog.csv");
-                                if (catalogInTargetDir.exists()) {
-                                    trdMode.catalogFile = catalogInTargetDir.getAbsolutePath();
-                                    publish("Catalog file (auto-detected): " + catalogInTargetDir.getAbsolutePath());
-                                } else {
-                                    throw new IllegalArgumentException("Catalog file or catalog.csv in target directory not found");
-                                }
-                            } else {
-                                throw new IllegalArgumentException("Catalog file or target directory not specified");
+                        if (trdMode != null) {
+                            if (trdMode.catalogFile == null || trdMode.catalogFile.isEmpty()) {
+                                throw new IllegalArgumentException("Catalog file is required for TRD mode. Please select a catalog file.");
                             }
-                        }
-                        
-                        if (trdMode != null && trdMode.catalogFile != null) {
+                            
+                            File catalogFileObj = new File(trdMode.catalogFile);
+                            if (!catalogFileObj.exists()) {
+                                throw new IllegalArgumentException("Specified catalog file does not exist: " + trdMode.catalogFile);
+                            }
+                            
                             publish("TRD mode: Processing catalog file...");
                             publish("Catalog file: " + trdMode.catalogFile);
+                            
                             if (trdMode.datDirectory != null) {
                                 publish("Target directory (binary file search location): " + trdMode.datDirectory);
+                            } else {
+                                throw new IllegalArgumentException("Target directory (datDirectory) is required for TRD mode. Please select a target directory.");
                             }
                         }
                         
@@ -1489,6 +1482,7 @@ public class HypocenterLocationPanel extends JPanel {
                         
                         com.treloc.xtreloc.solver.HypoTripleDiff solver = 
                             new com.treloc.xtreloc.solver.HypoTripleDiff(config);
+                        solver.setLogConsumer(message -> publish("LSQR: " + message));
                         try {
                             solver.start("", "");
                         } catch (RuntimeException e) {
@@ -1622,9 +1616,7 @@ public class HypocenterLocationPanel extends JPanel {
                             }
                         }
                     } else {
-                        // シーケンシャル処理（numJobs=1の場合）
                         for (File datFile : datFiles) {
-                            // 中断チェック
                             if (isCancelled()) {
                                 publish("Cancelled");
                                 break;
@@ -1637,7 +1629,6 @@ public class HypocenterLocationPanel extends JPanel {
                                 int current = processedCount.get() + errorCount.get() + 1;
                                 publish("Processing: " + datFile.getName() + " (" + current + "/" + datFiles.size() + ")");
                                 
-                                // モードに応じたsolverを選択
                                 String mode = (String) modeCombo.getSelectedItem();
                                 if ("GRD".equals(mode)) {
                                     HypoGridSearch solver = new HypoGridSearch(config);
@@ -1650,11 +1641,9 @@ public class HypocenterLocationPanel extends JPanel {
                                         new com.treloc.xtreloc.solver.HypoTripleDiff(config);
                                     solver.start(inputPath, outputPath);
                                 } else {
-                                    throw new IllegalArgumentException("不明なモード: " + mode);
+                                    throw new IllegalArgumentException("Unknown mode: " + mode);
                                 }
                                 processedCount.incrementAndGet();
-                                
-                                // 実行結果を読み込んでリストに追加
                                 try {
                                     java.util.List<com.treloc.xtreloc.app.gui.model.Hypocenter> hypocenters = 
                                         loadHypocentersFromDatFile(new File(outputPath));
@@ -1679,9 +1668,12 @@ public class HypocenterLocationPanel extends JPanel {
                         publish("Execution completed: " + processedCount.get() + " files processed successfully, " + errorCount.get() + " files with errors");
                     }
                     
-                    // 全ての結果をcatalog形式にまとめる（中断時も実行）
                     if (!allHypocenters.isEmpty()) {
-                        File catalogFile = new File(outputDir, "catalog.csv");
+                        File inputCatalogFile = getCatalogFileFromField();
+                        String mode = (String) modeCombo.getSelectedItem();
+                        File catalogFile = com.treloc.xtreloc.util.CatalogFileNameGenerator.generateCatalogFileName(
+                            inputCatalogFile != null ? inputCatalogFile.getAbsolutePath() : null,
+                            mode, outputDir);
                         try {
                             com.treloc.xtreloc.app.gui.service.CsvExporter.exportHypocenters(allHypocenters, catalogFile);
                             publish("Exported in catalog format: " + catalogFile.getAbsolutePath() + " (" + allHypocenters.size() + " entries)");
@@ -1693,7 +1685,6 @@ public class HypocenterLocationPanel extends JPanel {
                         publish("Warning: No processed hypocenter data");
                     }
                     
-                    // マップに結果を表示
                     if (!allHypocenters.isEmpty() && mapView != null) {
                         SwingUtilities.invokeLater(() -> {
                             try {
@@ -1721,7 +1712,6 @@ public class HypocenterLocationPanel extends JPanel {
                     java.io.PrintWriter pw = new java.io.PrintWriter(sw);
                     e.printStackTrace(pw);
                     logger.severe("Stack trace:\n" + sw.toString());
-                    // 全体のエラーでも処理は続行（既に処理されたファイルの結果は保持）
                 } finally {
                     if (executor != null) {
                         executor.shutdown();
@@ -1754,7 +1744,7 @@ public class HypocenterLocationPanel extends JPanel {
                     executeButton.setEnabled(true);
                     cancelButton.setEnabled(false);
                     try {
-                        get(); // 例外があればスロー
+                        get();
                     } catch (java.util.concurrent.CancellationException e) {
                         appendLog("Processing was cancelled");
                     } catch (Exception e) {
@@ -1798,8 +1788,8 @@ public class HypocenterLocationPanel extends JPanel {
         
         if (selectedOutputDir == null) {
             JOptionPane.showMessageDialog(this,
-                "出力ディレクトリを選択してください",
-                "エラー", JOptionPane.ERROR_MESSAGE);
+                "Please select an output directory",
+                "Error", JOptionPane.ERROR_MESSAGE);
             return;
         }
         
@@ -1828,17 +1818,14 @@ public class HypocenterLocationPanel extends JPanel {
         
         if (selectedStationFile == null || !selectedStationFile.exists()) {
             JOptionPane.showMessageDialog(this,
-                "観測点ファイルを選択してください",
-                "エラー", JOptionPane.ERROR_MESSAGE);
+                "Please select a station file",
+                "Error", JOptionPane.ERROR_MESSAGE);
             return;
         }
-        
-        // パラメータを設定
         String selectedModel = (String) taupModelCombo.getSelectedItem();
         config.taupFile = selectedModel;
         config.stationFile = selectedStationFile.getAbsolutePath();
         
-        // SYNモードの設定
         if (config.modes == null) {
             config.modes = new java.util.HashMap<>();
         }
@@ -1858,7 +1845,6 @@ public class HypocenterLocationPanel extends JPanel {
             @Override
             protected Void doInBackground() throws Exception {
                 try {
-                    // taupFileとstationFileが設定されていることを確認
                     if (config.taupFile == null || config.taupFile.isEmpty()) {
                         throw new IllegalArgumentException("Velocity model file (taupFile) is not set");
                     }
@@ -1866,10 +1852,8 @@ public class HypocenterLocationPanel extends JPanel {
                         throw new IllegalArgumentException("Station file (stationFile) is not set");
                     }
                     
-                    publish("カタログファイル: " + catalogFile.getAbsolutePath());
-                    publish("出力ディレクトリ: " + selectedOutputDir.getAbsolutePath());
-                    
-                    // SYNモードのパラメータを取得（テーブルから）
+                    publish("Catalog file: " + catalogFile.getAbsolutePath());
+                    publish("Output directory: " + selectedOutputDir.getAbsolutePath());
                     String randomSeedStr = getParameterValue("randomSeed");
                     String phsErrStr = getParameterValue("phsErr");
                     String locErrStr = getParameterValue("locErr");
@@ -1880,13 +1864,11 @@ public class HypocenterLocationPanel extends JPanel {
                     double locErr = !locErrStr.isEmpty() ? Double.parseDouble(locErrStr) : 0.03;
                     double minSelectRate = !minSelectRateStr.isEmpty() ? Double.parseDouble(minSelectRateStr) : 0.2;
                     double maxSelectRate = !maxSelectRateStr.isEmpty() ? Double.parseDouble(maxSelectRateStr) : 0.4;
-                    // 震源位置への摂動は常に有効
                     boolean addLocationPerturbation = true;
                     
                     publish("Parameters: seed=" + randomSeed + ", phsErr=" + phsErr + 
                            ", locErr=" + locErr + ", selectRate=" + minSelectRate + "-" + maxSelectRate);
                     
-                    // SyntheticTestを実行
                     SyntheticTest syntheticTest = new SyntheticTest(config, randomSeed, phsErr, locErr, 
                                                                    minSelectRate, maxSelectRate, addLocationPerturbation);
                     syntheticTest.generateDataFromCatalog();
@@ -1906,15 +1888,12 @@ public class HypocenterLocationPanel extends JPanel {
                             try {
                                 List<com.treloc.xtreloc.app.gui.model.Hypocenter> hypocenters = 
                                     loadHypocentersFromDatFile(datFile);
-                                // SYNモードで生成されたデータにはtype="SYN"を設定
                                 for (com.treloc.xtreloc.app.gui.model.Hypocenter h : hypocenters) {
                                     com.treloc.xtreloc.app.gui.model.Hypocenter newHypo;
                                     String type = (h.type == null || h.type.isEmpty()) ? "SYN" : h.type;
                                     
-                                    // datFilePathが正しく設定されているか確認
                                     String datFilePath = h.datFilePath;
                                     if (datFilePath == null || datFilePath.isEmpty()) {
-                                        // datFilePathが設定されていない場合は、相対パスを計算
                                         if (selectedOutputDir != null) {
                                             try {
                                                 java.nio.file.Path catalogPath = selectedOutputDir.toPath();
@@ -1922,7 +1901,6 @@ public class HypocenterLocationPanel extends JPanel {
                                                 java.nio.file.Path relativePath = catalogPath.relativize(datPath);
                                                 datFilePath = relativePath.toString().replace(java.io.File.separator, "/");
                                             } catch (Exception e) {
-                                                // 相対パス計算に失敗した場合はファイル名のみを使用
                                                 datFilePath = datFile.getName();
                                                 logger.warning("Failed to calculate relative path: " + datFile.getName() + " - " + e.getMessage());
                                             }
@@ -1930,8 +1908,6 @@ public class HypocenterLocationPanel extends JPanel {
                                             datFilePath = datFile.getName();
                                         }
                                     }
-                                    
-                                    // 新しいHypocenterオブジェクトを作成（typeとdatFilePathを確実に設定）
                                     newHypo = new com.treloc.xtreloc.app.gui.model.Hypocenter(
                                         h.time, h.lat, h.lon, h.depth, h.xerr, h.yerr, h.zerr, h.rms, 
                                         h.clusterId, datFilePath, type);
@@ -1945,7 +1921,8 @@ public class HypocenterLocationPanel extends JPanel {
                         }
                         
                         if (!allHypocenters.isEmpty()) {
-                            File catalogFile = new File(selectedOutputDir, "catalog.csv");
+                            File catalogFile = com.treloc.xtreloc.util.CatalogFileNameGenerator.generateCatalogFileName(
+                                null, "SYN", selectedOutputDir);
                             try {
                                 com.treloc.xtreloc.app.gui.service.CsvExporter.exportHypocenters(allHypocenters, catalogFile);
                                 publish("Catalog auto-generated: " + catalogFile.getAbsolutePath() + " (" + allHypocenters.size() + " entries)");
@@ -1977,7 +1954,7 @@ public class HypocenterLocationPanel extends JPanel {
                 executeButton.setEnabled(true);
                 cancelButton.setEnabled(false);
                 try {
-                    get(); // 例外があればスロー
+                    get();
                 } catch (Exception e) {
                     // Error should already be logged via publish() in doInBackground
                     // Show dialog with detailed message
@@ -2014,24 +1991,21 @@ public class HypocenterLocationPanel extends JPanel {
         
         if (selectedOutputDir == null) {
             JOptionPane.showMessageDialog(this,
-                "出力ディレクトリを選択してください",
-                "エラー", JOptionPane.ERROR_MESSAGE);
+                "Please select an output directory",
+                "Error", JOptionPane.ERROR_MESSAGE);
             return;
         }
         
         if (selectedStationFile == null || !selectedStationFile.exists()) {
             JOptionPane.showMessageDialog(this,
-                "観測点ファイルを選択してください",
-                "エラー", JOptionPane.ERROR_MESSAGE);
+                "Please select a station file",
+                "Error", JOptionPane.ERROR_MESSAGE);
             return;
         }
-        
-        // パラメータを設定
         String selectedModel = (String) taupModelCombo.getSelectedItem();
         config.taupFile = selectedModel;
         config.stationFile = selectedStationFile.getAbsolutePath();
         
-        // テーブルから共通パラメータを取得
         String thresholdStr = getParameterValue("threshold");
         String hypBottomStr = getParameterValue("hypBottom");
         if (!thresholdStr.isEmpty()) {
@@ -2041,7 +2015,6 @@ public class HypocenterLocationPanel extends JPanel {
             config.hypBottom = Double.parseDouble(hypBottomStr);
         }
         
-        // CLSモードの設定
         if (config.modes == null) {
             config.modes = new java.util.HashMap<>();
         }
@@ -2052,7 +2025,6 @@ public class HypocenterLocationPanel extends JPanel {
         }
         clsConfig.catalogFile = catalogFile.getAbsolutePath();
         clsConfig.outDirectory = selectedOutputDir.toPath();
-        // ターゲットディレクトリを設定（datファイルの探索先）
         if (selectedTargetDir != null) {
             clsConfig.datDirectory = selectedTargetDir.toPath();
         }
@@ -2091,13 +2063,10 @@ public class HypocenterLocationPanel extends JPanel {
                 // Invalid value, ignore
             }
         }
-        // useBinaryFormatは常にtrue（bin形式のみ）
         clsConfig.useBinaryFormat = true;
         
-        // 内部クラスで使用するために値をコピー
         final int finalMinPts = clsConfig.minPts;
         final double finalEps = clsConfig.eps;
-        final boolean finalUseBinary = clsConfig.useBinaryFormat;
         
         executeButton.setEnabled(false);
         cancelButton.setEnabled(true);
@@ -2113,22 +2082,18 @@ public class HypocenterLocationPanel extends JPanel {
                     publish("Output directory: " + selectedOutputDir.getAbsolutePath());
                     publish("Parameters: minPts=" + finalMinPts + ", eps=" + finalEps);
                     
-                    // SpatialClusteringを実行
                     clustering = new com.treloc.xtreloc.solver.SpatialClustering(config);
-                    clustering.start("", ""); // パラメータはconfigから取得
+                    clustering.start("", "");
                     
                     publish("Clustering process completed");
                     publish("Output directory: " + selectedOutputDir.getAbsolutePath());
                     publish("Catalog file with cluster IDs: " + new File(selectedOutputDir, "catalog.csv").getAbsolutePath());
                     publish("Triple difference data: " + selectedOutputDir.getAbsolutePath() + "/triple_diff_*.bin");
                     
-                    // K-distanceグラフを表示（epsが自動推定された場合）
                     List<Double> kDistances = clustering.getKDistances();
                     if (kDistances != null && !kDistances.isEmpty()) {
                         double estimatedEps = clustering.getEstimatedEps();
                         publish("Estimated Epsilon: " + estimatedEps + " km");
-                        
-                        // K-distanceグラフを別ウィンドウで表示
                         SwingUtilities.invokeLater(() -> {
                             showKDistanceGraph(kDistances, estimatedEps);
                         });
@@ -2168,7 +2133,7 @@ public class HypocenterLocationPanel extends JPanel {
                 executeButton.setEnabled(true);
                 cancelButton.setEnabled(false);
                 try {
-                    get(); // 例外があればスロー
+                    get();
                 } catch (Exception e) {
                     // Error should already be logged via publish() in doInBackground
                     // Show dialog with detailed message
@@ -2231,8 +2196,6 @@ public class HypocenterLocationPanel extends JPanel {
                     double lat = Double.parseDouble(parts1[0]);
                     double lon = Double.parseDouble(parts1[1]);
                     double depth = Double.parseDouble(parts1[2]);
-                    // ファイル名から時刻を取得（例: 071201.000030.dat → 071201.000030）
-                    // parts1[3]はタイプ（STD, INI, ERRなど）なので、常にファイル名から取得
                     String time = datFile.getName().replace(".dat", "");
                     String type = parts1.length > 3 ? parts1[3] : null;
                     
@@ -2245,11 +2208,8 @@ public class HypocenterLocationPanel extends JPanel {
                     String line2 = br.readLine();
                     if (line2 != null && !line2.trim().isEmpty()) {
                         String[] parts2 = line2.trim().split("\\s+");
-                        // 2行目が数値のみ（エラー情報）か、観測点コードを含むかで判定
                         try {
-                            // 最初の要素が数値かどうかで判定
                             Double.parseDouble(parts2[0]);
-                            // 数値のみの場合（エラー情報行）
                             if (parts2.length >= 4) {
                                 xerr = Double.parseDouble(parts2[0]);
                                 yerr = Double.parseDouble(parts2[1]);
@@ -2257,12 +2217,9 @@ public class HypocenterLocationPanel extends JPanel {
                                 rms = Double.parseDouble(parts2[3]);
                             }
                         } catch (NumberFormatException e) {
-                            // 2行目が観測点ペアの場合（エラー情報行がない形式）
-                            // エラー情報はデフォルト値（0.0）のまま
                         }
                     }
                     
-                    // カタログファイルの基準ディレクトリからの相対パスを計算
                     String datFilePath = null;
                     if (selectedOutputDir != null) {
                         try {
@@ -2271,7 +2228,6 @@ public class HypocenterLocationPanel extends JPanel {
                             java.nio.file.Path relativePath = catalogPath.relativize(datPath);
                             datFilePath = relativePath.toString().replace(java.io.File.separator, "/");
                         } catch (Exception e) {
-                            // 相対パス計算に失敗した場合は絶対パスを使用
                             datFilePath = datFile.getAbsolutePath();
                         }
                     } else {
@@ -2282,7 +2238,7 @@ public class HypocenterLocationPanel extends JPanel {
                 }
             }
         } catch (Exception e) {
-            logger.warning("datファイルの読み込みに失敗: " + e.getMessage());
+            logger.warning("Failed to read dat file: " + e.getMessage());
         }
         return hypocenters;
     }
@@ -2313,12 +2269,10 @@ public class HypocenterLocationPanel extends JPanel {
             thresholdField.setText(String.valueOf(config.threshold));
             hypBottomField.setText(String.valueOf(config.hypBottom));
             
-            // 速度構造を設定
             if (config.taupFile != null && !config.taupFile.isEmpty()) {
                 if (taupModelCombo != null) {
                     taupModelCombo.setSelectedItem(config.taupFile);
                 }
-                // 共有ファイルマネージャーにも設定
                 com.treloc.xtreloc.app.gui.util.SharedFileManager.getInstance().setTaupFile(config.taupFile);
             }
             
@@ -2332,7 +2286,6 @@ public class HypocenterLocationPanel extends JPanel {
                     if (grdSolver.has("numFocus") && numFocusField != null) {
                         numFocusField.setText(String.valueOf(grdSolver.get("numFocus").asInt()));
                     }
-                    // 後方互換性: numGridが指定されている場合
                     if (grdSolver.has("numGrid") && !grdSolver.has("totalGrids") && totalGridsField != null) {
                         totalGridsField.setText(String.valueOf(grdSolver.get("numGrid").asInt()));
                         if (numFocusField != null) {

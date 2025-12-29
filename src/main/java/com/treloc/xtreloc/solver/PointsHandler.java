@@ -11,9 +11,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.logging.Logger;
 
-/**
- * datファイルの読み書きを行うクラス
- */
 public class PointsHandler {
     private static final Logger logger = Logger.getLogger(PointsHandler.class.getName());
     private Point mainPoint;
@@ -24,12 +21,6 @@ public class PointsHandler {
         this.codeIndexMap = new HashMap<>();
     }
 
-    /**
-     * datファイルを読み込む
-     * @param datFile datファイルのパス
-     * @param codeStrings 観測点コードの配列
-     * @param threshold 閾値
-     */
     public void readDatFile(String datFile, String[] codeStrings, double threshold) throws IOException {
         codeIndexMap.clear();
         for (int i = 0; i < codeStrings.length; i++) {
@@ -37,7 +28,6 @@ public class PointsHandler {
         }
 
         try (BufferedReader br = new BufferedReader(new FileReader(datFile))) {
-            // 1行目: 緯度 経度 深度 タイプ
             String line1 = br.readLine();
             if (line1 == null) {
                 throw new IOException("Empty file: " + datFile);
@@ -48,7 +38,6 @@ public class PointsHandler {
             double dep = Double.parseDouble(parts1[2]);
             String type = parts1.length > 3 ? parts1[3] : "";
 
-            // 2行目: エラー情報（elat, elon, edep, res）または観測点ペア
             String line2 = br.readLine();
             double elat = 0.0;
             double elon = 0.0;
@@ -58,11 +47,8 @@ public class PointsHandler {
             
             if (line2 != null && !line2.trim().isEmpty()) {
                 String[] parts2 = line2.trim().split("\\s+");
-                // 2行目が数値のみ（エラー情報）か、観測点コードを含むかで判定
                 try {
-                    // 最初の要素が数値かどうかで判定
                     Double.parseDouble(parts2[0]);
-                    // 数値のみの場合（エラー情報行）
                     if (parts2.length >= 4) {
                         elat = Double.parseDouble(parts2[0]);
                         elon = Double.parseDouble(parts2[1]);
@@ -71,23 +57,17 @@ public class PointsHandler {
                         hasErrorLine = true;
                     }
                 } catch (NumberFormatException e) {
-                    // 2行目が観測点ペアの場合（エラー情報行がない形式）
-                    // line2は後で観測点ペアとして処理する
                     hasErrorLine = false;
                 }
             }
 
-            // 観測点ペアの情報を読み込む
             List<double[]> lagList = new ArrayList<>();
             List<Integer> usedIdxList = new ArrayList<>();
             
-            // エラー情報行がない場合、line2から処理開始
             String line;
             if (hasErrorLine) {
-                // エラー情報行がある場合、次の行から読み始める
                 line = br.readLine();
             } else {
-                // エラー情報行がない場合、line2を観測点ペアとして処理
                 line = line2;
             }
             
@@ -105,9 +85,6 @@ public class PointsHandler {
                 Integer idx2 = codeIndexMap.get(code2);
 
                 if (idx1 != null && idx2 != null) {
-                    // thresholdが0以下の場合はすべてのデータを使用
-                    // thresholdはweight（重み）と比較される（マニュアルに記載通り）
-                    // weight >= threshold の場合にデータを使用
                     if (threshold <= 0.0 || weight >= threshold) {
                         lagList.add(new double[]{idx1, idx2, lagTime, weight});
                         if (!usedIdxList.contains(idx1)) usedIdxList.add(idx1);
@@ -115,11 +92,8 @@ public class PointsHandler {
                     }
                 }
                 
-                // 次の行を読み込む
                 line = br.readLine();
             }
-
-            // Pointオブジェクトを作成
             double[][] lagTable = lagList.toArray(new double[lagList.size()][]);
             int[] usedIdx = usedIdxList.stream().mapToInt(i -> i).toArray();
 
@@ -129,25 +103,14 @@ public class PointsHandler {
         }
     }
 
-    /**
-     * メインのPointを取得
-     */
     public Point getMainPoint() {
         return mainPoint;
     }
 
-    /**
-     * メインのPointを設定
-     */
     public void setMainPoint(Point point) {
         this.mainPoint = point;
     }
 
-    /**
-     * datファイルに書き込む
-     * @param outFile 出力ファイルのパス
-     * @param codeStrings 観測点コードの配列
-     */
     public void writeDatFile(String outFile, String[] codeStrings) throws IOException {
         if (mainPoint == null) {
             throw new IllegalStateException("No point data to write");
@@ -169,15 +132,12 @@ public class PointsHandler {
         }
 
         try (PrintWriter writer = new PrintWriter(new FileWriter(outFile))) {
-            // 1行目: 緯度 経度 深度 タイプ
             writer.printf("%.3f %.3f %.3f %s%n",
                 mainPoint.getLat(), mainPoint.getLon(), mainPoint.getDep(), mainPoint.getType());
 
-            // 2行目: エラー情報
             writer.printf("%.3f %.3f %.3f %.3f%n",
                 mainPoint.getElat(), mainPoint.getElon(), mainPoint.getEdep(), mainPoint.getRes());
 
-            // 3行目以降: 観測点ペアの情報（重みは残差の逆数）
             double[][] lagTable = mainPoint.getLagTable();
             if (lagTable != null) {
                 for (int i = 0; i < lagTable.length; i++) {
@@ -185,7 +145,6 @@ public class PointsHandler {
                     int idx1 = (int) lag[0];
                     int idx2 = (int) lag[1];
                     double lagTime = lag[2];
-                    // 4列目: 残差の逆数の重み（既にlagTableに設定されている）
                     double weight = lag.length > 3 ? lag[3] : 1.0;
 
                     if (idx1 < codeStrings.length && idx2 < codeStrings.length) {

@@ -4,7 +4,6 @@ import com.treloc.xtreloc.app.gui.controller.MapController;
 
 import javax.swing.*;
 import javax.swing.table.DefaultTableModel;
-import javax.swing.table.TableCellRenderer;
 import java.awt.*;
 import java.io.File;
 import java.util.ArrayList;
@@ -131,7 +130,8 @@ public class ShapefileTablePanel extends JPanel {
         fileChooser.setDialogTitle("Select Shapefile");
         fileChooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter(
             "Shapefile (*.shp)", "shp"));
-        fileChooser.setCurrentDirectory(new File(System.getProperty("user.dir")));
+        
+        com.treloc.xtreloc.app.gui.util.FileChooserHelper.setDefaultDirectory(fileChooser);
         
         int result = fileChooser.showOpenDialog(this);
         if (result == JFileChooser.APPROVE_OPTION) {
@@ -151,9 +151,26 @@ public class ShapefileTablePanel extends JPanel {
             
             if (mapView != null && mapController != null) {
                 try {
-                    // FeatureSourceを取得して保存
-                    var store = org.geotools.api.data.FileDataStoreFinder.getDataStore(file);
-                    org.geotools.api.data.FeatureSource featureSource = store.getFeatureSource();
+                    // Get FeatureSource and save it
+                    org.geotools.api.data.DataStore store = org.geotools.api.data.FileDataStoreFinder.getDataStore(file);
+                    if (store == null) {
+                        throw new Exception("Failed to create DataStore for shapefile. " +
+                            "Make sure the shapefile is valid and all required files (.shp, .shx, .dbf) are present.");
+                    }
+                    
+                    // Get type name from DataStore
+                    String[] typeNames = store.getTypeNames();
+                    if (typeNames == null || typeNames.length == 0) {
+                        store.dispose();
+                        throw new Exception("No type names found in shapefile.");
+                    }
+                    String typeName = typeNames[0];
+                    
+                    org.geotools.api.data.FeatureSource featureSource = store.getFeatureSource(typeName);
+                    if (featureSource == null) {
+                        store.dispose();
+                        throw new Exception("Failed to get FeatureSource from shapefile.");
+                    }
                     
                     String layerTitle = mapController.loadShapefile(file);
                     shapefiles.add(file);
@@ -169,15 +186,45 @@ public class ShapefileTablePanel extends JPanel {
                     
                     statusLabel.setText(String.format("Shapefile: %d loaded", shapefiles.size()));
                     
-                    // 最初のShapefileを選択状態にする
+                    // Select the first shapefile
                     if (shapefiles.size() == 1) {
                         table.setRowSelectionInterval(0, 0);
                         displayShapefileData(file);
                     }
                 } catch (Exception ex) {
+                    // Detailed error reporting
+                    StringBuilder errorMsg = new StringBuilder("Failed to display shapefile on map:\n");
+                    errorMsg.append("  File: ").append(file.getAbsolutePath()).append("\n");
+                    errorMsg.append("  Error type: ").append(ex.getClass().getName()).append("\n");
+                    errorMsg.append("  Error message: ").append(ex.getMessage()).append("\n");
+                    if (ex.getCause() != null) {
+                        errorMsg.append("  Caused by: ").append(ex.getCause().getClass().getName())
+                               .append(": ").append(ex.getCause().getMessage()).append("\n");
+                    }
+                    
+                    // Log detailed error to console/logger
+                    java.util.logging.Logger logger = java.util.logging.Logger.getLogger(getClass().getName());
+                    logger.severe("Shapefile load error:\n" + errorMsg.toString());
+                    
+                    // Print full stack trace to logger
+                    java.io.StringWriter sw = new java.io.StringWriter();
+                    java.io.PrintWriter pw = new java.io.PrintWriter(sw);
+                    ex.printStackTrace(pw);
+                    logger.severe("Stack trace:\n" + sw.toString());
+                    
+                    // Also print to System.err for console output
+                    System.err.println("========================================");
+                    System.err.println("SHAPEFILE LOAD ERROR");
+                    System.err.println("========================================");
+                    System.err.println(errorMsg.toString());
+                    System.err.println("Stack trace:");
+                    ex.printStackTrace(System.err);
+                    System.err.println("========================================");
+                    
+                    // Show user-friendly error dialog
                     JOptionPane.showMessageDialog(this,
-                        "Failed to display on map: " + ex.getMessage(),
-                        "Warning", JOptionPane.WARNING_MESSAGE);
+                        errorMsg.toString(),
+                        "Error", JOptionPane.ERROR_MESSAGE);
                 }
             }
             

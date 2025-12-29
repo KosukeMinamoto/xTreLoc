@@ -38,7 +38,7 @@ public class ReportPanel extends JPanel {
     }
     
     public ReportPanel() {
-        this(null); // 後方互換性のため
+        this(null);
     }
     
     /**
@@ -109,19 +109,17 @@ public class ReportPanel extends JPanel {
         catalogTable = new JTable(catalogTableModel);
         catalogTable.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
         catalogTable.setColumnSelectionAllowed(true);
-        catalogTable.setCellSelectionEnabled(true); // セル選択を有効化
+        catalogTable.setCellSelectionEnabled(true);
         catalogTable.setAutoResizeMode(JTable.AUTO_RESIZE_ALL_COLUMNS);
         catalogTable.setFillsViewportHeight(true);
         catalogTable.setRowHeight(20);
         catalogTable.getTableHeader().setReorderingAllowed(false);
         
-        // 列ヘッダークリックイベントリスナーを追加
         catalogTable.getTableHeader().addMouseListener(new java.awt.event.MouseAdapter() {
             @Override
             public void mouseClicked(java.awt.event.MouseEvent e) {
                 int columnIndex = catalogTable.columnAtPoint(e.getPoint());
                 if (columnIndex >= 0) {
-                    // 列全体を選択
                     catalogTable.clearSelection();
                     catalogTable.setColumnSelectionInterval(columnIndex, columnIndex);
                     // 列選択処理を実行
@@ -142,9 +140,14 @@ public class ReportPanel extends JPanel {
                     if (selectedRow >= 0 && selectedRow < hypocenters.size() && mapView != null) {
                         Hypocenter h = hypocenters.get(selectedRow);
                         try {
-                            mapView.highlightPoint(h.lon, h.lat);
+                            com.treloc.xtreloc.app.gui.model.CatalogInfo catalogInfo = mapView.findCatalogForHypocenter(h);
+                            if (catalogInfo != null) {
+                                mapView.highlightPoint(h.lon, h.lat, null, 
+                                    catalogInfo.getSymbolType(), catalogInfo.getColor());
+                            } else {
+                                mapView.highlightPoint(h.lon, h.lat);
+                            }
                         } catch (Exception ex) {
-                            // エラーは無視
                         }
                     } else if (mapView != null) {
                         mapView.clearHighlight();
@@ -173,7 +176,7 @@ public class ReportPanel extends JPanel {
         
         // 右パネル: ヒストグラム
         JPanel rightPanel = new JPanel(new BorderLayout());
-        rightPanel.setBorder(new TitledBorder("ヒストグラム"));
+        rightPanel.setBorder(new TitledBorder("Histogram"));
         histogramPanel = new JPanel() {
             @Override
             protected void paintComponent(Graphics g) {
@@ -201,7 +204,8 @@ public class ReportPanel extends JPanel {
         fileChooser.setDialogTitle("Select Catalog File");
         fileChooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter(
             "Catalog files (*.csv)", "csv"));
-        fileChooser.setCurrentDirectory(new File(System.getProperty("user.dir")));
+        
+        com.treloc.xtreloc.app.gui.util.FileChooserHelper.setDefaultDirectory(fileChooser);
         
         int result = fileChooser.showOpenDialog(this);
         if (result == JFileChooser.APPROVE_OPTION) {
@@ -290,7 +294,7 @@ public class ReportPanel extends JPanel {
                         // GeoToolsの既知のバグを無視
                         return;
                     }
-                    System.err.println("色付けの適用に失敗: " + e.getMessage());
+                    System.err.println("Failed to apply coloring: " + e.getMessage());
                 }
             });
         } else if (mapView != null) {
@@ -306,7 +310,7 @@ public class ReportPanel extends JPanel {
                         // GeoToolsの既知のバグを無視
                         return;
                     }
-                    System.err.println("表示の更新に失敗: " + e.getMessage());
+                    System.err.println("Failed to update display: " + e.getMessage());
                 }
             });
         }
@@ -410,16 +414,16 @@ public class ReportPanel extends JPanel {
         DecimalFormat df = new DecimalFormat("#.######");
         
         StringBuilder sb = new StringBuilder();
-        sb.append("列: ").append(columnName).append("\n");
-        sb.append("データ数: ").append(values.size()).append("\n\n");
-        sb.append("最小値: ").append(df.format(min)).append("\n");
-        sb.append("最大値: ").append(df.format(max)).append("\n");
-        sb.append("平均値: ").append(df.format(mean)).append("\n");
-        sb.append("中央値: ").append(df.format(median)).append("\n");
-        sb.append("標準偏差: ").append(df.format(stdDev)).append("\n");
-        sb.append("第1四分位数: ").append(df.format(q1)).append("\n");
-        sb.append("第3四分位数: ").append(df.format(q3)).append("\n");
-        sb.append("四分位範囲: ").append(df.format(q3 - q1)).append("\n");
+        sb.append("Column: ").append(columnName).append("\n");
+        sb.append("Data count: ").append(values.size()).append("\n\n");
+        sb.append("Min: ").append(df.format(min)).append("\n");
+        sb.append("Max: ").append(df.format(max)).append("\n");
+        sb.append("Mean: ").append(df.format(mean)).append("\n");
+        sb.append("Median: ").append(df.format(median)).append("\n");
+        sb.append("Std Dev: ").append(df.format(stdDev)).append("\n");
+        sb.append("Q1: ").append(df.format(q1)).append("\n");
+        sb.append("Q3: ").append(df.format(q3)).append("\n");
+        sb.append("IQR: ").append(df.format(q3 - q1)).append("\n");
         
         return sb.toString();
     }
@@ -563,7 +567,7 @@ public class ReportPanel extends JPanel {
             if (title.length() > 0) title.append(", ");
             title.append(columnNames[idx]);
         }
-        title.append(" のヒストグラム");
+        title.append(" Histogram");
         
         g.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 12));
         int titleWidth = fm.stringWidth(title.toString());
@@ -623,9 +627,10 @@ public class ReportPanel extends JPanel {
         }
         
         JFileChooser fileChooser = new JFileChooser();
-        fileChooser.setDialogTitle("レポートを出力");
+        fileChooser.setDialogTitle("Export Report");
         fileChooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter(
             "Text files (*.txt)", "txt"));
+        com.treloc.xtreloc.app.gui.util.FileChooserHelper.setDefaultDirectory(fileChooser);
         fileChooser.setSelectedFile(new File("report.txt"));
         
         int result = fileChooser.showSaveDialog(this);
@@ -634,12 +639,12 @@ public class ReportPanel extends JPanel {
             try {
                 writeReport(outputFile);
                 JOptionPane.showMessageDialog(this,
-                    "レポートを出力しました: " + outputFile.getAbsolutePath(),
-                    "情報", JOptionPane.INFORMATION_MESSAGE);
+                    "Report exported: " + outputFile.getAbsolutePath(),
+                    "Information", JOptionPane.INFORMATION_MESSAGE);
             } catch (IOException e) {
                 JOptionPane.showMessageDialog(this,
-                    "レポートの出力に失敗しました: " + e.getMessage(),
-                    "エラー", JOptionPane.ERROR_MESSAGE);
+                    "Failed to export report: " + e.getMessage(),
+                    "Error", JOptionPane.ERROR_MESSAGE);
             }
         }
     }
@@ -717,6 +722,7 @@ public class ReportPanel extends JPanel {
         saveChooser.setDialogTitle("Export Catalog to CSV");
         saveChooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter(
             "CSV files (*.csv)", "csv"));
+        com.treloc.xtreloc.app.gui.util.FileChooserHelper.setDefaultDirectory(saveChooser);
         saveChooser.setSelectedFile(new File(selectedDir, "catalog.csv"));
         
         int saveResult = saveChooser.showSaveDialog(this);
@@ -869,7 +875,7 @@ public class ReportPanel extends JPanel {
                 }
             }
         } catch (Exception e) {
-            throw new RuntimeException("datファイルの読み込みに失敗: " + e.getMessage(), e);
+            throw new RuntimeException("Failed to read dat file: " + e.getMessage(), e);
         }
         return hypocenters;
     }
@@ -886,11 +892,12 @@ public class ReportPanel extends JPanel {
         }
         
         JFileChooser fileChooser = new JFileChooser();
-        fileChooser.setDialogTitle("ヒストグラムを画像として出力");
+        fileChooser.setDialogTitle("Export Histogram as Image");
         fileChooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter(
             "PNG files (*.png)", "png"));
         fileChooser.addChoosableFileFilter(new javax.swing.filechooser.FileNameExtensionFilter(
             "JPEG files (*.jpg, *.jpeg)", "jpg", "jpeg"));
+        com.treloc.xtreloc.app.gui.util.FileChooserHelper.setDefaultDirectory(fileChooser);
         fileChooser.setSelectedFile(new File("histogram.png"));
         
         int result = fileChooser.showSaveDialog(this);
@@ -899,12 +906,12 @@ public class ReportPanel extends JPanel {
             try {
                 exportHistogramImageToFile(outputFile);
                 JOptionPane.showMessageDialog(this,
-                    "ヒストグラムを画像として出力しました: " + outputFile.getAbsolutePath(),
-                    "情報", JOptionPane.INFORMATION_MESSAGE);
+                    "Histogram exported: " + outputFile.getAbsolutePath(),
+                    "Information", JOptionPane.INFORMATION_MESSAGE);
             } catch (Exception e) {
                 JOptionPane.showMessageDialog(this,
-                    "画像の出力に失敗しました: " + e.getMessage(),
-                    "エラー", JOptionPane.ERROR_MESSAGE);
+                    "Failed to export image: " + e.getMessage(),
+                    "Error", JOptionPane.ERROR_MESSAGE);
             }
         }
     }

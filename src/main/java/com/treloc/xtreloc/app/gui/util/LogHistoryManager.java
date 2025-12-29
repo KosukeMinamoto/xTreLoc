@@ -39,7 +39,7 @@ public class LogHistoryManager {
         try {
             return readLastLinesFromFile(logFile, numLines);
         } catch (IOException e) {
-            System.err.println("ログ履歴の読み込みに失敗: " + e.getMessage());
+            System.err.println("Failed to read log history: " + e.getMessage());
             return Collections.emptyList();
         }
     }
@@ -113,15 +113,15 @@ public class LogHistoryManager {
         List<String> lines = readLastLines(numLines);
         
         if (lines.isEmpty()) {
-            System.out.println("=== ログ履歴（なし） ===");
+            System.out.println("=== Log History (empty) ===");
             return;
         }
         
-        System.out.println("=== ログ履歴（最新 " + lines.size() + " 行） ===");
+        System.out.println("=== Log History (latest " + lines.size() + " lines) ===");
         for (String line : lines) {
             System.out.println(line);
         }
-        System.out.println("=== ログ履歴終了 ===");
+        System.out.println("=== End of Log History ===");
     }
     
     /**

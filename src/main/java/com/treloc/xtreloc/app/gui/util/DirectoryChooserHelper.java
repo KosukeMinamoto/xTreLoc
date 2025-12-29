@@ -36,7 +36,7 @@ public class DirectoryChooserHelper {
         if (currentDirectory != null && currentDirectory.exists()) {
             fileChooser.setCurrentDirectory(currentDirectory);
         } else {
-            fileChooser.setCurrentDirectory(new File(System.getProperty("user.dir")));
+            com.treloc.xtreloc.app.gui.util.FileChooserHelper.setDefaultDirectory(fileChooser);
         }
         
         JButton newDirButton = new JButton("New Folder");

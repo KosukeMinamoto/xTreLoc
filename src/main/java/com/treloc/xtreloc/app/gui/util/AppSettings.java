@@ -23,6 +23,7 @@ public class AppSettings {
     private int historyLines = 50;
     private boolean autoUpdateEnabled = true;
     private long lastUpdateCheck = 0;
+    private String homeDirectory = System.getProperty("user.home");
     
     /**
      * Loads application settings from the settings file.
@@ -57,6 +58,9 @@ public class AppSettings {
                 if (node.has("lastUpdateCheck")) {
                     settings.lastUpdateCheck = node.get("lastUpdateCheck").asLong();
                 }
+                if (node.has("homeDirectory")) {
+                    settings.homeDirectory = node.get("homeDirectory").asText();
+                }
                 return settings;
             } catch (IOException e) {
                 System.err.println("Failed to load settings file: " + e.getMessage());
@@ -80,6 +84,7 @@ public class AppSettings {
             node.put("historyLines", historyLines);
             node.put("autoUpdateEnabled", autoUpdateEnabled);
             node.put("lastUpdateCheck", lastUpdateCheck);
+            node.put("homeDirectory", homeDirectory);
             mapper.writerWithDefaultPrettyPrinter().writeValue(settingsFile, node);
         } catch (IOException e) {
             System.err.println("Failed to save settings file: " + e.getMessage());
@@ -210,6 +215,24 @@ public class AppSettings {
      */
     public void setLastUpdateCheck(long lastUpdateCheck) {
         this.lastUpdateCheck = lastUpdateCheck;
+    }
+    
+    /**
+     * Gets the home directory for file dialogs.
+     * 
+     * @return home directory path (defaults to user.home)
+     */
+    public String getHomeDirectory() {
+        return homeDirectory;
+    }
+    
+    /**
+     * Sets the home directory for file dialogs.
+     * 
+     * @param homeDirectory home directory path
+     */
+    public void setHomeDirectory(String homeDirectory) {
+        this.homeDirectory = homeDirectory;
     }
 }
 

@@ -151,9 +151,15 @@ public class CatalogTablePanel extends JPanel {
                         selectedRow < getCurrentHypocenters().size() && mapView != null) {
                         Hypocenter h = getCurrentHypocenters().get(selectedRow);
                         try {
-                            mapView.highlightPoint(h.lon, h.lat);
+                            int catalogRow = catalogListTable.getSelectedRow();
+                            if (catalogRow >= 0 && catalogRow < catalogInfos.size()) {
+                                com.treloc.xtreloc.app.gui.model.CatalogInfo catalogInfo = catalogInfos.get(catalogRow);
+                                mapView.highlightPoint(h.lon, h.lat, null, 
+                                    catalogInfo.getSymbolType(), catalogInfo.getColor());
+                            } else {
+                                mapView.highlightPoint(h.lon, h.lat);
+                            }
                         } catch (Exception ex) {
-                            // Ignore errors
                         }
                     } else if (mapView != null) {
                         mapView.clearHighlight();
@@ -309,7 +315,8 @@ public class CatalogTablePanel extends JPanel {
         fileChooser.setDialogTitle("Select Catalog File");
         fileChooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter(
             "Catalog files (*.csv)", "csv"));
-        fileChooser.setCurrentDirectory(new File(System.getProperty("user.dir")));
+        
+        com.treloc.xtreloc.app.gui.util.FileChooserHelper.setDefaultDirectory(fileChooser);
         
         int result = fileChooser.showOpenDialog(this);
         if (result == JFileChooser.APPROVE_OPTION) {
@@ -400,6 +407,15 @@ public class CatalogTablePanel extends JPanel {
      */
     public List<Hypocenter> getHypocenters() {
         return getCurrentHypocenters();
+    }
+    
+    /**
+     * Gets all catalog information.
+     * 
+     * @return the list of all catalog information
+     */
+    public java.util.List<com.treloc.xtreloc.app.gui.model.CatalogInfo> getCatalogInfos() {
+        return new java.util.ArrayList<>(catalogInfos);
     }
     
     /**
@@ -600,8 +616,7 @@ public class CatalogTablePanel extends JPanel {
             frame.setSize(600, 400);
             frame.setLocationRelativeTo(this);
             
-            // テーブルモデルを作成
-            String[] columnNames = {"観測点1", "観測点2", "走時差 (秒)", "重み"};
+            String[] columnNames = {"Station 1", "Station 2", "Travel Time Difference (sec)", "Weight"};
             DefaultTableModel model = new DefaultTableModel(columnNames, 0) {
                 @Override
                 public boolean isCellEditable(int row, int column) {
@@ -609,7 +624,6 @@ public class CatalogTablePanel extends JPanel {
                 }
             };
             
-            // データを追加
             for (double[] lag : lagTable) {
                 int idx1 = (int) lag[0];
                 int idx2 = (int) lag[1];

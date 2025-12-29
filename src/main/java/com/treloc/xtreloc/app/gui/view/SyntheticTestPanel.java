@@ -10,7 +10,7 @@ import java.io.File;
 import java.util.logging.Logger;
 
 /**
- * シンセティックテストデータ作成パネル
+ * Panel for creating synthetic test data
  */
 public class SyntheticTestPanel extends JPanel {
     private static final Logger logger = Logger.getLogger(SyntheticTestPanel.class.getName());
@@ -34,40 +34,31 @@ public class SyntheticTestPanel extends JPanel {
     
     private void initComponents() {
         setLayout(new BorderLayout());
-        setBorder(new TitledBorder("シンセティックテストデータ作成"));
+        setBorder(new TitledBorder("Synthetic Test Data Generation"));
         
-        // 左パネル: パラメータ入力
         JPanel leftPanel = new JPanel();
         leftPanel.setLayout(new BoxLayout(leftPanel, BoxLayout.Y_AXIS));
         
-        // 1. 速度構造選択（TauPモデル）
         JPanel taupPanel = createTaupPanel();
         leftPanel.add(taupPanel);
         leftPanel.add(Box.createVerticalStrut(10));
         
-        // 2. カタログファイル選択
         JPanel catalogPanel = createCatalogPanel();
         leftPanel.add(catalogPanel);
         leftPanel.add(Box.createVerticalStrut(10));
         
-        // 3. 出力ディレクトリ選択
         JPanel outputPanel = createOutputPanel();
         leftPanel.add(outputPanel);
         leftPanel.add(Box.createVerticalStrut(10));
         
-        // 4. 実行ボタン
         JPanel buttonPanel = createButtonPanel();
         leftPanel.add(buttonPanel);
         
-        // スクロール可能にする
         JScrollPane scrollPane = new JScrollPane(leftPanel);
         scrollPane.setBorder(null);
         scrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED);
         
-        // 右パネル: ログ出力
         JPanel logPanel = createLogPanel();
-        
-        // 左右分割: 左: パラメータ、右: ログ
         JSplitPane splitPane = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, scrollPane, logPanel);
         splitPane.setResizeWeight(0.5);
         splitPane.setDividerLocation(400);
@@ -77,13 +68,13 @@ public class SyntheticTestPanel extends JPanel {
     
     private JPanel createTaupPanel() {
         JPanel panel = new JPanel(new GridBagLayout());
-        panel.setBorder(BorderFactory.createTitledBorder("速度構造（TauPモデル）"));
+        panel.setBorder(BorderFactory.createTitledBorder("Velocity Structure (TauP Model)"));
         GridBagConstraints gbc = new GridBagConstraints();
         gbc.insets = new Insets(5, 5, 5, 5);
         gbc.anchor = GridBagConstraints.WEST;
         
         gbc.gridx = 0; gbc.gridy = 0;
-        panel.add(new JLabel("TauPモデル:"), gbc);
+        panel.add(new JLabel("TauP Model:"), gbc);
         gbc.gridx = 1;
         JComboBox<String> taupCombo = new JComboBox<>(new String[]{"prem", "iasp91", "ak135", "ak135f"});
         taupCombo.setSelectedItem("prem");
@@ -91,7 +82,6 @@ public class SyntheticTestPanel extends JPanel {
             String selected = (String) taupCombo.getSelectedItem();
             if (selected != null && config != null) {
                 config.taupFile = selected;
-                // 共有ファイルマネージャーに通知
                 com.treloc.xtreloc.app.gui.util.SharedFileManager.getInstance().setTaupFile(selected);
             }
         });
@@ -105,7 +95,7 @@ public class SyntheticTestPanel extends JPanel {
         panel.setBorder(BorderFactory.createTitledBorder("Catalog File"));
         
         catalogFileField = new JTextField();
-        catalogFileField.setEditable(true); // 手動入力も可能にする
+        catalogFileField.setEditable(true);
         
         selectCatalogButton = new JButton();
         try {
@@ -122,10 +112,8 @@ public class SyntheticTestPanel extends JPanel {
         selectCatalogButton.addActionListener(e -> selectCatalogFile());
         
         JPanel fieldPanel = new JPanel(new BorderLayout());
-        fieldPanel.add(selectCatalogButton, BorderLayout.WEST); // 左側に配置
+        fieldPanel.add(selectCatalogButton, BorderLayout.WEST);
         fieldPanel.add(catalogFileField, BorderLayout.CENTER);
-        
-        // テキストフィールドの変更を監視
         catalogFileField.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
             public void changedUpdate(javax.swing.event.DocumentEvent e) { updateFromField(); }
             public void removeUpdate(javax.swing.event.DocumentEvent e) { updateFromField(); }
@@ -138,31 +126,28 @@ public class SyntheticTestPanel extends JPanel {
     
     private JPanel createOutputPanel() {
         JPanel panel = new JPanel(new BorderLayout());
-        panel.setBorder(BorderFactory.createTitledBorder("出力ディレクトリ"));
+        panel.setBorder(BorderFactory.createTitledBorder("Output Directory"));
         
         outputDirField = new JTextField();
-        outputDirField.setEditable(true); // 手動入力も可能にする
+        outputDirField.setEditable(true);
         
-        // フォルダアイコンをボタンに設定（左側に配置）
         selectOutputDirButton = new JButton();
         try {
             Icon folderIcon = UIManager.getIcon("FileView.directoryIcon");
             if (folderIcon != null) {
                 selectOutputDirButton.setIcon(folderIcon);
             } else {
-                selectOutputDirButton.setText("選択");
+                selectOutputDirButton.setText("Select");
             }
         } catch (Exception e) {
-            selectOutputDirButton.setText("選択");
+            selectOutputDirButton.setText("Select");
         }
-        selectOutputDirButton.setToolTipText("出力ディレクトリを選択");
+        selectOutputDirButton.setToolTipText("Select output directory");
         selectOutputDirButton.addActionListener(e -> selectOutputDirectory());
         
         JPanel fieldPanel = new JPanel(new BorderLayout());
-        fieldPanel.add(selectOutputDirButton, BorderLayout.WEST); // 左側に配置
+        fieldPanel.add(selectOutputDirButton, BorderLayout.WEST);
         fieldPanel.add(outputDirField, BorderLayout.CENTER);
-        
-        // テキストフィールドの変更を監視
         outputDirField.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
             public void changedUpdate(javax.swing.event.DocumentEvent e) { updateFromField(); }
             public void removeUpdate(javax.swing.event.DocumentEvent e) { updateFromField(); }
@@ -174,7 +159,6 @@ public class SyntheticTestPanel extends JPanel {
     }
     
     private void updateFromField() {
-        // テキストフィールドからファイル/ディレクトリを更新
         String catalogPath = catalogFileField.getText().trim();
         if (!catalogPath.isEmpty()) {
             File file = new File(catalogPath);
@@ -196,7 +180,7 @@ public class SyntheticTestPanel extends JPanel {
     
     private JPanel createButtonPanel() {
         JPanel panel = new JPanel(new FlowLayout());
-        executeButton = new JButton("実行");
+        executeButton = new JButton("Execute");
         executeButton.setEnabled(false);
         executeButton.addActionListener(e -> executeSyntheticTest());
         panel.add(executeButton);
@@ -206,7 +190,7 @@ public class SyntheticTestPanel extends JPanel {
     
     private JPanel createLogPanel() {
         JPanel panel = new JPanel(new BorderLayout());
-        panel.setBorder(BorderFactory.createTitledBorder("実行ログ"));
+        panel.setBorder(BorderFactory.createTitledBorder("Execution Log"));
         
         logArea = new JTextArea();
         logArea.setEditable(false);
@@ -227,7 +211,6 @@ public class SyntheticTestPanel extends JPanel {
         fileChooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter(
             "Catalog files (*.csv)", "csv"));
         
-        // 現在のテキストフィールドのパスを初期ディレクトリとして設定
         String currentPath = catalogFileField.getText().trim();
         if (!currentPath.isEmpty()) {
             File currentFile = new File(currentPath);
@@ -251,13 +234,11 @@ public class SyntheticTestPanel extends JPanel {
     }
     
     private void selectOutputDirectory() {
-        // 現在のテキストフィールドのパスを初期ディレクトリとして設定
         File currentDir = null;
         String currentPath = outputDirField.getText().trim();
         if (!currentPath.isEmpty()) {
             currentDir = new File(currentPath);
             if (currentDir.exists() && currentDir.isDirectory()) {
-                // currentDirをそのまま使用
             } else if (currentDir.getParentFile() != null && currentDir.getParentFile().exists()) {
                 currentDir = currentDir.getParentFile();
             } else {
@@ -272,7 +253,7 @@ public class SyntheticTestPanel extends JPanel {
             selectedOutputDir = selectedDir;
             outputDirField.setText(selectedOutputDir.getAbsolutePath());
             updateExecuteButtonState();
-            appendLog("出力ディレクトリを選択: " + selectedOutputDir.getAbsolutePath());
+            appendLog("Output directory selected: " + selectedOutputDir.getAbsolutePath());
         }
     }
     
@@ -285,18 +266,17 @@ public class SyntheticTestPanel extends JPanel {
         if (selectedCatalogFile == null || selectedOutputDir == null || config == null) {
             JOptionPane.showMessageDialog(this,
                 "Please select catalog file and output directory",
-                "エラー", JOptionPane.ERROR_MESSAGE);
+                "Error", JOptionPane.ERROR_MESSAGE);
             return;
         }
         
         executeButton.setEnabled(false);
-        appendLog("シンセティックテストデータの生成を開始...");
+        appendLog("Starting synthetic test data generation...");
         
         SwingWorker<Void, String> worker = new SwingWorker<Void, String>() {
             @Override
             protected Void doInBackground() throws Exception {
                 try {
-                    // AppConfigを更新（SYNモードの設定が存在しない場合は作成）
                     if (config.modes == null) {
                         config.modes = new java.util.HashMap<>();
                     }
@@ -308,25 +288,22 @@ public class SyntheticTestPanel extends JPanel {
                     synConfig.catalogFile = selectedCatalogFile.getAbsolutePath();
                     synConfig.outDirectory = selectedOutputDir.toPath();
                     
-                    // taupFileとstationFileが設定されていることを確認
                     if (config.taupFile == null || config.taupFile.isEmpty()) {
-                        throw new IllegalArgumentException("速度構造ファイル（taupFile）が設定されていません");
+                        throw new IllegalArgumentException("Velocity structure file (taupFile) is not set");
                     }
                     if (config.stationFile == null || config.stationFile.isEmpty()) {
-                        // 共有ファイルマネージャーから取得を試みる
                         File sharedStationFile = com.treloc.xtreloc.app.gui.util.SharedFileManager.getInstance().getStationFile();
                         if (sharedStationFile != null) {
                             config.stationFile = sharedStationFile.getAbsolutePath();
                         } else {
-                            throw new IllegalArgumentException("観測点ファイル（stationFile）が設定されていません");
+                            throw new IllegalArgumentException("Station file (stationFile) is not set");
                         }
                     }
                     
-                    // SyntheticTestを実行
                     SyntheticTest syntheticTest = new SyntheticTest(config);
                     syntheticTest.generateDataFromCatalog();
                     
-                    publish("シンセティックテストデータの生成が完了しました");
+                    publish("Synthetic test data generation completed");
                 } catch (Exception e) {
                     // Detailed error reporting for GUI
                     StringBuilder errorMsg = new StringBuilder("Synthetic test data generation error:\n");
@@ -360,7 +337,7 @@ public class SyntheticTestPanel extends JPanel {
             protected void done() {
                 executeButton.setEnabled(true);
                 try {
-                    get(); // 例外があればスロー
+                    get();
                 } catch (Exception e) {
                     // Error should already be logged via publish() in doInBackground
                     // Show dialog with detailed message
@@ -389,7 +366,6 @@ public class SyntheticTestPanel extends JPanel {
     public void setConfig(AppConfig config) {
         this.config = config;
         
-        // 観測点ファイルが設定されていない場合、共有ファイルマネージャーから取得
         if (config != null && (config.stationFile == null || config.stationFile.isEmpty())) {
             File sharedStationFile = com.treloc.xtreloc.app.gui.util.SharedFileManager.getInstance().getStationFile();
             if (sharedStationFile != null) {
@@ -397,9 +373,8 @@ public class SyntheticTestPanel extends JPanel {
             }
         }
         
-        // 速度構造が設定されていない場合、デフォルト値を設定
         if (config != null && (config.taupFile == null || config.taupFile.isEmpty())) {
-            config.taupFile = "prem"; // デフォルト
+            config.taupFile = "prem";
             com.treloc.xtreloc.app.gui.util.SharedFileManager.getInstance().setTaupFile("prem");
         }
         

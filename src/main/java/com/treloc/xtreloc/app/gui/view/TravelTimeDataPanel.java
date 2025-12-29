@@ -5,7 +5,7 @@ import javax.swing.table.DefaultTableModel;
 import java.awt.*;
 
 /**
- * 走時差データをExcel形式で表示するパネル
+ * Panel for displaying travel time difference data in table format
  */
 public class TravelTimeDataPanel extends JPanel {
     private JTable table;
@@ -14,15 +14,13 @@ public class TravelTimeDataPanel extends JPanel {
     
     public TravelTimeDataPanel() {
         setLayout(new BorderLayout());
-        setBorder(BorderFactory.createTitledBorder("走時差データ"));
+        setBorder(BorderFactory.createTitledBorder("Travel Time Difference Data"));
         
-        // タイトルラベル
-        titleLabel = new JLabel("ファイルパス列をクリックして走時差データを表示");
+        titleLabel = new JLabel("Click file path column to display travel time difference data");
         titleLabel.setHorizontalAlignment(SwingConstants.CENTER);
         add(titleLabel, BorderLayout.NORTH);
         
-        // テーブルモデルの作成
-        String[] columnNames = {"観測点1", "観測点2", "走時差 (秒)", "重み"};
+        String[] columnNames = {"Station 1", "Station 2", "Travel Time Diff (sec)", "Weight"};
         tableModel = new DefaultTableModel(columnNames, 0) {
             @Override
             public boolean isCellEditable(int row, int column) {
@@ -39,7 +37,7 @@ public class TravelTimeDataPanel extends JPanel {
     }
     
     /**
-     * 走時差データを設定
+     * Sets travel time difference data
      */
     public void setData(double[][] lagTable, String[] codeStrings) {
         tableModel.setRowCount(0);
@@ -48,8 +46,6 @@ public class TravelTimeDataPanel extends JPanel {
             titleLabel.setText("No data available");
             return;
         }
-        
-        // データを追加
         for (double[] lag : lagTable) {
             int idx1 = (int) lag[0];
             int idx2 = (int) lag[1];
@@ -67,15 +63,15 @@ public class TravelTimeDataPanel extends JPanel {
             });
         }
         
-        titleLabel.setText("走時差データ: " + lagTable.length + " ペア");
+        titleLabel.setText("Travel Time Difference Data: " + lagTable.length + " pairs");
     }
     
     /**
-     * データをクリア
+     * Clears data
      */
     public void clearData() {
         tableModel.setRowCount(0);
-        titleLabel.setText("ファイルパス列をクリックして走時差データを表示");
+        titleLabel.setText("Click file path column to display travel time difference data");
     }
 }
 

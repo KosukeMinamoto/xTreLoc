@@ -8,38 +8,56 @@ public class StyleFactory {
 
     public static Style hypocenterStyle() {
         StyleBuilder sb = new StyleBuilder();
-        Mark mark = sb.createMark(StyleBuilder.MARK_CIRCLE,
-                sb.createFill(Color.BLUE),
-                sb.createStroke(Color.BLACK, 1));
+        // Create fill with explicit literal expressions
+        org.geotools.api.style.Fill fill = sb.createFill();
+        fill.setColor(sb.literalExpression(Color.BLUE));
+        fill.setOpacity(sb.literalExpression(1.0));
+        // Create stroke with explicit literal expressions
+        org.geotools.api.style.Stroke stroke = sb.createStroke();
+        stroke.setColor(sb.literalExpression(Color.BLACK));
+        stroke.setWidth(sb.literalExpression(1.0));
+        stroke.setOpacity(sb.literalExpression(1.0));
+        Mark mark = sb.createMark(StyleBuilder.MARK_CIRCLE, fill, stroke);
         Graphic g = sb.createGraphic(null, new Mark[] { mark }, null, 1, 8, 0);
         return sb.createStyle(sb.createPointSymbolizer(g));
     }
     
     /**
-     * 数値に基づいて色付けする震源スタイル
-     * 実際の色はMapViewで各Featureごとに設定されるため、
-     * ここではデフォルトのスタイルを返す
+     * Creates a hypocenter style for color mapping.
+     * The actual color is set per feature in MapView, so this returns a default style.
      */
     public static Style hypocenterColorStyle() {
         StyleBuilder sb = new StyleBuilder();
-        // デフォルトのマークを作成（実際の色はMapViewで各レイヤーごとに設定される）
-        Mark mark = sb.createMark(StyleBuilder.MARK_CIRCLE,
-                sb.createFill(Color.BLUE), // デフォルト色
-                sb.createStroke(Color.BLACK, 1));
+        org.geotools.api.style.Fill fill = sb.createFill();
+        fill.setColor(sb.literalExpression(Color.BLUE));
+        fill.setOpacity(sb.literalExpression(1.0));
+        // Create stroke with explicit literal expressions
+        org.geotools.api.style.Stroke stroke = sb.createStroke();
+        stroke.setColor(sb.literalExpression(Color.BLACK));
+        stroke.setWidth(sb.literalExpression(1.0));
+        stroke.setOpacity(sb.literalExpression(1.0));
+        Mark mark = sb.createMark(StyleBuilder.MARK_CIRCLE, fill, stroke);
         Graphic g = sb.createGraphic(null, new Mark[] { mark }, null, 1, 8, 0);
         
         return sb.createStyle(sb.createPointSymbolizer(g));
     }
     
     /**
-     * 色情報（R, G, B）に基づいてスタイルを作成
+     * Creates a style based on RGB color values.
      */
     public static Style createColorStyle(int r, int g, int b) {
         StyleBuilder sb = new StyleBuilder();
         Color color = new Color(r, g, b);
-        Mark mark = sb.createMark(StyleBuilder.MARK_CIRCLE,
-                sb.createFill(color),
-                sb.createStroke(Color.BLACK, 1));
+        // Create fill with explicit literal expressions
+        org.geotools.api.style.Fill fill = sb.createFill();
+        fill.setColor(sb.literalExpression(color));
+        fill.setOpacity(sb.literalExpression(1.0));
+        // Create stroke with explicit literal expressions
+        org.geotools.api.style.Stroke stroke = sb.createStroke();
+        stroke.setColor(sb.literalExpression(Color.BLACK));
+        stroke.setWidth(sb.literalExpression(1.0));
+        stroke.setOpacity(sb.literalExpression(1.0));
+        Mark mark = sb.createMark(StyleBuilder.MARK_CIRCLE, fill, stroke);
         Graphic graphic = sb.createGraphic(null, new Mark[] { mark }, null, 1, 8, 0);
         return sb.createStyle(sb.createPointSymbolizer(graphic));
     }
@@ -47,16 +65,27 @@ public class StyleFactory {
     public static Style stationStyle() {
         StyleBuilder sb = new StyleBuilder();
         // Black filled inverted triangle (180 degree rotation)
-        Mark mark = sb.createMark(StyleBuilder.MARK_TRIANGLE,
-                sb.createFill(Color.BLACK), // Filled black
-                sb.createStroke(Color.BLACK, 1));
+        // Create fill with explicit literal expressions
+        org.geotools.api.style.Fill fill = sb.createFill();
+        fill.setColor(sb.literalExpression(Color.BLACK)); // Filled black
+        fill.setOpacity(sb.literalExpression(1.0));
+        // Create stroke with explicit literal expressions
+        org.geotools.api.style.Stroke stroke = sb.createStroke();
+        stroke.setColor(sb.literalExpression(Color.BLACK));
+        stroke.setWidth(sb.literalExpression(1.0));
+        stroke.setOpacity(sb.literalExpression(1.0));
+        Mark mark = sb.createMark(StyleBuilder.MARK_TRIANGLE, fill, stroke);
         // Rotate 180 degrees to make it inverted
         Graphic g = sb.createGraphic(null, new Mark[] { mark }, null, 1, 10, 180);
 
         TextSymbolizer text = sb.createTextSymbolizer();
         text.setLabel(sb.attributeExpression("code"));
         text.setFont(sb.createFont("SansSerif", 10));
-        text.setFill(sb.createFill(Color.BLACK));
+        // Create text fill with explicit literal expressions
+        org.geotools.api.style.Fill textFill = sb.createFill();
+        textFill.setColor(sb.literalExpression(Color.BLACK));
+        textFill.setOpacity(sb.literalExpression(1.0));
+        text.setFill(textFill);
         text.setHalo(sb.createHalo(Color.WHITE, 2)); // Larger halo for better visibility
         // Position label above the triangle (offset upward)
         // Create point placement - anchor at bottom center, displace upward
@@ -77,22 +106,114 @@ public class StyleFactory {
         return s;
     }
     
-    /**
-     * 選択されたポイントを強調表示するスタイル
-     */
     public static Style selectedPointStyle() {
         StyleBuilder sb = new StyleBuilder();
-        // 大きな赤い円で強調表示
-        Mark mark = sb.createMark(StyleBuilder.MARK_CIRCLE,
-                sb.createFill(Color.RED),
-                sb.createStroke(Color.YELLOW, 3));
-        Graphic g = sb.createGraphic(null, new Mark[] { mark }, null, 1, 15, 0);
+        org.geotools.api.style.Fill fill = sb.createFill();
+        fill.setColor(sb.literalExpression(Color.RED));
+        fill.setOpacity(sb.literalExpression(1.0));
+        org.geotools.api.style.Stroke stroke = sb.createStroke();
+        stroke.setColor(sb.literalExpression(Color.YELLOW));
+        stroke.setWidth(sb.literalExpression(3.0));
+        stroke.setOpacity(sb.literalExpression(1.0));
+        Mark mark = sb.createMark(StyleBuilder.MARK_TRIANGLE, fill, stroke);
+        Graphic g = sb.createGraphic(null, new Mark[] { mark }, null, 1, 15, 180);
         return sb.createStyle(sb.createPointSymbolizer(g));
+    }
+    
+    public static Style selectedSymbolStyle(com.treloc.xtreloc.app.gui.model.CatalogInfo.SymbolType symbolType, Color color) {
+        StyleBuilder sb = new StyleBuilder();
+        org.geotools.api.style.Fill fill = sb.createFill();
+        fill.setColor(sb.literalExpression(color));
+        fill.setOpacity(sb.literalExpression(1.0));
+        org.geotools.api.style.Stroke stroke = sb.createStroke();
+        stroke.setColor(sb.literalExpression(Color.YELLOW));
+        stroke.setWidth(sb.literalExpression(3.0));
+        stroke.setOpacity(sb.literalExpression(1.0));
+        
+        Mark mark;
+        switch (symbolType) {
+            case CIRCLE:
+                mark = sb.createMark(StyleBuilder.MARK_CIRCLE, fill, stroke);
+                break;
+            case SQUARE:
+                mark = sb.createMark(StyleBuilder.MARK_SQUARE, fill, stroke);
+                break;
+            case TRIANGLE:
+                mark = sb.createMark(StyleBuilder.MARK_TRIANGLE, fill, stroke);
+                break;
+            case DIAMOND:
+                mark = sb.createMark(StyleBuilder.MARK_STAR, fill, stroke);
+                break;
+            case CROSS:
+                stroke.setWidth(sb.literalExpression(4.0));
+                mark = sb.createMark(StyleBuilder.MARK_CROSS, fill, stroke);
+                break;
+            case STAR:
+                mark = sb.createMark(StyleBuilder.MARK_STAR, fill, stroke);
+                break;
+            default:
+                mark = sb.createMark(StyleBuilder.MARK_CIRCLE, fill, stroke);
+        }
+        
+        Graphic graphic = sb.createGraphic(null, new Mark[] { mark }, null, 1, 20, 0);
+        return sb.createStyle(sb.createPointSymbolizer(graphic));
+    }
+    
+    /**
+     * Creates a colored station style with inverted triangle and station name label.
+     * 
+     * @param r red component (0-255)
+     * @param g green component (0-255)
+     * @param b blue component (0-255)
+     * @return the style with colored inverted triangle and station code label
+     */
+    public static Style createColoredStationStyle(int r, int g, int b) {
+        StyleBuilder sb = new StyleBuilder();
+        Color color = new Color(r, g, b);
+        // Colored filled inverted triangle (180 degree rotation)
+        // Create fill with explicit literal expressions
+        org.geotools.api.style.Fill fill = sb.createFill();
+        fill.setColor(sb.literalExpression(color));
+        fill.setOpacity(sb.literalExpression(1.0));
+        // Create stroke with explicit literal expressions
+        org.geotools.api.style.Stroke stroke = sb.createStroke();
+        stroke.setColor(sb.literalExpression(Color.BLACK));
+        stroke.setWidth(sb.literalExpression(1.0));
+        stroke.setOpacity(sb.literalExpression(1.0));
+        Mark mark = sb.createMark(StyleBuilder.MARK_TRIANGLE, fill, stroke);
+        // Rotate 180 degrees to make it inverted
+        Graphic graphic = sb.createGraphic(null, new Mark[] { mark }, null, 1, 10, 180);
+
+        // Add station code label
+        TextSymbolizer text = sb.createTextSymbolizer();
+        text.setLabel(sb.attributeExpression("code"));
+        text.setFont(sb.createFont("SansSerif", 10));
+        // Create text fill with explicit literal expressions
+        org.geotools.api.style.Fill textFill = sb.createFill();
+        textFill.setColor(sb.literalExpression(Color.BLACK));
+        textFill.setOpacity(sb.literalExpression(1.0));
+        text.setFill(textFill);
+        text.setHalo(sb.createHalo(Color.WHITE, 2));
+        // Position label above the triangle
+        org.geotools.api.style.PointPlacement placement = sb.createPointPlacement();
+        placement.setAnchorPoint(sb.createAnchorPoint(0.5, 0.0));
+        placement.setDisplacement(sb.createDisplacement(0, -15));
+        placement.setRotation(sb.literalExpression(0));
+        text.setLabelPlacement(placement);
+
+        Rule rule = sb.createRule(sb.createPointSymbolizer(graphic));
+        rule.symbolizers().add(text);
+
+        FeatureTypeStyle fts = sb.createFeatureTypeStyle(rule.symbolizers().get(0));
+        fts.rules().add(rule);
+
+        Style style = sb.createStyle();
+        style.featureTypeStyles().add(fts);
+        return style;
     }
     
     public static Style createGridStyle() {
         StyleBuilder sb = new StyleBuilder();
-        // グリッド線用のストローク（グレー、細い線、点線パターン）
         org.geotools.api.style.Stroke stroke = sb.createStroke(
             Color.GRAY, 0.5f);
         return sb.createStyle(sb.createLineSymbolizer(stroke));
@@ -116,59 +237,140 @@ public class StyleFactory {
     }
     
     /**
-     * Shapefile style with thicker line width.
+     * Creates a simple style for shapefiles using only literal values.
+     * This avoids function evaluation issues that can cause "Unable to find function" errors.
+     * Uses the same pattern as createGridStyle() which works correctly.
      */
     public static Style createShapefileStyle() {
         StyleBuilder sb = new StyleBuilder();
-        // Thicker stroke for shapefile lines (2.0f instead of default 1.0f)
-        org.geotools.api.style.Stroke stroke = sb.createStroke(
-            Color.BLUE, // Default blue color
-            2.0f); // Thicker line
+        // Use the same pattern as createGridStyle() which works - pass color and width directly
+        org.geotools.api.style.Stroke stroke = sb.createStroke(Color.BLUE, 2.0f);
         return sb.createStyle(sb.createLineSymbolizer(stroke));
     }
     
     /**
-     * シンボルタイプと色に基づいてスタイルを作成
+     * Creates a style for shapefiles based on geometry type.
+     * This method determines the geometry type and creates an appropriate style.
+     * 
+     * @param featureSource the feature source to determine geometry type from
+     * @return a style appropriate for the geometry type
+     */
+    public static Style createShapefileStyleForGeometry(org.geotools.api.data.FeatureSource featureSource) {
+        try {
+            org.geotools.api.feature.type.FeatureType featureType = featureSource.getSchema();
+            org.geotools.api.feature.type.GeometryDescriptor geomDesc = featureType.getGeometryDescriptor();
+            if (geomDesc != null) {
+                Class<?> geomClass = geomDesc.getType().getBinding();
+                
+                System.out.println("[StyleFactory] Geometry type detected: " + geomClass.getName());
+                
+                if (org.locationtech.jts.geom.Point.class.isAssignableFrom(geomClass) ||
+                    org.locationtech.jts.geom.MultiPoint.class.isAssignableFrom(geomClass)) {
+                    // Point geometry - use point symbolizer with explicit literal expressions
+                    System.out.println("[StyleFactory] Creating point style");
+                    StyleBuilder sb = new StyleBuilder();
+                    
+                    // Create fill with explicit literal expressions
+                    org.geotools.api.style.Fill fill = sb.createFill();
+                    fill.setColor(sb.literalExpression(Color.BLUE));
+                    fill.setOpacity(sb.literalExpression(1.0));
+                    
+                    // Create stroke with explicit literal expressions
+                    org.geotools.api.style.Stroke stroke = sb.createStroke();
+                    stroke.setColor(sb.literalExpression(Color.BLUE));
+                    stroke.setWidth(sb.literalExpression(1.0));
+                    stroke.setOpacity(sb.literalExpression(1.0));
+                    
+                    Mark mark = sb.createMark(StyleBuilder.MARK_CIRCLE, fill, stroke);
+                    // Use the same pattern as other working methods - StyleBuilder handles conversion
+                    Graphic graphic = sb.createGraphic(null, new Mark[] { mark }, null, 1, 8, 0);
+                    Style style = sb.createStyle(sb.createPointSymbolizer(graphic));
+                    System.out.println("[StyleFactory] Point style created successfully");
+                    return style;
+                } else if (org.locationtech.jts.geom.Polygon.class.isAssignableFrom(geomClass) ||
+                          org.locationtech.jts.geom.MultiPolygon.class.isAssignableFrom(geomClass)) {
+                    // Polygon geometry - use polygon symbolizer with explicit literal expressions
+                    System.out.println("[StyleFactory] Creating polygon style");
+                    StyleBuilder sb = new StyleBuilder();
+                    
+                    // Create fill with explicit literal expressions
+                    org.geotools.api.style.Fill fill = sb.createFill();
+                    fill.setColor(sb.literalExpression(Color.BLUE));
+                    fill.setOpacity(sb.literalExpression(0.3));
+                    
+                    // Create stroke with explicit literal expressions
+                    org.geotools.api.style.Stroke stroke = sb.createStroke();
+                    stroke.setColor(sb.literalExpression(Color.BLUE));
+                    stroke.setWidth(sb.literalExpression(2.0));
+                    stroke.setOpacity(sb.literalExpression(1.0));
+                    
+                    Style style = sb.createStyle(sb.createPolygonSymbolizer(stroke, fill));
+                    System.out.println("[StyleFactory] Polygon style created successfully");
+                    return style;
+                } else {
+                    System.out.println("[StyleFactory] Geometry type not Point or Polygon, using line style");
+                }
+            } else {
+                System.out.println("[StyleFactory] No geometry descriptor found, using line style");
+            }
+        } catch (Exception e) {
+            // If we can't determine geometry type, log error and fall back to simple line style
+            System.err.println("[StyleFactory] Error determining geometry type: " + e.getMessage());
+            e.printStackTrace(System.err);
+            java.util.logging.Logger.getLogger(StyleFactory.class.getName())
+                .warning("Error determining geometry type: " + e.getMessage());
+        }
+        
+        // Default: line style (works for LineString, and GeoTools handles others)
+        System.out.println("[StyleFactory] Creating default line style");
+        Style style = createShapefileStyle();
+        System.out.println("[StyleFactory] Default line style created successfully");
+        return style;
+    }
+    
+    /**
+     * Creates a style based on symbol type and color.
      */
     public static Style createSymbolStyle(com.treloc.xtreloc.app.gui.model.CatalogInfo.SymbolType symbolType, Color color, int size) {
         StyleBuilder sb = new StyleBuilder();
-        Mark mark;
+        // Create fill with explicit literal expressions
+        org.geotools.api.style.Fill fill = sb.createFill();
+        fill.setColor(sb.literalExpression(color));
+        fill.setOpacity(sb.literalExpression(1.0));
+        // Create stroke with explicit literal expressions
+        org.geotools.api.style.Stroke stroke = sb.createStroke();
+        stroke.setColor(sb.literalExpression(Color.BLACK));
+        stroke.setOpacity(sb.literalExpression(1.0));
         
+        Mark mark;
         switch (symbolType) {
             case CIRCLE:
-                mark = sb.createMark(StyleBuilder.MARK_CIRCLE,
-                        sb.createFill(color),
-                        sb.createStroke(Color.BLACK, 1));
+                stroke.setWidth(sb.literalExpression(1.0));
+                mark = sb.createMark(StyleBuilder.MARK_CIRCLE, fill, stroke);
                 break;
             case SQUARE:
-                mark = sb.createMark(StyleBuilder.MARK_SQUARE,
-                        sb.createFill(color),
-                        sb.createStroke(Color.BLACK, 1));
+                stroke.setWidth(sb.literalExpression(1.0));
+                mark = sb.createMark(StyleBuilder.MARK_SQUARE, fill, stroke);
                 break;
             case TRIANGLE:
-                mark = sb.createMark(StyleBuilder.MARK_TRIANGLE,
-                        sb.createFill(color),
-                        sb.createStroke(Color.BLACK, 1));
+                stroke.setWidth(sb.literalExpression(1.0));
+                mark = sb.createMark(StyleBuilder.MARK_TRIANGLE, fill, stroke);
                 break;
             case DIAMOND:
-                mark = sb.createMark(StyleBuilder.MARK_STAR,
-                        sb.createFill(color),
-                        sb.createStroke(Color.BLACK, 1));
+                stroke.setWidth(sb.literalExpression(1.0));
+                mark = sb.createMark(StyleBuilder.MARK_STAR, fill, stroke);
                 break;
             case CROSS:
-                mark = sb.createMark(StyleBuilder.MARK_CROSS,
-                        sb.createFill(color),
-                        sb.createStroke(Color.BLACK, 2));
+                stroke.setWidth(sb.literalExpression(2.0));
+                mark = sb.createMark(StyleBuilder.MARK_CROSS, fill, stroke);
                 break;
             case STAR:
-                mark = sb.createMark(StyleBuilder.MARK_STAR,
-                        sb.createFill(color),
-                        sb.createStroke(Color.BLACK, 1));
+                stroke.setWidth(sb.literalExpression(1.0));
+                mark = sb.createMark(StyleBuilder.MARK_STAR, fill, stroke);
                 break;
             default:
-                mark = sb.createMark(StyleBuilder.MARK_CIRCLE,
-                        sb.createFill(color),
-                        sb.createStroke(Color.BLACK, 1));
+                stroke.setWidth(sb.literalExpression(1.0));
+                mark = sb.createMark(StyleBuilder.MARK_CIRCLE, fill, stroke);
         }
         
         Graphic graphic = sb.createGraphic(null, new Mark[] { mark }, null, 1, size, 0);
@@ -176,7 +378,7 @@ public class StyleFactory {
     }
     
     /**
-     * 接続線用のスタイルを作成
+     * Creates a style for connection lines.
      */
     public static Style createConnectionLineStyle(Color color, float width) {
         StyleBuilder sb = new StyleBuilder();

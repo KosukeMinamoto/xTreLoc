@@ -21,6 +21,7 @@ import com.treloc.xtreloc.app.gui.model.Hypocenter;
 import com.treloc.xtreloc.io.TripleDifferenceIO;
 import com.treloc.xtreloc.io.TripleDifferenceIO.TripleDifference;
 import com.treloc.xtreloc.io.AppConfig;
+import com.treloc.xtreloc.util.CatalogFileNameGenerator;
 
 import edu.sc.seis.TauP.TauModelException;
 
@@ -42,7 +43,7 @@ public class SpatialClustering extends SolverBase {
     private Double epsPercentile; // Data inclusion rate when eps < 0 (0-1, null means use elbow method)
     private String catalogFile;
     private String outputDir;
-    private String targetDir; // ターゲットディレクトリ（datファイルの探索先）
+    private String targetDir;
     private boolean useBinaryFormat;
     private Double rmsThreshold; // RMS threshold for catalog filtering (null means no filtering)
     private Double locErrThreshold; // Location error threshold for catalog filtering (xerr and yerr must both be <= this value, null means no filtering)
@@ -60,12 +61,10 @@ public class SpatialClustering extends SolverBase {
         if (appConfig.modes != null && appConfig.modes.containsKey("CLS")) {
             var clsConfig = appConfig.modes.get("CLS");
             this.catalogFile = clsConfig.catalogFile;
-            // outputDirの設定（Pathから直接Fileを作成してから文字列に変換）
             if (clsConfig.outDirectory != null) {
                 try {
                     File outputDirFile = clsConfig.outDirectory.toFile();
                     this.outputDir = outputDirFile.getAbsolutePath();
-                    // ルートディレクトリの場合は現在のディレクトリを使用
                     if (this.outputDir.equals("/") || this.outputDir.isEmpty()) {
                         this.outputDir = ".";
                     }
@@ -76,13 +75,9 @@ public class SpatialClustering extends SolverBase {
             } else {
                 this.outputDir = ".";
             }
-            // ターゲットディレクトリの設定（datファイルの探索先）
-            // GUIモードでは、config.jsonのdatDirectoryは無視され、GUIで選択したターゲットディレクトリが使用される
-            // CLIモードでは、config.jsonのdatDirectoryが使用される
             if (clsConfig.datDirectory != null) {
                 try {
                     java.nio.file.Path targetDirPath = clsConfig.datDirectory;
-                    // Validate that target directory exists
                     if (!java.nio.file.Files.exists(targetDirPath)) {
                         throw new IllegalArgumentException(
                             String.format("Target directory does not exist: %s\n" +
@@ -97,7 +92,6 @@ public class SpatialClustering extends SolverBase {
                     }
                     File targetDirFile = targetDirPath.toFile();
                     this.targetDir = targetDirFile.getAbsolutePath();
-                    // ルートディレクトリの場合は現在のディレクトリを使用
                     if (this.targetDir.equals("/") || this.targetDir.isEmpty()) {
                         this.targetDir = ".";
                     }
@@ -118,7 +112,6 @@ public class SpatialClustering extends SolverBase {
             this.epsPercentile = clsConfig.epsPercentile; // null means use elbow method
             this.rmsThreshold = clsConfig.rmsThreshold; // null means no filtering
             this.locErrThreshold = clsConfig.locErrThreshold; // null means no filtering
-            // CLSモードでは常にbin形式で出力
             this.useBinaryFormat = true;
             logger.info("SpatialClustering initialized: outputDir=" + this.outputDir + 
                        ", targetDir=" + (this.targetDir != null ? this.targetDir : "null") +
@@ -182,8 +175,6 @@ public class SpatialClustering extends SolverBase {
                 
                 clusteredPoints = new HashSet<>(allPoints);
                 
-                // Write updated catalog with existing cluster IDs to output directory
-                // outputDirが空文字列や"/"の場合は"."に変換
                 String safeOutputDir = this.outputDir;
                 if (safeOutputDir == null || safeOutputDir.isEmpty() || safeOutputDir.equals("/")) {
                     safeOutputDir = ".";
@@ -201,20 +192,15 @@ public class SpatialClustering extends SolverBase {
                 for (Point point : clusteredPoints) {
                     File outputDatFile = null;
                     try {
-                        // datファイル名を決定（filePathから取得、またはtimeから生成）
                         String datFileName;
                         if (point.getFilePath() != null && !point.getFilePath().isEmpty()) {
-                            // filePathが相対パスの場合、ファイル名のみを取得
                             File datFilePath = new File(point.getFilePath());
                             datFileName = datFilePath.getName();
-                            // .dat拡張子がない場合は追加
                             if (!datFileName.toLowerCase().endsWith(".dat")) {
                                 datFileName = datFileName + ".dat";
                             }
                         } else {
-                            // filePathがない場合はtimeから生成
                             String timeStr = point.getTime();
-                            // ISO 8601形式の場合はyymmdd.hhmmss形式に変換
                             if (timeStr.contains("T") || timeStr.contains("-")) {
                                 datFileName = convertTimeToDatFileName(timeStr) + ".dat";
                             } else {
@@ -222,18 +208,15 @@ public class SpatialClustering extends SolverBase {
                             }
                         }
                         
-                        // 出力ディレクトリにdatファイルを書き込む
                         outputDatFile = new File(outputDirFile, datFileName);
                         if (outputDatFile.getParentFile() != null) {
-                            outputDatFile.getParentFile().mkdirs(); // サブディレクトリも作成
+                            outputDatFile.getParentFile().mkdirs();
                         }
                         
                         PointsHandler pointsHandler = new PointsHandler();
                         pointsHandler.setMainPoint(point);
-                        // codeStringsはSolverBaseから継承されている
                         pointsHandler.writeDatFile(outputDatFile.getAbsolutePath(), this.codeStrings);
                         
-                        // カタログファイルのfilePathを更新（相対パス）
                         String relativePath = outputDatFile.getName();
                         point.setFilePath(relativePath);
                         
@@ -255,9 +238,10 @@ public class SpatialClustering extends SolverBase {
                 }
                 logger.info("Dat files written: " + datFilesWritten + ", skipped: " + datFilesSkipped);
                 
-                File outputCatalogFile = new File(safeOutputDir, "catalog.csv");
+                File outputCatalogFile = CatalogFileNameGenerator.generateCatalogFileName(
+                    this.catalogFile, "CLS", new File(safeOutputDir));
                 writePointsToCatalog(new ArrayList<>(clusteredPoints), outputCatalogFile.getAbsolutePath());
-                logger.info("Catalog saved to: " + outputCatalogFile.getAbsolutePath() + " (catalog.csv)");
+                logger.info("Catalog saved to: " + outputCatalogFile.getAbsolutePath());
                 
                 clusteredCatalogFile = outputCatalogFile.getAbsolutePath();
             } else {
@@ -275,20 +259,15 @@ public class SpatialClustering extends SolverBase {
                         allPoints.remove(point); // allPoints -> Noise Points
                     }
                 }
-                // ノイズポイント（クラスタに属さないポイント）にクラスタID 0を付与
                 for (Point noisePoint : allPoints) {
                     noisePoint.setCid(0);
                 }
                 clusteredPoints.addAll(allPoints);
-                
-                // クラスタ数とイベント数をログに表示
                 int totalClusteredEvents = clusteredPoints.size() - allPoints.size();
                 int noiseEvents = allPoints.size();
                 logger.info("Clustering completed: " + clusters.size() + " clusters with " + totalClusteredEvents + " events, " + 
                            noiseEvents + " noise points (CID=0)");
                 
-                // Write updated catalog with cluster IDs to output directory
-                // outputDirが空文字列や"/"の場合は"."に変換
                 String safeOutputDir = this.outputDir;
                 if (safeOutputDir == null || safeOutputDir.isEmpty() || safeOutputDir.equals("/")) {
                     safeOutputDir = ".";
@@ -306,20 +285,15 @@ public class SpatialClustering extends SolverBase {
                 for (Point point : clusteredPoints) {
                     File outputDatFile = null;
                     try {
-                        // datファイル名を決定（filePathから取得、またはtimeから生成）
                         String datFileName;
                         if (point.getFilePath() != null && !point.getFilePath().isEmpty()) {
-                            // filePathが相対パスの場合、ファイル名のみを取得
                             File datFilePath = new File(point.getFilePath());
                             datFileName = datFilePath.getName();
-                            // .dat拡張子がない場合は追加
                             if (!datFileName.toLowerCase().endsWith(".dat")) {
                                 datFileName = datFileName + ".dat";
                             }
                         } else {
-                            // filePathがない場合はtimeから生成
                             String timeStr = point.getTime();
-                            // ISO 8601形式の場合はyymmdd.hhmmss形式に変換
                             if (timeStr.contains("T") || timeStr.contains("-")) {
                                 datFileName = convertTimeToDatFileName(timeStr) + ".dat";
                             } else {
@@ -327,18 +301,15 @@ public class SpatialClustering extends SolverBase {
                             }
                         }
                         
-                        // 出力ディレクトリにdatファイルを書き込む
                         outputDatFile = new File(outputDirFile, datFileName);
                         if (outputDatFile.getParentFile() != null) {
-                            outputDatFile.getParentFile().mkdirs(); // サブディレクトリも作成
+                            outputDatFile.getParentFile().mkdirs();
                         }
                         
                         PointsHandler pointsHandler = new PointsHandler();
                         pointsHandler.setMainPoint(point);
-                        // codeStringsはSolverBaseから継承されている
                         pointsHandler.writeDatFile(outputDatFile.getAbsolutePath(), this.codeStrings);
                         
-                        // カタログファイルのfilePathを更新（相対パス）
                         String relativePath = outputDatFile.getName();
                         point.setFilePath(relativePath);
                         
@@ -360,18 +331,14 @@ public class SpatialClustering extends SolverBase {
                 }
                 logger.info("Dat files written: " + datFilesWritten + ", skipped: " + datFilesSkipped);
                 
-                File outputCatalogFile = new File(safeOutputDir, "catalog.csv");
+                File outputCatalogFile = CatalogFileNameGenerator.generateCatalogFileName(
+                    this.catalogFile, "CLS", new File(safeOutputDir));
                 writePointsToCatalog(new ArrayList<>(clusteredPoints), outputCatalogFile.getAbsolutePath());
-                logger.info("Clustered catalog saved to: " + outputCatalogFile.getAbsolutePath() + " (catalog.csv)");
+                logger.info("Clustered catalog saved to: " + outputCatalogFile.getAbsolutePath());
                 
                 clusteredCatalogFile = outputCatalogFile.getAbsolutePath();
             }
             
-            // 入力カタログファイルは変更しない（読み込み元を保護）
-            
-            // Calculate triple differences for each cluster
-            // クラスタリング後のカタログファイルから読み込む
-            // クラスタIDは1から始まる（0はノイズポイント用に予約）
             int clusterId = 1;
             int totalTripleDiffs = 0;
             logger.info("Starting triple difference calculation for clusters...");
@@ -475,7 +442,6 @@ public class SpatialClustering extends SolverBase {
         
         DBSCANClusterer<Point> clusterer = new DBSCANClusterer<>(currentEps, this.minPts, new HaversineDistance());
         List<Cluster<Point>> clusters = clusterer.cluster(points);
-        // クラスタIDを1から始める（0はノイズポイント用に予約）
         int clusterId = 1;
         for (Cluster<Point> cluster : clusters) {
             for (Point point : cluster.getPoints()) {
@@ -642,14 +608,12 @@ public class SpatialClustering extends SolverBase {
      */
     private void saveTripleDifferences(List<TripleDifference> tripleDifferences, int clusterId) {
         try {
-            // outputDirが空文字列や"/"の場合は"."に変換
             String safeOutputDir = this.outputDir;
             if (safeOutputDir == null || safeOutputDir.isEmpty() || safeOutputDir.equals("/")) {
                 safeOutputDir = ".";
                 logger.warning("outputDir is invalid (" + this.outputDir + "), using current directory");
             }
             
-            // 出力ディレクトリが存在しない場合は作成
             File outputDirFile = new File(safeOutputDir);
             if (!outputDirFile.exists()) {
                 outputDirFile.mkdirs();
@@ -732,7 +696,6 @@ public class SpatialClustering extends SolverBase {
         int pointsWithLagTable = 0;
         int pointsWithoutLagTable = 0;
         for (Hypocenter h : filteredHypocenters) {
-            // cidをHypocenterから取得（カタログファイルに書き込まれたクラスタID）
             int cid = (h.clusterId != null && h.clusterId >= 0) ? h.clusterId : -1;
             Point point = new Point(
                 h.time, h.lat, h.lon, h.depth,
@@ -767,7 +730,6 @@ public class SpatialClustering extends SolverBase {
             if ((datFile == null || !datFile.exists()) && h.datFilePath != null && !h.datFilePath.isEmpty()) {
                 File catalogDir = file.getParentFile();
                 String datFilePath = h.datFilePath;
-                // datFilePathに拡張子がない場合は.datを追加
                 if (!datFilePath.endsWith(".dat")) {
                     datFilePath = datFilePath + ".dat";
                 }
@@ -786,9 +748,7 @@ public class SpatialClustering extends SolverBase {
                 }
             }
             
-            // If datFilePath didn't work, try constructing from time
             if (datFile == null || !datFile.exists()) {
-                // timeをyymmdd.hhmmss形式に変換（ISO 8601形式の場合）
                 String datFileName = convertTimeToDatFileName(h.time) + ".dat";
                 // First, try in original catalog file's directory (where .dat files are usually located)
                 File originalCatalogDir = new File(this.catalogFile).getParentFile();
@@ -886,16 +846,11 @@ public class SpatialClustering extends SolverBase {
      */
     private void writePointsToCatalog(List<Point> points, String catalogFile) throws IOException {
         try (java.io.PrintWriter writer = new java.io.PrintWriter(new java.io.FileWriter(catalogFile))) {
-            // catalog_ground_truth.csvと同じ形式: time,latitude,longitude,depth,xerr,yerr,zerr,rms,file,mode,cid
             writer.println("time,latitude,longitude,depth,xerr,yerr,zerr,rms,file,mode,cid");
             for (Point p : points) {
-                // fileカラム: datFilePathが設定されていない場合は空文字列
                 String filePath = p.getFilePath() != null && !p.getFilePath().isEmpty() ? p.getFilePath() : "";
-                // modeカラム: typeが設定されていない場合は空文字列
                 String mode = p.getType() != null && !p.getType().isEmpty() ? p.getType() : "";
-                // cidカラム: clusterIdが-1未満の場合は空文字列（-1は未設定を意味する）
                 String cid = p.getCid() >= 0 ? String.valueOf(p.getCid()) : "";
-                // 時間フォーマットをISO 8601形式に変換（yymmdd.hhmmss -> YYYY-MM-DDTHH:MM:SS）
                 String timeStr = convertTimeFormat(p.getTime());
                 writer.printf("%s,%.6f,%.6f,%.3f,%.3f,%.3f,%.3f,%.3f,%s,%s,%s%n",
                     timeStr, p.getLat(), p.getLon(), p.getDep(),
@@ -917,15 +872,12 @@ public class SpatialClustering extends SolverBase {
             return "";
         }
         
-        // 既にyymmdd.hhmmss形式（例: 000101.100000）の場合はそのまま返す
         if (timeStr.contains(".") && timeStr.length() >= 13 && !timeStr.contains("T") && !timeStr.contains("-")) {
             return timeStr;
         }
         
-        // ISO 8601形式（例: 2000-01-01T10:00:00）をyymmdd.hhmmss形式に変換
         try {
             if (timeStr.contains("T") && timeStr.length() >= 19) {
-                // 年は2桁に変換（2000 -> 00）
                 String year = timeStr.substring(2, 4);
                 String month = timeStr.substring(5, 7);
                 String day = timeStr.substring(8, 10);
@@ -938,7 +890,6 @@ public class SpatialClustering extends SolverBase {
             logger.warning("Failed to convert time format for dat file name: " + timeStr + " - " + e.getMessage());
         }
         
-        // 変換できない場合はそのまま返す
         return timeStr;
     }
     
@@ -954,16 +905,14 @@ public class SpatialClustering extends SolverBase {
             return "";
         }
         
-        // 既にISO 8601形式（例: 2000-01-01T00:00:00）の場合はそのまま返す
         if (timeStr.contains("T") && timeStr.contains("-")) {
             return timeStr;
         }
         
-        // yymmdd.hhmmss形式（例: 000101.110000）をISO 8601形式に変換
         try {
             if (timeStr.length() >= 13 && timeStr.contains(".")) {
-                String datePart = timeStr.substring(0, 6); // yymmdd
-                String timePart = timeStr.substring(7, 13); // hhmmss
+                String datePart = timeStr.substring(0, 6);
+                String timePart = timeStr.substring(7, 13);
                 
                 int yy = Integer.parseInt(datePart.substring(0, 2));
                 int mm = Integer.parseInt(datePart.substring(2, 4));
@@ -972,7 +921,6 @@ public class SpatialClustering extends SolverBase {
                 int min = Integer.parseInt(timePart.substring(2, 4));
                 int ss = Integer.parseInt(timePart.substring(4, 6));
                 
-                // 年を2000年代に変換（00-99 -> 2000-2099）
                 int year = (yy < 50) ? (2000 + yy) : (1900 + yy);
                 
                 return String.format("%04d-%02d-%02dT%02d:%02d:%02d", year, mm, dd, hh, min, ss);
@@ -981,7 +929,6 @@ public class SpatialClustering extends SolverBase {
             logger.warning("Failed to convert time format: " + timeStr + " - " + e.getMessage());
         }
         
-        // 変換できない場合はそのまま返す
         return timeStr;
     }
 }

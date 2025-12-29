@@ -1,12 +1,14 @@
 package com.treloc.xtreloc.app.gui.model;
 
+import com.treloc.xtreloc.util.TimeFormatConverter;
+
 import java.awt.Color;
 import java.io.File;
 import java.util.List;
 
 /**
- * カタログ情報を保持するクラス
- * 複数カタログの比較表示に使用
+ * Catalog information class
+ * Used for comparing multiple catalogs
  */
 public class CatalogInfo {
     private String name;
@@ -16,9 +18,6 @@ public class CatalogInfo {
     private File sourceFile;
     private boolean visible;
     
-    /**
-     * シンボルタイプ
-     */
     public enum SymbolType {
         CIRCLE("Circle"),
         SQUARE("Square"),
@@ -97,26 +96,16 @@ public class CatalogInfo {
     }
     
     /**
-     * 時刻文字列から時刻を比較可能な形式に変換
-     * ISO 8601形式 (2000-01-01T00:00:00) を想定
+     * Normalizes time string for comparison
+     * Supports both ISO 8601 and yymmdd.hhmmss formats
+     * Removes seconds for minute-level comparison
      */
     public static String normalizeTime(String time) {
-        if (time == null) return "";
-        // ミリ秒部分を削除（ある場合）
-        int dotIndex = time.indexOf('.');
-        if (dotIndex > 0) {
-            time = time.substring(0, dotIndex);
-        }
-        // 秒部分を削除して分単位で比較（必要に応じて調整）
-        int lastColon = time.lastIndexOf(':');
-        if (lastColon > 0) {
-            return time.substring(0, lastColon);
-        }
-        return time;
+        return TimeFormatConverter.normalizeTimeForComparison(time);
     }
     
     /**
-     * 2つの時刻が同じイベントかどうかを判定（分単位で比較）
+     * Checks if two times represent the same event (minute-level comparison)
      */
     public static boolean isSameEvent(String time1, String time2) {
         if (time1 == null || time2 == null) return false;

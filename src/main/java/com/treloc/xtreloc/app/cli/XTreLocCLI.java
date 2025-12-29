@@ -32,6 +32,11 @@ public final class XTreLocCLI {
             showHelp();
             return;
         }
+        
+        if ("--version".equals(args[0]) || "-v".equals(args[0])) {
+            showVersion();
+            return;
+        }
 
         String mode = args[0].toUpperCase();
         String configPath = (args.length >= 2)
@@ -45,9 +50,11 @@ public final class XTreLocCLI {
             LogInitializer.setup(logFile.getAbsolutePath(), configPath);
             
             java.util.logging.Logger logger = java.util.logging.Logger.getLogger("com.treloc.xtreloc");
+            String version = com.treloc.xtreloc.app.gui.util.VersionInfo.getVersionString();
             logger.info("========================================");
-            logger.info("xTreLoc CLI モード起動");
-            logger.info("ログファイル: " + logFile.getAbsolutePath());
+            logger.info("xTreLoc CLI mode started");
+            logger.info(version);
+            logger.info("Log file: " + logFile.getAbsolutePath());
             logger.info("========================================");
 
             ConfigLoader loader = new ConfigLoader(configPath);
@@ -114,17 +121,25 @@ public final class XTreLocCLI {
             }
 
         } catch (Exception e) {
-            System.err.println("\nERROR: " + e.getMessage());
+            // Detailed error reporting for CLI
+            System.err.println("\n========================================");
+            System.err.println("ERROR: " + e.getMessage());
+            System.err.println("========================================");
+            System.err.println("Error type: " + e.getClass().getName());
             if (e.getCause() != null) {
-                System.err.println("Caused by: " + e.getCause().getClass().getSimpleName() + ": " + e.getCause().getMessage());
+                System.err.println("Caused by: " + e.getCause().getClass().getName() + ": " + e.getCause().getMessage());
             }
+            System.err.println("\nStack trace:");
+            e.printStackTrace(System.err);
             System.err.println("\nFor detailed error information, check the log file:");
             try {
                 java.io.File logFile = com.treloc.xtreloc.app.gui.util.LogHistoryManager.getLogFile();
                 System.err.println("  " + logFile.getAbsolutePath());
             } catch (Exception logEx) {
             }
+            System.err.println("========================================");
             
+            // Log to file with full stack trace
             logger.log(Level.SEVERE, "Fatal error", e);
             System.exit(1);
         }
@@ -368,7 +383,8 @@ public final class XTreLocCLI {
             return;
         }
         
-        java.io.File catalogFile = outDir.resolve("catalog.csv").toFile();
+        java.io.File catalogFile = com.treloc.xtreloc.util.CatalogFileNameGenerator.generateCatalogFileName(
+            null, mode, outDir.toFile());
         try (java.io.FileWriter writer = new java.io.FileWriter(catalogFile)) {
             writer.write("time,latitude,longitude,depth,xerr,yerr,zerr,rms,file,mode,cid\n");
             
@@ -380,7 +396,6 @@ public final class XTreLocCLI {
                     type = mode;
                 }
                 
-                // 時刻をISO 8601形式に変換
                 String timeISO8601 = convertTimeToISO8601(h.time);
                 
                 writer.write(String.format("%s,%.6f,%.6f,%.3f,%.3f,%.3f,%.3f,%.3f,%s,%s,%s\n",
@@ -452,23 +467,18 @@ public final class XTreLocCLI {
     private static String extractTimeFromFilename(String filename) {
         String baseName = filename.endsWith(".dat") ? filename.substring(0, filename.length() - 4) : filename;
         
-        // yymmdd.hhmmss形式（例: 000101.110000）をそのまま返す
         if (baseName.contains(".") && baseName.length() >= 13) {
-            // ドットを含む形式を確認（yymmdd.hhmmss）
             String[] parts = baseName.split("\\.");
             if (parts.length == 2 && parts[0].length() == 6 && parts[1].length() == 6) {
                 if (parts[0].matches("\\d{6}") && parts[1].matches("\\d{6}")) {
-                    return baseName; // yymmdd.hhmmss形式をそのまま返す
+                    return baseName;
                 }
             }
         }
         
-        // 14桁の数字形式（例: 000101110000）の場合、yymmdd.hhmmss形式に変換
         if (baseName.matches("\\d{14}")) {
             return baseName.substring(0, 6) + "." + baseName.substring(6, 14);
         }
-        
-        // その他の形式から14桁の数字を抽出（ドットを無視）
         String timeWithoutDot = baseName.replace(".", "");
         java.util.regex.Pattern pattern = java.util.regex.Pattern.compile("(\\d{14})");
         java.util.regex.Matcher matcher = pattern.matcher(timeWithoutDot);
@@ -492,16 +502,14 @@ public final class XTreLocCLI {
             return "";
         }
         
-        // 既にISO 8601形式（例: 2000-01-01T00:00:00）の場合はそのまま返す
         if (timeStr.contains("T") && timeStr.contains("-")) {
             return timeStr;
         }
         
-        // yymmdd.hhmmss形式（例: 000101.110000）をISO 8601形式に変換
         try {
             if (timeStr.length() >= 13 && timeStr.contains(".")) {
-                String datePart = timeStr.substring(0, 6); // yymmdd
-                String timePart = timeStr.substring(7, 13); // hhmmss
+                String datePart = timeStr.substring(0, 6);
+                String timePart = timeStr.substring(7, 13);
                 
                 int yy = Integer.parseInt(datePart.substring(0, 2));
                 int mm = Integer.parseInt(datePart.substring(2, 4));
@@ -510,7 +518,6 @@ public final class XTreLocCLI {
                 int min = Integer.parseInt(timePart.substring(2, 4));
                 int ss = Integer.parseInt(timePart.substring(4, 6));
                 
-                // 年を2000年代に変換（00-99 -> 2000-2099）
                 int year = (yy < 50) ? (2000 + yy) : (1900 + yy);
                 
                 return String.format("%04d-%02d-%02dT%02d:%02d:%02d", year, mm, dd, hh, min, ss);
@@ -519,7 +526,6 @@ public final class XTreLocCLI {
             logger.warning("Failed to convert time format: " + timeStr + " - " + e.getMessage());
         }
         
-        // 変換できない場合はそのまま返す
         return timeStr;
     }
 
@@ -580,6 +586,10 @@ public final class XTreLocCLI {
         System.out.println(
                 "Usage: java -jar xtreloc.jar <MODE> [config.json]");
         System.out.println();
+        System.out.println("Options:");
+        System.out.println("  --help, -h    Show this help message");
+        System.out.println("  --version, -v Show version information");
+        System.out.println();
         System.out.println("Modes:");
         System.out.println("  GRD   Grid search location");
         System.out.println("  STD   Station-pair double difference");
@@ -589,6 +599,11 @@ public final class XTreLocCLI {
         System.out.println("  SYN   Synthetic test data generation");
     }
 
+    private static void showVersion() {
+        String version = com.treloc.xtreloc.app.gui.util.VersionInfo.getVersionString();
+        System.out.println(version);
+    }
+
     private static void showLogo() {
         System.out.println("");
         System.out.println("          ______                __");
@@ -596,6 +611,9 @@ public final class XTreLocCLI {
         System.out.println("  | |/_/  / /   / ___/ / _ \\  / /   / __ \\ / ___/");
         System.out.println(" _>  <   / /   / /    /  __/ / /___/ /_/ // /__");
         System.out.println("/_/|_|  /_/   /_/     \\___/ /_____/\\____/ \\___/");
+        System.out.println("");
+        String version = com.treloc.xtreloc.app.gui.util.VersionInfo.getVersionString();
+        System.out.println("  " + version);
         System.out.println("");
     }
 

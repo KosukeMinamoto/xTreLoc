@@ -5,7 +5,7 @@ import org.apache.commons.math3.linear.RealVector;
 import org.apache.commons.math3.linear.ArrayRealVector;
 
 /**
- * 震源点のデータを保持するクラス
+ * Point class that holds hypocenter data.
  * Implements Clusterable for DBSCAN clustering.
  */
 public class Point implements Clusterable {

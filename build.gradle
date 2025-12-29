@@ -71,7 +71,9 @@ jar {
     from {
         configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
     }
-    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    // Use INCLUDE for META-INF/services to merge function factory registrations
+    // But exclude signature files to avoid SecurityException
+    duplicatesStrategy = DuplicatesStrategy.INCLUDE
     // 署名ファイルを除外（SecurityExceptionを防ぐため）
     exclude 'META-INF/*.SF'
     exclude 'META-INF/*.DSA'

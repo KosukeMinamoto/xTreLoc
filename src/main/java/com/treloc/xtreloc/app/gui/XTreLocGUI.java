@@ -4,7 +4,6 @@ import com.treloc.xtreloc.app.gui.view.MapView;
 import com.treloc.xtreloc.app.gui.controller.MapController;
 
 import javax.swing.*;
-import javax.swing.filechooser.FileNameExtensionFilter;
 import java.awt.*;
 import java.io.File;
 
@@ -31,7 +30,8 @@ public class XTreLocGUI {
         
         SwingUtilities.invokeLater(() -> {
             try {
-                JFrame mainFrame = new JFrame("xTreLoc");
+                String version = com.treloc.xtreloc.app.gui.util.VersionInfo.getVersion();
+                JFrame mainFrame = new JFrame("xTreLoc " + version);
                 mainFrame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
                 mainFrame.setLayout(new BorderLayout());
                 
@@ -82,13 +82,11 @@ public class XTreLocGUI {
                     dataViewPanel.getCatalogPanel();
                 catalogPanel.setTravelTimeDataPanel(travelTimeDataPanel);
                 
-                // 走時差データを左ペインの下に配置
                 JSplitPane leftPanelSplit = new JSplitPane(JSplitPane.VERTICAL_SPLIT,
                     excelPane, travelTimeDataPanel);
                 leftPanelSplit.setResizeWeight(0.7);
                 leftPanelSplit.setDividerLocation(400);
                 
-                // 右側はマップのみ
                 JSplitPane viewerSplit = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT,
                     leftPanelSplit, mapFrame.getContentPane());
                 viewerSplit.setResizeWeight(0.5);
@@ -104,16 +102,13 @@ public class XTreLocGUI {
                     reportPanel.setHypocenters(hypocenters);
                 });
                 
-                // viewerタブ用の右ペインタブパネルを作成（map, hist, scatter）
                 JTabbedPane viewerRightTabs = new JTabbedPane();
                 viewerRightTabs.addTab("Map", mapFrame.getContentPane());
                 
-                // Histタブに複数列選択対応のヒストグラムパネルを作成
-                JPanel histogramPanel = createHistogramPanel(catalogPanel);
+                JPanel histogramPanel = createHistogramPanel(catalogPanel, view);
                 viewerRightTabs.addTab("Hist", histogramPanel);
                 
-                // Scatter plot panelを作成
-                JPanel scatterPanel = createScatterPanel(reportPanel);
+                JPanel scatterPanel = createScatterPanel(reportPanel, view);
                 viewerRightTabs.addTab("Scatter", scatterPanel);
                 
                 com.treloc.xtreloc.app.gui.view.MicrosoftStyleTabbedPane mainTabbedPane = 
@@ -195,38 +190,42 @@ public class XTreLocGUI {
     }
     
     /**
-     * Histogram panelを作成（複数列選択対応）
+     * Histogram panelを作成（カタログ間比較対応）
      */
-    private static JPanel createHistogramPanel(com.treloc.xtreloc.app.gui.view.CatalogTablePanel catalogPanel) {
+    private static JPanel createHistogramPanel(com.treloc.xtreloc.app.gui.view.CatalogTablePanel catalogPanel, MapView mapView) {
         JPanel histogramPanelWrapper = new JPanel(new BorderLayout());
         histogramPanelWrapper.setBorder(javax.swing.BorderFactory.createTitledBorder("Histogram"));
         
         JPanel columnSelectionPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
-        columnSelectionPanel.setBorder(javax.swing.BorderFactory.createTitledBorder("Select Columns to Display (Multiple Selection)"));
+        columnSelectionPanel.setBorder(javax.swing.BorderFactory.createTitledBorder("Select Parameter (Single Selection)"));
         
         String[] columnNames = {"Latitude", "Longitude", "Depth (km)", "xerr (km)", "yerr (km)", "zerr (km)", "rms"};
-        java.util.List<JCheckBox> columnCheckBoxes = new java.util.ArrayList<>();
+        java.util.List<JRadioButton> columnRadioButtons = new java.util.ArrayList<>();
+        ButtonGroup columnGroup = new ButtonGroup();
         
         for (String columnName : columnNames) {
-            JCheckBox checkBox = new JCheckBox(columnName);
-            columnCheckBoxes.add(checkBox);
-            columnSelectionPanel.add(checkBox);
+            JRadioButton radioButton = new JRadioButton(columnName);
+            columnRadioButtons.add(radioButton);
+            columnGroup.add(radioButton);
+            columnSelectionPanel.add(radioButton);
         }
         
-        // ヒストグラム描画パネル
         JPanel histogramPanel = new JPanel() {
             @Override
             protected void paintComponent(Graphics g) {
                 super.paintComponent(g);
-                drawHistogram(g, catalogPanel, columnCheckBoxes, columnNames);
+                drawHistogram(g, catalogPanel, columnRadioButtons, columnNames, mapView);
             }
         };
         histogramPanel.setPreferredSize(new Dimension(500, 400));
         histogramPanel.setBackground(Color.WHITE);
         
-        // チェックボックスの変更時に再描画
-        for (JCheckBox checkBox : columnCheckBoxes) {
-            checkBox.addActionListener(e -> histogramPanel.repaint());
+        for (JRadioButton radioButton : columnRadioButtons) {
+            radioButton.addActionListener(e -> histogramPanel.repaint());
+        }
+        
+        if (mapView != null) {
+            mapView.addCatalogVisibilityChangeListener(() -> histogramPanel.repaint());
         }
         
         histogramPanelWrapper.add(columnSelectionPanel, BorderLayout.NORTH);
@@ -235,16 +234,80 @@ public class XTreLocGUI {
         return histogramPanelWrapper;
     }
     
-    /**
-     * ヒストグラムを描画（複数列対応）
-     */
     private static void drawHistogram(Graphics g, com.treloc.xtreloc.app.gui.view.CatalogTablePanel catalogPanel,
-                                     java.util.List<JCheckBox> columnCheckBoxes, String[] columnNames) {
+                                     java.util.List<JRadioButton> columnRadioButtons, String[] columnNames,
+                                     MapView mapView) {
         try {
-            // CatalogTablePanelからhypocentersを取得
-            java.util.List<com.treloc.xtreloc.app.gui.model.Hypocenter> hypocenters = catalogPanel.getHypocenters();
+            int selectedColumnIndex = -1;
+            String selectedColumnName = null;
+            for (int i = 0; i < columnRadioButtons.size() && i < columnNames.length; i++) {
+                if (columnRadioButtons.get(i).isSelected()) {
+                    selectedColumnIndex = i + 2;
+                    selectedColumnName = columnNames[i];
+                    break;
+                }
+            }
             
-            if (hypocenters == null || hypocenters.isEmpty()) {
+            if (selectedColumnIndex == -1) {
+                g.setColor(Color.BLACK);
+                g.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 14));
+                FontMetrics fm = g.getFontMetrics();
+                String message = "Please select a parameter";
+                int x = (g.getClipBounds().width - fm.stringWidth(message)) / 2;
+                int y = g.getClipBounds().height / 2;
+                g.drawString(message, x, y);
+                return;
+            }
+            
+            java.util.List<com.treloc.xtreloc.app.gui.model.CatalogInfo> selectedCatalogs = new java.util.ArrayList<>();
+            if (mapView != null) {
+                java.util.List<com.treloc.xtreloc.app.gui.model.CatalogInfo> allCatalogs = mapView.getCatalogInfos();
+                for (com.treloc.xtreloc.app.gui.model.CatalogInfo info : allCatalogs) {
+                    if (info.isVisible() && info.getHypocenters() != null && !info.getHypocenters().isEmpty()) {
+                        selectedCatalogs.add(info);
+                    }
+                }
+            }
+            
+            if (selectedCatalogs.isEmpty()) {
+                g.setColor(Color.BLACK);
+                g.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 14));
+                FontMetrics fm = g.getFontMetrics();
+                String message = "Please select at least one catalog";
+                int x = (g.getClipBounds().width - fm.stringWidth(message)) / 2;
+                int y = g.getClipBounds().height / 2;
+                g.drawString(message, x, y);
+                return;
+            }
+            
+            int width = g.getClipBounds().width;
+            int height = g.getClipBounds().height;
+            
+            int margin = 50;
+            int chartWidth = width - 2 * margin;
+            int chartHeight = height - 2 * margin - 60;
+            
+            g.setColor(Color.WHITE);
+            g.fillRect(0, 0, width, height);
+            double globalMin = Double.MAX_VALUE;
+            double globalMax = Double.MIN_VALUE;
+            java.util.List<java.util.List<Double>> allValues = new java.util.ArrayList<>();
+            java.util.List<com.treloc.xtreloc.app.gui.model.CatalogInfo> catalogInfoForValues = new java.util.ArrayList<>();
+            
+            for (com.treloc.xtreloc.app.gui.model.CatalogInfo info : selectedCatalogs) {
+                java.util.List<Double> values = getColumnValuesForHistogram(info.getHypocenters(), selectedColumnIndex);
+                if (!values.isEmpty()) {
+                    java.util.Collections.sort(values);
+                    double min = values.get(0);
+                    double max = values.get(values.size() - 1);
+                    if (min < globalMin) globalMin = min;
+                    if (max > globalMax) globalMax = max;
+                    allValues.add(values);
+                    catalogInfoForValues.add(info);
+                }
+            }
+            
+            if (globalMin == Double.MAX_VALUE) {
                 g.setColor(Color.BLACK);
                 g.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 14));
                 FontMetrics fm = g.getFontMetrics();
@@ -255,65 +318,11 @@ public class XTreLocGUI {
                 return;
             }
             
-            // 選択された列のインデックスを取得
-            java.util.Set<Integer> selectedColumns = new java.util.HashSet<>();
-            for (int i = 0; i < columnCheckBoxes.size() && i < columnNames.length; i++) {
-                if (columnCheckBoxes.get(i).isSelected()) {
-                    // CatalogTablePanelの列インデックスに変換（行番号=0, 時刻=1をスキップ）
-                    selectedColumns.add(i + 2); // 2=緯度列のインデックス
-                }
-            }
-            
-            if (selectedColumns.isEmpty()) {
-                g.setColor(Color.BLACK);
-                g.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 14));
-                FontMetrics fm = g.getFontMetrics();
-                String message = "Please select columns to display";
-                int x = (g.getClipBounds().width - fm.stringWidth(message)) / 2;
-                int y = g.getClipBounds().height / 2;
-                g.drawString(message, x, y);
-                return;
-            }
-            
-            int width = g.getClipBounds().width;
-            int height = g.getClipBounds().height;
-            
-            // 余白
-            int margin = 50;
-            int chartWidth = width - 2 * margin;
-            int chartHeight = height - 2 * margin;
-            
-            // 背景をクリア
-            g.setColor(Color.WHITE);
-            g.fillRect(0, 0, width, height);
-            
-            // 全選択列のデータ範囲を計算
-            double globalMin = Double.MAX_VALUE;
-            double globalMax = Double.MIN_VALUE;
-            java.util.List<java.util.List<Double>> allValues = new java.util.ArrayList<>();
-            
-            for (int columnIndex : selectedColumns) {
-                java.util.List<Double> values = getColumnValuesForHistogram(hypocenters, columnIndex);
-                if (!values.isEmpty()) {
-                    java.util.Collections.sort(values);
-                    double min = values.get(0);
-                    double max = values.get(values.size() - 1);
-                    if (min < globalMin) globalMin = min;
-                    if (max > globalMax) globalMax = max;
-                    allValues.add(values);
-                }
-            }
-            
-            if (globalMin == Double.MAX_VALUE) {
-                return;
-            }
-            
             double range = globalMax - globalMin;
             if (range == 0) {
                 range = 1.0;
             }
             
-            // ビンの数を決定（Sturgesの公式）
             int totalSize = 0;
             for (java.util.List<Double> values : allValues) {
                 totalSize += values.size();
@@ -325,8 +334,6 @@ public class XTreLocGUI {
             if (numBins < 5) {
                 numBins = 5;
             }
-            
-            // 各列のビンを作成
             java.util.List<int[]> allBins = new java.util.ArrayList<>();
             double binWidth = range / numBins;
             
@@ -339,7 +346,6 @@ public class XTreLocGUI {
                 allBins.add(bins);
             }
             
-            // 最大頻度を取得
             int maxFreq = 0;
             for (int[] bins : allBins) {
                 for (int freq : bins) {
@@ -352,19 +358,12 @@ public class XTreLocGUI {
                 maxFreq = 1;
             }
             
-            // 色の配列（複数の列を異なる色で表示）
-            Color[] colors = {Color.BLUE, Color.RED, Color.GREEN, Color.ORANGE, Color.MAGENTA, Color.CYAN, Color.PINK};
-            
-            // 各列のヒストグラムを重ね書き
-            int colorIndex = 0;
-            
             for (int i = 0; i < allBins.size(); i++) {
                 int[] bins = allBins.get(i);
-                Color color = colors[colorIndex % colors.length];
-                colorIndex++;
+                com.treloc.xtreloc.app.gui.model.CatalogInfo info = catalogInfoForValues.get(i);
+                Color catalogColor = info.getColor();
                 
-                // 半透明で描画（重ね書きを視認しやすくする）
-                g.setColor(new Color(color.getRed(), color.getGreen(), color.getBlue(), 150));
+                g.setColor(new Color(catalogColor.getRed(), catalogColor.getGreen(), catalogColor.getBlue(), 150));
                 double barWidth = (double) chartWidth / numBins;
                 
                 for (int j = 0; j < numBins; j++) {
@@ -375,26 +374,19 @@ public class XTreLocGUI {
                 }
             }
             
-            // 軸を描画
             g.setColor(Color.BLACK);
-            // X軸
             g.drawLine(margin, margin + chartHeight, margin + chartWidth, margin + chartHeight);
-            // Y軸
             g.drawLine(margin, margin, margin, margin + chartHeight);
             
-            // ラベルを描画
             g.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 10));
             FontMetrics fm = g.getFontMetrics();
             
-            // X軸のラベル
             for (int i = 0; i <= 5; i++) {
                 double value = globalMin + (range * i / 5);
                 String label = String.format("%.2f", value);
                 int x = margin + (int) (chartWidth * i / 5) - fm.stringWidth(label) / 2;
                 g.drawString(label, x, margin + chartHeight + 20);
             }
-            
-            // Y軸のラベル
             for (int i = 0; i <= 5; i++) {
                 int freq = maxFreq * i / 5;
                 String label = String.valueOf(freq);
@@ -402,36 +394,31 @@ public class XTreLocGUI {
                 g.drawString(label, margin - fm.stringWidth(label) - 5, y);
             }
             
-            // タイトルと凡例
-            StringBuilder title = new StringBuilder();
-            for (int idx : selectedColumns) {
-                if (title.length() > 0) title.append(", ");
-                int checkBoxIndex = idx - 2; // CatalogTablePanelの列インデックスからチェックボックスのインデックスに変換
-                if (checkBoxIndex >= 0 && checkBoxIndex < columnNames.length) {
-                    title.append(columnNames[checkBoxIndex]);
-                }
-            }
-            title.append(" Histogram");
-            
+            String title = selectedColumnName + " Histogram";
             g.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 12));
-            int titleWidth = fm.stringWidth(title.toString());
-            g.drawString(title.toString(), (width - titleWidth) / 2, 20);
+            int titleWidth = fm.stringWidth(title);
+            g.drawString(title, (width - titleWidth) / 2, 20);
             
-            // 凡例を描画
             g.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 10));
-            int legendY = 35;
-            colorIndex = 0;
-            for (int idx : selectedColumns) {
-                Color color = colors[colorIndex % colors.length];
-                colorIndex++;
-                g.setColor(color);
-                g.fillRect(margin + chartWidth - 100, legendY, 15, 10);
+            int legendY = margin + chartHeight + 50;
+            int legendX = margin;
+            int legendItemHeight = 15;
+            
+            for (int i = 0; i < catalogInfoForValues.size(); i++) {
+                com.treloc.xtreloc.app.gui.model.CatalogInfo info = catalogInfoForValues.get(i);
+                Color catalogColor = info.getColor();
+                
+                g.setColor(catalogColor);
+                g.fillRect(legendX, legendY, 15, 10);
+                
                 g.setColor(Color.BLACK);
-                int checkBoxIndex = idx - 2;
-                if (checkBoxIndex >= 0 && checkBoxIndex < columnNames.length) {
-                    g.drawString(columnNames[checkBoxIndex], margin + chartWidth - 80, legendY + 8);
+                g.drawString(info.getName(), legendX + 20, legendY + 8);
+                
+                legendX += 120;
+                if (legendX + 120 > width - margin) {
+                    legendX = margin;
+                    legendY += legendItemHeight;
                 }
-                legendY += 15;
             }
             
         } catch (Exception e) {
@@ -440,15 +427,11 @@ public class XTreLocGUI {
         }
     }
     
-    /**
-     * 列インデックスから値を取得（ヒストグラム用）
-     */
     private static java.util.List<Double> getColumnValuesForHistogram(
             java.util.List<com.treloc.xtreloc.app.gui.model.Hypocenter> hypocenters, int columnIndex) {
         java.util.List<Double> values = new java.util.ArrayList<>();
         for (com.treloc.xtreloc.app.gui.model.Hypocenter h : hypocenters) {
             double value = 0.0;
-            // CatalogTablePanelの列インデックス: 0=行, 1=時刻, 2=緯度, 3=経度, 4=深度, 5=xerr, 6=yerr, 7=zerr, 8=rms
             switch (columnIndex) {
                 case 2:
                     value = h.lat;
@@ -479,10 +462,7 @@ public class XTreLocGUI {
         return values;
     }
     
-    /**
-     * Scatter plot panelを作成
-     */
-    private static JPanel createScatterPanel(com.treloc.xtreloc.app.gui.view.ReportPanel reportPanel) {
+    private static JPanel createScatterPanel(com.treloc.xtreloc.app.gui.view.ReportPanel reportPanel, MapView mapView) {
         JPanel scatterPanel = new JPanel(new BorderLayout());
         scatterPanel.setBorder(javax.swing.BorderFactory.createTitledBorder("Scatter Plot"));
         
@@ -495,14 +475,11 @@ public class XTreLocGUI {
         yAxisCombo.setSelectedIndex(2);
         controlPanel.add(yAxisCombo);
         
-        // 散布図描画パネル
         JPanel plotPanel = new JPanel() {
             @Override
             protected void paintComponent(Graphics g) {
                 super.paintComponent(g);
-                if (reportPanel != null) {
-                    drawScatterPlot(g, reportPanel, xAxisCombo, yAxisCombo);
-                }
+                drawScatterPlot(g, reportPanel, xAxisCombo, yAxisCombo, mapView);
             }
         };
         plotPanel.setPreferredSize(new Dimension(500, 400));
@@ -515,27 +492,68 @@ public class XTreLocGUI {
         scatterPanel.add(controlPanel, BorderLayout.NORTH);
         scatterPanel.add(plotPanel, BorderLayout.CENTER);
         
-        // コンボボックスの変更時に再描画
         xAxisCombo.addActionListener(e -> plotPanel.repaint());
         yAxisCombo.addActionListener(e -> plotPanel.repaint());
+        
+        if (mapView != null) {
+            mapView.addCatalogVisibilityChangeListener(() -> plotPanel.repaint());
+        }
         
         return scatterPanel;
     }
     
-    /**
-     * 散布図を描画
-     */
     private static void drawScatterPlot(Graphics g, com.treloc.xtreloc.app.gui.view.ReportPanel reportPanel, 
-                                       JComboBox<String> xAxisCombo, JComboBox<String> yAxisCombo) {
+                                       JComboBox<String> xAxisCombo, JComboBox<String> yAxisCombo, MapView mapView) {
         try {
-            // ReportPanelからhypocentersを取得（リフレクションを使用）
-            java.lang.reflect.Field hypocentersField = com.treloc.xtreloc.app.gui.view.ReportPanel.class.getDeclaredField("hypocenters");
-            hypocentersField.setAccessible(true);
-            @SuppressWarnings("unchecked")
-            java.util.List<com.treloc.xtreloc.app.gui.model.Hypocenter> hypocenters = 
-                (java.util.List<com.treloc.xtreloc.app.gui.model.Hypocenter>) hypocentersField.get(reportPanel);
+            String xAxisName = (String) xAxisCombo.getSelectedItem();
+            String yAxisName = (String) yAxisCombo.getSelectedItem();
             
-            if (hypocenters == null || hypocenters.isEmpty()) {
+            java.util.List<com.treloc.xtreloc.app.gui.model.CatalogInfo> selectedCatalogs = new java.util.ArrayList<>();
+            if (mapView != null) {
+                java.util.List<com.treloc.xtreloc.app.gui.model.CatalogInfo> allCatalogs = mapView.getCatalogInfos();
+                for (com.treloc.xtreloc.app.gui.model.CatalogInfo info : allCatalogs) {
+                    if (info.isVisible() && info.getHypocenters() != null && !info.getHypocenters().isEmpty()) {
+                        selectedCatalogs.add(info);
+                    }
+                }
+            }
+            
+            if (selectedCatalogs.isEmpty()) {
+                g.setColor(Color.BLACK);
+                g.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 14));
+                FontMetrics fm = g.getFontMetrics();
+                String message = "Please select at least one catalog in Map";
+                int x = (g.getClipBounds().width - fm.stringWidth(message)) / 2;
+                int y = g.getClipBounds().height / 2;
+                g.drawString(message, x, y);
+                return;
+            }
+            
+            java.util.List<java.util.List<Double>> allXValues = new java.util.ArrayList<>();
+            java.util.List<java.util.List<Double>> allYValues = new java.util.ArrayList<>();
+            java.util.List<com.treloc.xtreloc.app.gui.model.CatalogInfo> catalogInfoForValues = new java.util.ArrayList<>();
+            
+            for (com.treloc.xtreloc.app.gui.model.CatalogInfo info : selectedCatalogs) {
+                java.util.List<Double> xValues = new java.util.ArrayList<>();
+                java.util.List<Double> yValues = new java.util.ArrayList<>();
+                
+                for (com.treloc.xtreloc.app.gui.model.Hypocenter h : info.getHypocenters()) {
+                    double xVal = getValueForColumn(h, xAxisName);
+                    double yVal = getValueForColumn(h, yAxisName);
+                    if (!Double.isNaN(xVal) && !Double.isNaN(yVal)) {
+                        xValues.add(xVal);
+                        yValues.add(yVal);
+                    }
+                }
+                
+                if (!xValues.isEmpty()) {
+                    allXValues.add(xValues);
+                    allYValues.add(yValues);
+                    catalogInfoForValues.add(info);
+                }
+            }
+            
+            if (allXValues.isEmpty()) {
                 g.setColor(Color.BLACK);
                 g.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 14));
                 FontMetrics fm = g.getFontMetrics();
@@ -546,31 +564,23 @@ public class XTreLocGUI {
                 return;
             }
             
-            String xAxisName = (String) xAxisCombo.getSelectedItem();
-            String yAxisName = (String) yAxisCombo.getSelectedItem();
+            double xMin = Double.MAX_VALUE;
+            double xMax = Double.MIN_VALUE;
+            double yMin = Double.MAX_VALUE;
+            double yMax = Double.MIN_VALUE;
             
-            // データを取得
-            java.util.List<Double> xValues = new java.util.ArrayList<>();
-            java.util.List<Double> yValues = new java.util.ArrayList<>();
-            
-            for (com.treloc.xtreloc.app.gui.model.Hypocenter h : hypocenters) {
-                double xVal = getValueForColumn(h, xAxisName);
-                double yVal = getValueForColumn(h, yAxisName);
-                if (!Double.isNaN(xVal) && !Double.isNaN(yVal)) {
-                    xValues.add(xVal);
-                    yValues.add(yVal);
+            for (java.util.List<Double> xValues : allXValues) {
+                for (double val : xValues) {
+                    if (val < xMin) xMin = val;
+                    if (val > xMax) xMax = val;
                 }
             }
-            
-            if (xValues.isEmpty()) {
-                return;
+            for (java.util.List<Double> yValues : allYValues) {
+                for (double val : yValues) {
+                    if (val < yMin) yMin = val;
+                    if (val > yMax) yMax = val;
+                }
             }
-            
-            // データ範囲を計算
-            double xMin = java.util.Collections.min(xValues);
-            double xMax = java.util.Collections.max(xValues);
-            double yMin = java.util.Collections.min(yValues);
-            double yMax = java.util.Collections.max(yValues);
             
             double xRange = xMax - xMin;
             double yRange = yMax - yMin;
@@ -581,34 +591,36 @@ public class XTreLocGUI {
             int height = g.getClipBounds().height;
             int margin = 60;
             int chartWidth = width - 2 * margin;
-            int chartHeight = height - 2 * margin;
+            int chartHeight = height - 2 * margin - 60;
             
-            // 背景をクリア
             g.setColor(Color.WHITE);
             g.fillRect(0, 0, width, height);
             
-            // 軸を描画
             g.setColor(Color.BLACK);
-            g.drawLine(margin, margin + chartHeight, margin + chartWidth, margin + chartHeight); // X軸
-            g.drawLine(margin, margin, margin, margin + chartHeight); // Y軸
+            g.drawLine(margin, margin + chartHeight, margin + chartWidth, margin + chartHeight);
+            g.drawLine(margin, margin, margin, margin + chartHeight);
             
-            // データポイントを描画
-            g.setColor(Color.BLUE);
-            for (int i = 0; i < xValues.size(); i++) {
-                double xVal = xValues.get(i);
-                double yVal = yValues.get(i);
+            for (int catalogIdx = 0; catalogIdx < allXValues.size(); catalogIdx++) {
+                java.util.List<Double> xValues = allXValues.get(catalogIdx);
+                java.util.List<Double> yValues = allYValues.get(catalogIdx);
+                com.treloc.xtreloc.app.gui.model.CatalogInfo info = catalogInfoForValues.get(catalogIdx);
+                Color catalogColor = info.getColor();
                 
-                int x = margin + (int) ((xVal - xMin) / xRange * chartWidth);
-                int y = margin + chartHeight - (int) ((yVal - yMin) / yRange * chartHeight);
-                
-                g.fillOval(x - 2, y - 2, 4, 4);
+                g.setColor(catalogColor);
+                for (int i = 0; i < xValues.size(); i++) {
+                    double xVal = xValues.get(i);
+                    double yVal = yValues.get(i);
+                    
+                    int x = margin + (int) ((xVal - xMin) / xRange * chartWidth);
+                    int y = margin + chartHeight - (int) ((yVal - yMin) / yRange * chartHeight);
+                    
+                    g.fillOval(x - 2, y - 2, 4, 4);
+                }
             }
             
-            // ラベルを描画
             g.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 10));
             FontMetrics fm = g.getFontMetrics();
             
-            // X軸ラベル
             for (int i = 0; i <= 5; i++) {
                 double value = xMin + (xRange * i / 5);
                 String label = String.format("%.2f", value);
@@ -616,7 +628,6 @@ public class XTreLocGUI {
                 g.drawString(label, x, margin + chartHeight + 20);
             }
             
-            // Y軸ラベル
             for (int i = 0; i <= 5; i++) {
                 double value = yMin + (yRange * i / 5);
                 String label = String.format("%.2f", value);
@@ -624,11 +635,32 @@ public class XTreLocGUI {
                 g.drawString(label, margin - fm.stringWidth(label) - 5, y);
             }
             
-            // タイトル
             g.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 12));
             String title = yAxisName + " vs " + xAxisName;
             int titleWidth = fm.stringWidth(title);
             g.drawString(title, (width - titleWidth) / 2, 20);
+            
+            g.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 10));
+            int legendY = margin + chartHeight + 50;
+            int legendX = margin;
+            int legendItemHeight = 15;
+            
+            for (int i = 0; i < catalogInfoForValues.size(); i++) {
+                com.treloc.xtreloc.app.gui.model.CatalogInfo info = catalogInfoForValues.get(i);
+                Color catalogColor = info.getColor();
+                
+                g.setColor(catalogColor);
+                g.fillOval(legendX, legendY, 8, 8);
+                
+                g.setColor(Color.BLACK);
+                g.drawString(info.getName(), legendX + 12, legendY + 8);
+                
+                legendX += 120;
+                if (legendX + 120 > width - margin) {
+                    legendX = margin;
+                    legendY += legendItemHeight;
+                }
+            }
             
         } catch (Exception e) {
             System.err.println("Failed to draw scatter plot: " + e.getMessage());
@@ -636,9 +668,6 @@ public class XTreLocGUI {
         }
     }
     
-    /**
-     * 列名から値を取得
-     */
     private static double getValueForColumn(com.treloc.xtreloc.app.gui.model.Hypocenter h, String columnName) {
         switch (columnName) {
             case "Latitude":
@@ -740,76 +769,6 @@ public class XTreLocGUI {
         UIManager.put("ComboBox.font", selectedFont);
     }
 
-    private static File selectShapefile() {
-        JFileChooser fileChooser = new JFileChooser();
-        fileChooser.setDialogTitle("Select Shapefile");
-        fileChooser.setFileFilter(new FileNameExtensionFilter(
-            "Shapefile (*.shp)", "shp"));
-        fileChooser.setCurrentDirectory(new File(System.getProperty("user.dir")));
-        
-        int result = fileChooser.showOpenDialog(null);
-        if (result == JFileChooser.APPROVE_OPTION) {
-            return fileChooser.getSelectedFile();
-        }
-        return null;
-    }
-
-    private static File selectCatalogFile() {
-        JFileChooser fileChooser = new JFileChooser();
-        fileChooser.setDialogTitle("Select Catalog File");
-        fileChooser.setFileFilter(new FileNameExtensionFilter(
-            "Catalog files (*.dat)", "dat"));
-        fileChooser.setCurrentDirectory(new File(System.getProperty("user.dir")));
-        
-        int result = fileChooser.showOpenDialog(null);
-        if (result == JFileChooser.APPROVE_OPTION) {
-            return fileChooser.getSelectedFile();
-        }
-        return null;
-    }
-    
-    private static void selectAndLoadShapefileRelatedFiles(File shapefile, MapController ctrl) {
-        String baseName = shapefile.getName().replaceFirst("[.][^.]+$", "");
-        File parentDir = shapefile.getParentFile();
-        if (parentDir == null) {
-            parentDir = new File(System.getProperty("user.dir"));
-        }
-        
-        String[] relatedExtensions = {".dbf", ".shx", ".prj", ".shp.xml", ".cpg", ".sbn", ".sbx"};
-        
-        java.util.List<File> existingFiles = new java.util.ArrayList<>();
-        for (String ext : relatedExtensions) {
-            File relatedFile = new File(parentDir, baseName + ext);
-            if (relatedFile.exists()) {
-                existingFiles.add(relatedFile);
-            }
-        }
-        
-        if (!existingFiles.isEmpty()) {
-            String[] options = new String[existingFiles.size() + 1];
-            options[0] = "Load All";
-            for (int i = 0; i < existingFiles.size(); i++) {
-                options[i + 1] = existingFiles.get(i).getName();
-            }
-            
-            int choice = JOptionPane.showOptionDialog(null,
-                "Related files for the Shapefile were found. Please select files to load:",
-                "Select Related Files",
-                JOptionPane.DEFAULT_OPTION,
-                JOptionPane.QUESTION_MESSAGE,
-                null,
-                options,
-                options[0]);
-            
-            if (choice == 0) {
-                System.out.println("Loading related files automatically");
-            } else if (choice > 0 && choice <= existingFiles.size()) {
-                File selectedFile = existingFiles.get(choice - 1);
-                System.out.println("Selected file: " + selectedFile.getName());
-            }
-        }
-    }
-    
     private static void checkForUpdatesAsync(
             com.treloc.xtreloc.app.gui.util.AppSettings appSettings, 
             JFrame mainFrame) {

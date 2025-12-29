@@ -7,43 +7,29 @@ import com.treloc.xtreloc.app.gui.util.UpdateInfo;
 import java.io.*;
 import java.net.HttpURLConnection;
 import java.net.URL;
-import java.nio.file.Files;
-import java.nio.file.StandardCopyOption;
 import java.util.logging.Logger;
 
 /**
- * アプリケーションの更新をチェックし、ダウンロードするサービスクラス
+ * Service class for checking and downloading application updates
  */
 public class UpdateChecker {
     private static final Logger logger = Logger.getLogger(UpdateChecker.class.getName());
     
-    // 更新情報を取得するURL（GitHub Releases APIなど）
-    // 実際のURLに置き換えてください
     private static final String UPDATE_CHECK_URL = "https://api.github.com/repos/KosukeMinamoto/xTreLoc/releases/latest";
     
     /**
-     * 現在のバージョンを取得
+     * Gets the current version.
      * 
-     * @return 現在のバージョン文字列
+     * @return the current version string
      */
     private static String getCurrentVersion() {
-        try {
-            Package pkg = UpdateChecker.class.getPackage();
-            String version = pkg.getImplementationVersion();
-            if (version != null && !version.isEmpty()) {
-                return version;
-            }
-        } catch (Exception e) {
-            logger.warning("バージョン情報の取得に失敗しました: " + e.getMessage());
-        }
-        // フォールバック: デフォルトバージョン
-        return "1.0-SNAPSHOT";
+        return com.treloc.xtreloc.app.gui.util.VersionInfo.getVersion();
     }
     
     /**
-     * 更新が利用可能かチェック
+     * Checks if updates are available
      * 
-     * @return UpdateInfo 更新情報、更新がない場合はnull
+     * @return UpdateInfo update information, null if no updates available
      */
     public static UpdateInfo checkForUpdates() {
         try {
@@ -150,14 +136,14 @@ public class UpdateChecker {
                         }
                     }
                     
-                    logger.info("ダウンロード完了: " + destinationFile.getAbsolutePath());
+                    logger.info("Download completed: " + destinationFile.getAbsolutePath());
                     return true;
                 }
             } else {
-                logger.warning("ダウンロードに失敗しました。HTTPレスポンスコード: " + responseCode);
+                logger.warning("Download failed. HTTP response code: " + responseCode);
             }
         } catch (Exception e) {
-            logger.severe("ダウンロード中にエラーが発生しました: " + e.getMessage());
+            logger.severe("Error occurred during download: " + e.getMessage());
             e.printStackTrace();
         }
         return false;

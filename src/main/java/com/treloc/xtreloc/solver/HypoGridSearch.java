@@ -32,7 +32,6 @@ public class HypoGridSearch extends SolverBase {
                 this.totalGrids = grdSolver.get("totalGrids").asInt();
                 this.numFocus = grdSolver.get("numFocus").asInt();
             } else if (grdSolver.has("numGrid")) {
-                // 後方互換性: numGridが指定されている場合は、totalGridsとして使用し、numFocus=1とする
                 this.totalGrids = grdSolver.get("numGrid").asInt();
                 this.numFocus = 1;
             } else {
@@ -92,22 +91,17 @@ public class HypoGridSearch extends SolverBase {
 
         int gridsPerFocus = totalGrids / numFocus;
         
-        // 初期残差を計算（入力ファイルのresが0.0または無効な値の場合は必ず計算）
         double[] sWaveTravelTime = travelTime(this.stationTable, usedIdx, point);
         double[] travelTimeResidual = differentialTravelTimeResidual(lagTable, sWaveTravelTime);
         double initialRes = standardDeviation(travelTimeResidual);
         
         if (res <= 0.0 || res >= 999.0) {
-            // 入力ファイルのresが無効な場合は、計算した初期残差を使用
             res = initialRes;
             logger.info(String.format("Initial residual calculated: %.6f (input res was %.6f)", res, point.getRes()));
         } else {
-            // 入力ファイルのresが有効な場合でも、計算した初期残差を使用（より正確な基準値）
             res = initialRes;
             logger.info(String.format("Initial residual calculated: %.6f (input res was %.6f, using calculated value)", res, point.getRes()));
         }
-        
-        // Focused random search: numFocus回のfocus、各focusでgridsPerFocus回の探索
         for (int focus = 0; focus < numFocus; focus++) {
             double rangeFactor = Math.pow(0.5, focus);
             double[] latGrids = generageRandomGrid(
@@ -138,7 +132,6 @@ public class HypoGridSearch extends SolverBase {
             }
         }
 
-        // 最適な震源位置での残差を再計算
         Point bestPoint = new Point(time, lat, lon, dep, 0, 0, 0, 0, "", "", -999);
         double[] bestSWaveTravelTime = travelTime(this.stationTable, usedIdx, bestPoint);
         travelTimeResidual = differentialTravelTimeResidual(lagTable, bestSWaveTravelTime);

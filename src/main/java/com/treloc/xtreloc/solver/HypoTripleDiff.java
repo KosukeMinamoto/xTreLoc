@@ -55,6 +55,7 @@ public class HypoTripleDiff extends SolverBase {
     private int[] iterNumArray;
     private int[] distKmArray;
     private int[] dampFactArray;
+    private java.util.function.Consumer<String> logConsumer;
 
     /**
      * Constructs a new HypoTripleDiff solver with the specified configuration.
@@ -146,6 +147,10 @@ public class HypoTripleDiff extends SolverBase {
                        java.util.logging.Level.parse(logLevel.toUpperCase()).intValue();
     }
     
+    public void setLogConsumer(java.util.function.Consumer<String> logConsumer) {
+        this.logConsumer = logConsumer;
+    }
+    
     private int[] parseIntArray(com.fasterxml.jackson.databind.JsonNode node, String key, int[] defaultValue) {
         if (node.has(key) && node.get(key).isArray()) {
             List<Integer> list = new ArrayList<>();
@@ -180,23 +185,23 @@ public class HypoTripleDiff extends SolverBase {
     public void start(String datFile, String outputFile) throws TauModelException {
         String catalogPathToUse = null;
         try {
-            if (targetDir != null) {
-                File targetDirFile = targetDir.toFile();
-                File catalogInTargetDir = new File(targetDirFile, "catalog.csv");
-                if (catalogInTargetDir.exists()) {
-                    catalogPathToUse = catalogInTargetDir.getAbsolutePath();
-                    logger.info("Using catalog file from target directory (input directory): " + catalogPathToUse);
-                } else if (this.catalogFile != null && !this.catalogFile.isEmpty()) {
-                    File catalogFileObj = new File(this.catalogFile);
+            if (this.catalogFile == null || this.catalogFile.isEmpty()) {
+                StringBuilder errorMsg = new StringBuilder("Catalog file is required for TRD mode.\n");
+                errorMsg.append("  Please specify catalogFile in the TRD mode configuration.\n");
+                errorMsg.append("  Target directory: ").append(targetDir != null ? targetDir.toFile().getAbsolutePath() : "not set").append("\n");
+                logger.severe(errorMsg.toString());
+                throw new IllegalArgumentException(errorMsg.toString());
+            }
+            
+            File catalogFileObj = new File(this.catalogFile);
+            if (!catalogFileObj.exists()) {
+                if (targetDir != null) {
+                    File targetDirFile = targetDir.toFile();
                     if (catalogFileObj.isAbsolute()) {
                         File catalogInTarget = new File(targetDirFile, catalogFileObj.getName());
                         if (catalogInTarget.exists()) {
                             catalogPathToUse = catalogInTarget.getAbsolutePath();
                             logger.info("Using catalog file from target directory: " + catalogPathToUse);
-                        } else if (catalogFileObj.exists() && catalogFileObj.getParentFile() != null && 
-                                   catalogFileObj.getParentFile().equals(targetDirFile)) {
-                            catalogPathToUse = this.catalogFile;
-                            logger.info("Using specified catalog file in target directory: " + catalogPathToUse);
                         }
                     } else {
                         File catalogInTarget = new File(targetDirFile, this.catalogFile);
@@ -206,38 +211,32 @@ public class HypoTripleDiff extends SolverBase {
                         }
                     }
                 }
-            } else if (this.catalogFile != null && !this.catalogFile.isEmpty()) {
-                File catalogFileObj = new File(this.catalogFile);
-                if (catalogFileObj.exists()) {
-                    catalogPathToUse = this.catalogFile;
-                }
-            }
-            
-            if (catalogPathToUse == null || catalogPathToUse.isEmpty()) {
-                StringBuilder errorMsg = new StringBuilder("Catalog file not found.\n");
-                errorMsg.append("  Target directory: ").append(targetDir != null ? targetDir.toFile().getAbsolutePath() : "not set").append("\n");
-                if (targetDir != null) {
-                    File catalogInTargetDir = new File(targetDir.toFile(), "catalog.csv");
-                    errorMsg.append("  Searched for: ").append(catalogInTargetDir.getAbsolutePath()).append("\n");
-                    errorMsg.append("  File exists: ").append(catalogInTargetDir.exists()).append("\n");
-                }
-                if (this.catalogFile != null && !this.catalogFile.isEmpty()) {
+                
+                if (catalogPathToUse == null) {
+                    StringBuilder errorMsg = new StringBuilder("Catalog file not found.\n");
                     errorMsg.append("  Specified catalog file: ").append(this.catalogFile).append("\n");
-                    File catalogFileObj = new File(this.catalogFile);
-                    errorMsg.append("  Specified file exists: ").append(catalogFileObj.exists()).append("\n");
-                    if (catalogFileObj.exists() && catalogFileObj.getParentFile() != null) {
-                        errorMsg.append("  Specified file directory: ").append(catalogFileObj.getParentFile().getAbsolutePath()).append("\n");
-                        if (targetDir != null) {
-                            errorMsg.append("  Is in target directory: ").append(catalogFileObj.getParentFile().equals(targetDir.toFile())).append("\n");
+                    errorMsg.append("  File exists: ").append(catalogFileObj.exists()).append("\n");
+                    if (targetDir != null) {
+                        errorMsg.append("  Target directory: ").append(targetDir.toFile().getAbsolutePath()).append("\n");
+                        if (catalogFileObj.isAbsolute()) {
+                            File catalogInTarget = new File(targetDir.toFile(), catalogFileObj.getName());
+                            errorMsg.append("  Searched in target directory: ").append(catalogInTarget.getAbsolutePath()).append("\n");
+                            errorMsg.append("  File exists: ").append(catalogInTarget.exists()).append("\n");
+                        } else {
+                            File catalogInTarget = new File(targetDir.toFile(), this.catalogFile);
+                            errorMsg.append("  Searched in target directory: ").append(catalogInTarget.getAbsolutePath()).append("\n");
+                            errorMsg.append("  File exists: ").append(catalogInTarget.exists()).append("\n");
                         }
                     }
-                } else {
-                    errorMsg.append("  No catalog file specified in config\n");
+                    errorMsg.append("\nPlease ensure that the specified catalog file exists.");
+                    logger.severe(errorMsg.toString());
+                    throw new IllegalArgumentException(errorMsg.toString());
                 }
-                errorMsg.append("\nPlease ensure that catalog.csv exists in the target directory (input directory) or specify a valid catalog file path.");
-                logger.severe(errorMsg.toString());
-                throw new IllegalArgumentException(errorMsg.toString());
+            } else {
+                catalogPathToUse = catalogFileObj.getAbsolutePath();
+                logger.info("Using specified catalog file: " + catalogPathToUse);
             }
+            
             
             logger.info("Loading points from catalog: " + catalogPathToUse);
             List<Point> allPoints;
@@ -314,18 +313,9 @@ public class HypoTripleDiff extends SolverBase {
                            .map(String::valueOf)
                            .collect(java.util.stream.Collectors.joining(", ")));
             
-            File catalogFileObj = new File(catalogPathToUse);
-            String catalogFileName = catalogFileObj.getName();
-            String outputCatalogFileName;
-            if (catalogFileName.endsWith(".csv")) {
-                outputCatalogFileName = catalogFileName.replace(".csv", "_trd.csv");
-            } else if (catalogFileName.endsWith(".list")) {
-                outputCatalogFileName = catalogFileName.replace(".list", "_trd.list");
-            } else {
-                outputCatalogFileName = catalogFileName + "_trd.csv";
-            }
-            
-            String outputCatalogFile = outputCatalogFileName;
+            File outputCatalogFileObj = com.treloc.xtreloc.util.CatalogFileNameGenerator.generateCatalogFileName(
+                catalogPathToUse, "TRD", outDir.toFile());
+            String outputCatalogFile = outputCatalogFileObj.getName();
             
             List<Point> relocatedPoints = new ArrayList<>();
             
@@ -493,7 +483,8 @@ public class HypoTripleDiff extends SolverBase {
                                 1000,
                                 showLSQR,
                                 false,
-                                null);
+                                null,
+                                logConsumer);
                             
                             double[] dm = result.x;
                             

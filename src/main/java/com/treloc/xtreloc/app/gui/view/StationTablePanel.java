@@ -9,7 +9,6 @@ import javax.swing.event.ListSelectionListener;
 import javax.swing.table.DefaultTableModel;
 import java.awt.*;
 import java.io.File;
-import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Scanner;
@@ -73,9 +72,8 @@ public class StationTablePanel extends JPanel {
                     if (selectedRow >= 0 && selectedRow < stations.size() && mapView != null) {
                         Station s = stations.get(selectedRow);
                         try {
-                            mapView.highlightPoint(s.getLon(), s.getLat());
+                            mapView.highlightPoint(s.getLon(), s.getLat(), "station", null, null);
                         } catch (Exception ex) {
-                            // エラーは無視
                         }
                     } else if (mapView != null) {
                         mapView.clearHighlight();
@@ -133,7 +131,8 @@ public class StationTablePanel extends JPanel {
         fileChooser.setDialogTitle("Select Station File");
         fileChooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter(
             "Station files (*.tbl)", "tbl"));
-        fileChooser.setCurrentDirectory(new File(System.getProperty("user.dir")));
+        
+        com.treloc.xtreloc.app.gui.util.FileChooserHelper.setDefaultDirectory(fileChooser);
         
         int result = fileChooser.showOpenDialog(this);
         if (result == JFileChooser.APPROVE_OPTION) {
@@ -274,14 +273,14 @@ public class StationTablePanel extends JPanel {
             try {
                 mapView.showStations(stations, columnName, values);
             } catch (Exception e) {
-                System.err.println("色付けの適用に失敗: " + e.getMessage());
+                System.err.println("Failed to apply coloring: " + e.getMessage());
             }
         } else {
             // 数値列でない場合は通常の表示
             try {
                 mapView.showStations(stations);
             } catch (Exception e) {
-                System.err.println("表示の更新に失敗: " + e.getMessage());
+                System.err.println("Failed to update display: " + e.getMessage());
             }
         }
     }

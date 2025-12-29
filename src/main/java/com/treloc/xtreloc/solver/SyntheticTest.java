@@ -75,18 +75,13 @@ public class SyntheticTest extends SolverBase {
                    ", selectRate=" + minSelectRate + "-" + maxSelectRate +
                    ", locationPerturbation=" + addLocationPerturbation);
         
-        // Station data is loaded by SolverBase constructor
-        
-        // カタログファイルと出力ディレクトリの取得
         if (appConfig.modes != null && appConfig.modes.containsKey("SYN")) {
             AppConfig.ModeConfig synConfig = appConfig.modes.get("SYN");
             if (synConfig != null && synConfig.catalogFile != null) {
                 this.catalogFile = synConfig.catalogFile;
-                // 出力ディレクトリの設定
                 if (synConfig.outDirectory != null) {
                     this.outputDirectory = synConfig.outDirectory.toString();
                 } else {
-                    // 出力ディレクトリが指定されていない場合は、カタログファイルと同じディレクトリ
                     File catalog = new File(catalogFile);
                     this.outputDirectory = catalog.getParent() != null ? catalog.getParent() : ".";
                 }
@@ -165,18 +160,11 @@ public class SyntheticTest extends SolverBase {
         List<Point> points = new ArrayList<>();
         File file = new File(catalogFile);
         
-        // CatalogLoaderを使用してHypocenterリストを取得
         List<Hypocenter> hypocenters = CatalogLoader.load(file);
         
-        // HypocenterをPointに変換
         for (Hypocenter h : hypocenters) {
-            // ファイル名から出力パスを生成（時刻をファイル名として使用）
-            // 時刻形式が "2000-01-01T00:00:00" のような場合、ファイル名は "000101.000000.dat" にする（yymmdd.hhmmss.dat形式）
-            // または "071201.000030" のような形式の場合はそのまま使用
             String fileName;
             if (h.time.contains("T") && h.time.length() >= 19) {
-                // ISO 8601形式（例: 2000-01-01T00:00:00）をyymmdd.hhmmss形式に変換
-                // 年は2桁に変換（2000 → 00）
                 String year = h.time.substring(2, 4);
                 String month = h.time.substring(5, 7);
                 String day = h.time.substring(8, 10);
@@ -185,32 +173,28 @@ public class SyntheticTest extends SolverBase {
                 String second = h.time.substring(17, 19);
                 fileName = year + month + day + "." + hour + minute + second + ".dat";
             } else if (h.time.contains(".") && h.time.length() >= 13) {
-                // 既にyymmdd.hhmmss形式（例: 071201.000030）
                 fileName = h.time + ".dat";
             } else {
-                // 形式が異なる場合は変換を試みる（例: 071201000030 → 071201.000030）
                 if (h.time.length() == 12) {
                     fileName = h.time.substring(0, 6) + "." + h.time.substring(6) + ".dat";
                 } else {
-                    // その他の形式の場合はそのまま使用
                     fileName = h.time + ".dat";
                 }
             }
-            // 出力ディレクトリを含めたフルパスを設定
             String fullPath = new File(outputDirectory, fileName).getPath();
             
             Point point = new Point(
-                h.time,           // time
-                h.lat,            // lat
-                h.lon,            // lon
-                h.depth,          // dep
-                0.0,              // elat
-                0.0,              // elon
-                0.0,              // edep
-                0.0,              // res
-                fullPath,         // filePath
-                "SYN",            // type (SYNモードでは常にSYN)
-                -1                // cid
+                h.time,
+                h.lat,
+                h.lon,
+                h.depth,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+                fullPath,
+                "SYN",
+                -1
             );
             points.add(point);
         }
@@ -229,47 +213,37 @@ public class SyntheticTest extends SolverBase {
     public void generateData(Point pointTrue, double minSelectRate, double maxSelectRate) throws TauModelException {
         PointsHandler pointsHandler = new PointsHandler();
         
-        // SYNモードでは常に走時差に摂動を加える
-        // 1. 走時を計算（真の震源位置から）
         double[][] lagTable = randomLagTime(pointTrue, minSelectRate, maxSelectRate, true);
 
-        // 2. 震源位置に摂動を加える（オプション）
         double lat = pointTrue.getLat();
         double lon = pointTrue.getLon();
         double dep = pointTrue.getDep();
         
         if (addLocationPerturbation) {
-            // 震源位置に摂動を加える
-            // 緯度方向の摂動（度単位）
             lat = pointTrue.getLat() + rand.nextGaussian() * locErr;
-            // 経度方向の摂動（度単位、緯度補正を適用）
             double latRad = Math.toRadians(pointTrue.getLat());
             lon = pointTrue.getLon() + rand.nextGaussian() * locErr / Math.cos(latRad);
-            // 深度の摂動はkm単位で加える（locErrは度単位なので、getDeg2Km()を使用して変換）
             dep = pointTrue.getDep() + rand.nextGaussian() * locErr * HypoUtils.getDeg2Km();
             logger.fine("Location perturbation applied: lat=" + lat + ", lon=" + lon + ", dep=" + dep);
         }
         
-        // 3. 摂動が加わった震源位置から理論走時を計算し、観測値との残差を計算
         Point pointPerturbed = new Point(
             pointTrue.getTime(),
             lat,
             lon,
             dep,
-            0.0,  // エラー情報は0
             0.0,
             0.0,
-            0.0,  // 一時的に0
+            0.0,
+            0.0,
             pointTrue.getFilePath(),
             "SYN",
             -1
         );
         
-        // 摂動が加わった震源位置での理論走時を計算
         int[] codeIdx = IntStream.rangeClosed(0, stationTable.length - 1).toArray();
         double[] sWaveTravelTime = travelTime(stationTable, codeIdx, pointPerturbed);
         
-        // 観測値（lagTable）と理論値の残差を計算
         double[] travelTimeResidual = new double[lagTable.length];
         for (int i = 0; i < lagTable.length; i++) {
             int idxK = (int) lagTable[i][0];
@@ -279,7 +253,6 @@ public class SyntheticTest extends SolverBase {
             travelTimeResidual[i] = observedLag - calculatedLag;
         }
         
-        // 残差の標準偏差を計算
         double meanResidual = 0.0;
         for (double r : travelTimeResidual) {
             meanResidual += r;
@@ -292,30 +265,26 @@ public class SyntheticTest extends SolverBase {
         }
         double res = Math.sqrt(variance / travelTimeResidual.length);
         
-        // 残差が0.0または非常に小さい場合は999.0に設定（GRDモードで初期残差として使用される）
         if (res <= 0.0 || res < 1e-6) {
             res = 999.0;
             logger.fine("Residual is too small (" + res + "), setting to 999.0 for GRD mode");
         }
         
-        // 4. 出力用のPointを作成（残差を設定）
         Point point_output = new Point(
             pointTrue.getTime(),
             lat,
             lon,
             dep,
-            0.0,  // エラー情報は0
             0.0,
             0.0,
-            res,  // 計算した残差を設定
+            0.0,
+            res,
             pointTrue.getFilePath(),
             "SYN",
             -1
         );
         point_output.setLagTable(lagTable);
         pointsHandler.setMainPoint(point_output);
-        
-        // 4. ファイル出力
         try {
             pointsHandler.writeDatFile(pointTrue.getFilePath(), codeStrings);
         } catch (IOException e) {

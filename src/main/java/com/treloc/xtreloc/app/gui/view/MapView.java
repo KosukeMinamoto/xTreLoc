@@ -3,6 +3,7 @@ package com.treloc.xtreloc.app.gui.view;
 import com.treloc.xtreloc.app.gui.model.*;
 import com.treloc.xtreloc.app.gui.service.StyleFactory;
 import com.treloc.xtreloc.io.Station;
+import org.geotools.styling.StyleBuilder;
 
 import org.geotools.data.DataUtilities;
 import org.geotools.feature.DefaultFeatureCollection;
@@ -28,14 +29,9 @@ public class MapView {
 
 	private final MapContent map = new MapContent();
 	private final JMapFrame frame = new JMapFrame(map);
-	// private JLabel info = new JLabel("緯度経度: --");
 	private JLabel coordLabel = new JLabel(" ");
 	private ColorBarPanel colorBarPanel;
 	private JComboBox<ColorPalette> paletteCombo;
-	private double minDepth = 0.0;
-	private double maxDepth = 100.0;
-	private double minColorValue = 0.0;
-	private double maxColorValue = 100.0;
 	private int symbolSize = 10;
 	
 	private java.util.List<Hypocenter> lastHypocenters = null;
@@ -44,21 +40,17 @@ public class MapView {
 	
 	private JButton exportImageButton;
 	
-	// 複数カタログ管理
 	private java.util.List<com.treloc.xtreloc.app.gui.model.CatalogInfo> catalogInfos = new java.util.ArrayList<>();
 	private boolean showConnections = false;
 	
-	// Color map mode for multiple catalogs
 	private com.treloc.xtreloc.app.gui.model.CatalogInfo colorMapCatalog = null;
 	private String colorMapColumn = null;
 	private double[] colorMapValues = null;
 	
-	// Legend panel
 	private JPanel legendPanel;
 	
-	/**
-	 * Color palette types
-	 */
+	private JPanel stationSymbolLegendPanel;
+	
 	public enum ColorPalette {
 		BLUE_TO_RED("Blue to Red"),
 		VIRIDIS("Viridis"),
@@ -87,65 +79,54 @@ public class MapView {
 		frame.enableStatusBar(true);
 		frame.setSize(900, 700);
 		
-		// マップペインの背景色をテーマから取得
 		updateMapBackground();
 		
-		// ツールバーにロゴアイコンを追加
 		try {
 			File logoFile = com.treloc.xtreloc.app.gui.util.AppDirectoryManager.getLogoFile();
 			if (logoFile.exists()) {
 				ImageIcon logoIcon = new ImageIcon(logoFile.getAbsolutePath());
-				// アイコンサイズを調整（ステータスバー用に小さく）
 				Image img = logoIcon.getImage();
 				Image scaledImg = img.getScaledInstance(20, 20, Image.SCALE_SMOOTH);
 				ImageIcon scaledIcon = new ImageIcon(scaledImg);
 				JLabel logoLabel = new JLabel(scaledIcon);
-				// ツールバーの先頭に追加
 				frame.getToolBar().add(logoLabel, 0);
 			}
 		} catch (Exception e) {
 			System.err.println("Failed to load logo: " + e.getMessage());
 		}
 		
-		// ツールバーに情報ラベルを追加
-		// frame.getToolBar().add(info);
 		frame.getToolBar().add(Box.createHorizontalStrut(10));
 		frame.getToolBar().add(coordLabel);
 		
-		// Store palette combo reference (will be added to color bar panel)
-		this.paletteCombo = null; // Will be set in ColorBarPanel
+		this.paletteCombo = null;
 		
-		// カラーバーパネルを作成（マップ内に表示）
 		colorBarPanel = new ColorBarPanel(currentPalette);
 		
-		// Add color bar as overlay on the map pane
-		setupMapOverlays();
-		
-		// Setup legend panel
 		setupLegendPanel();
-		
-		// 画像出力ボタンをステータスバーの右上に追加
-		setupStatusBarExportButton();
-		
-		// マウスイベントリスナーを追加
+		setupStationSymbolLegendPanel();
 		setupMouseListener();
 		
-		// グリッド線は表示しない（削除）
-		// addGridLayer();
-		
-		// フレームは親コンテナで統合されるため、ここでは表示しない
 		frame.setVisible(false);
+		
+		SwingUtilities.invokeLater(() -> {
+			setupMapOverlays();
+		});
+		
+		SwingUtilities.invokeLater(() -> {
+			try {
+				Thread.sleep(100);
+			} catch (InterruptedException e) {
+				Thread.currentThread().interrupt();
+			}
+			setupStatusBarExportButton();
+		});
 	}
 	
-	/**
-	 * マップペインの背景色をテーマから取得して設定
-	 */
 	private void updateMapBackground() {
 		try {
 			MapPane mapPane = frame.getMapPane();
 			if (mapPane != null) {
 				Component mapPaneComponent = (Component) mapPane;
-				// テーマから背景色を取得
 				Color bgColor = UIManager.getColor("Panel.background");
 				if (bgColor != null) {
 					mapPaneComponent.setBackground(bgColor);
@@ -154,7 +135,6 @@ public class MapView {
 				}
 			}
 			
-			// フレームのコンテンツペインの背景色も設定
 			Container contentPane = frame.getContentPane();
 			if (contentPane != null) {
 				Color bgColor = UIManager.getColor("Panel.background");
@@ -165,13 +145,10 @@ public class MapView {
 				}
 			}
 		} catch (Exception e) {
-			System.err.println("マップ背景色の設定に失敗: " + e.getMessage());
+			System.err.println("Failed to set map background color: " + e.getMessage());
 		}
 	}
 	
-	/**
-	 * テーマ変更時にマップ背景を更新
-	 */
 	public void updateTheme() {
 		updateMapBackground();
 		if (frame != null) {
@@ -181,50 +158,6 @@ public class MapView {
 	
 	public JMapFrame getFrame() {
 		return frame;
-	}
-	
-	/**
-	 * 緯度経度のグリッド線を追加
-	 */
-	private void addGridLayer() {
-		try {
-			DefaultFeatureCollection gridCollection = new DefaultFeatureCollection();
-			SimpleFeatureType gridType = DataUtilities.createType("Grid", 
-				"geom:LineString");
-			GeometryFactory gf = new GeometryFactory();
-			
-			// デフォルトの範囲（日本周辺）
-			double minLon = 120.0;
-			double maxLon = 150.0;
-			double minLat = 20.0;
-			double maxLat = 50.0;
-			
-			// 経度線（縦線）- 1度間隔
-			for (double lon = Math.ceil(minLon); lon <= maxLon; lon += 1.0) {
-				Coordinate[] coords = {
-					new Coordinate(lon, minLat),
-					new Coordinate(lon, maxLat)
-				};
-				SimpleFeature f = DataUtilities.template(gridType);
-				f.setDefaultGeometry(gf.createLineString(coords));
-				gridCollection.add(f);
-			}
-			
-			// 緯度線（横線）- 1度間隔
-			for (double lat = Math.ceil(minLat); lat <= maxLat; lat += 1.0) {
-				Coordinate[] coords = {
-					new Coordinate(minLon, lat),
-					new Coordinate(maxLon, lat)
-				};
-				SimpleFeature f = DataUtilities.template(gridType);
-				f.setDefaultGeometry(gf.createLineString(coords));
-				gridCollection.add(f);
-			}
-			
-			map.addLayer(new FeatureLayer(gridCollection, StyleFactory.createGridStyle()));
-		} catch (Exception e) {
-			System.err.println("グリッド線の追加に失敗: " + e.getMessage());
-		}
 	}
 	
 	private void setupMouseListener() {
@@ -272,35 +205,153 @@ public class MapView {
 	}
 	
 	public void setColorRange(double min, double max, String label) {
-		this.minDepth = min;
-		this.maxDepth = max;
-		this.minColorValue = min;
-		this.maxColorValue = max;
 		if (colorBarPanel != null) {
 			colorBarPanel.setRange(min, max, label);
 		}
 	}
 
 	/**
-	 * Shapefileを追加（複数対応）
-	 * @param shp Shapefile
-	 * @return レイヤータイトル（表示/非表示の切り替えに使用）
+	 * Adds a shapefile to the map (supports multiple shapefiles).
+	 * 
+	 * @param shp the shapefile to add
+	 * @return the layer title (used for visibility toggle)
+	 * @throws Exception if the shapefile cannot be loaded or displayed
 	 */
 	public String addShapefile(File shp) throws Exception {
-		var store = org.geotools.api.data.FileDataStoreFinder.getDataStore(shp);
-		String layerTitle = "ShapefileLayer_" + shp.getName() + "_" + System.currentTimeMillis();
-		Style shapefileStyle = StyleFactory.createShapefileStyle();
-		FeatureLayer layer = new FeatureLayer(store.getFeatureSource(), shapefileStyle);
-		layer.setTitle(layerTitle);
-		map.addLayer(layer);
-		forceMapRepaint();
-		return layerTitle;
+		if (shp == null || !shp.exists()) {
+			throw new IllegalArgumentException("Shapefile does not exist: " + (shp != null ? shp.getAbsolutePath() : "null"));
+		}
+		
+		if (!shp.getName().toLowerCase().endsWith(".shp")) {
+			throw new IllegalArgumentException("File is not a shapefile (.shp): " + shp.getName());
+		}
+		
+		String baseName = shp.getName().substring(0, shp.getName().length() - 4);
+		File parentDir = shp.getParentFile();
+		if (parentDir == null) {
+			parentDir = new File(System.getProperty("user.dir"));
+		}
+		
+		File shxFile = new File(parentDir, baseName + ".shx");
+		File dbfFile = new File(parentDir, baseName + ".dbf");
+		
+		if (!shxFile.exists()) {
+			throw new IllegalArgumentException("Required .shx file not found: " + shxFile.getAbsolutePath());
+		}
+		if (!dbfFile.exists()) {
+			throw new IllegalArgumentException("Required .dbf file not found: " + dbfFile.getAbsolutePath());
+		}
+		
+		org.geotools.api.data.DataStore store = org.geotools.api.data.FileDataStoreFinder.getDataStore(shp);
+		if (store == null) {
+			throw new Exception("Failed to create DataStore for shapefile: " + shp.getAbsolutePath() + 
+				". Make sure the shapefile is valid and all required files (.shp, .shx, .dbf) are present.");
+		}
+		
+		try {
+			String[] typeNames = store.getTypeNames();
+			if (typeNames == null || typeNames.length == 0) {
+				throw new Exception("No type names found in shapefile: " + shp.getAbsolutePath());
+			}
+			String typeName = typeNames[0];
+			
+			org.geotools.api.data.FeatureSource featureSource = store.getFeatureSource(typeName);
+			if (featureSource == null) {
+				throw new Exception("Failed to get FeatureSource from shapefile: " + shp.getAbsolutePath());
+			}
+			
+			String layerTitle = "ShapefileLayer_" + shp.getName() + "_" + System.currentTimeMillis();
+			
+			Style shapefileStyle = StyleFactory.createShapefileStyle();
+			
+			try {
+				FeatureLayer layer = new FeatureLayer(featureSource, shapefileStyle);
+				layer.setTitle(layerTitle);
+				map.addLayer(layer);
+				forceMapRepaint();
+				return layerTitle;
+			} catch (Exception layerEx) {
+				if (layerEx.getMessage() != null && layerEx.getMessage().contains("Unable to find function")) {
+					System.err.println("[MapView] Function evaluation error detected, trying minimal style...");
+					try {
+						StyleBuilder sb = new StyleBuilder();
+						org.geotools.api.style.Stroke minimalStroke = sb.createStroke();
+						minimalStroke.setColor(sb.literalExpression(Color.BLUE));
+						minimalStroke.setWidth(sb.literalExpression(1.0));
+						minimalStroke.setOpacity(sb.literalExpression(1.0));
+						org.geotools.api.style.LineSymbolizer minimalLineSymbolizer = sb.createLineSymbolizer(minimalStroke);
+						Style minimalStyle = sb.createStyle(minimalLineSymbolizer);
+						
+						FeatureLayer layer = new FeatureLayer(featureSource, minimalStyle);
+						layer.setTitle(layerTitle);
+						map.addLayer(layer);
+						forceMapRepaint();
+						System.err.println("[MapView] Successfully created layer with minimal style");
+						return layerTitle;
+					} catch (Exception minimalEx) {
+						System.err.println("[MapView] Even minimal style failed: " + minimalEx.getMessage());
+					}
+				}
+				java.util.logging.Logger logger = java.util.logging.Logger.getLogger(MapView.class.getName());
+				logger.severe("Failed to create FeatureLayer: " + layerEx.getMessage());
+				
+				System.err.println("========================================");
+				System.err.println("FEATURE LAYER CREATION ERROR");
+				System.err.println("========================================");
+				System.err.println("File: " + shp.getAbsolutePath());
+				System.err.println("Error type: " + layerEx.getClass().getName());
+				System.err.println("Error message: " + layerEx.getMessage());
+				if (layerEx.getCause() != null) {
+					System.err.println("Caused by: " + layerEx.getCause().getClass().getName() + 
+						": " + layerEx.getCause().getMessage());
+				}
+				System.err.println("Stack trace:");
+				layerEx.printStackTrace(System.err);
+				System.err.println("========================================");
+				
+				java.io.StringWriter sw = new java.io.StringWriter();
+				java.io.PrintWriter pw = new java.io.PrintWriter(sw);
+				layerEx.printStackTrace(pw);
+				logger.severe("Stack trace:\n" + sw.toString());
+				
+				throw new Exception("Failed to create FeatureLayer: " + layerEx.getMessage(), layerEx);
+			}
+		} catch (Exception e) {
+			try {
+				store.dispose();
+			} catch (Exception disposeEx) {
+			}
+			
+			java.util.logging.Logger logger = java.util.logging.Logger.getLogger(MapView.class.getName());
+			logger.severe("Failed to add shapefile to map: " + e.getMessage());
+			
+			System.err.println("========================================");
+			System.err.println("SHAPEFILE ADD ERROR");
+			System.err.println("========================================");
+			System.err.println("File: " + shp.getAbsolutePath());
+			System.err.println("Error type: " + e.getClass().getName());
+			System.err.println("Error message: " + e.getMessage());
+			if (e.getCause() != null) {
+				System.err.println("Caused by: " + e.getCause().getClass().getName() + 
+					": " + e.getCause().getMessage());
+			}
+			System.err.println("Stack trace:");
+			e.printStackTrace(System.err);
+			System.err.println("========================================");
+			
+			java.io.StringWriter sw = new java.io.StringWriter();
+			java.io.PrintWriter pw = new java.io.PrintWriter(sw);
+			e.printStackTrace(pw);
+			logger.severe("Stack trace:\n" + sw.toString());
+			
+			throw new Exception("Failed to add shapefile to map: " + e.getMessage(), e);
+		}
 	}
 	
 	/**
-	 * Shapefileレイヤーの表示/非表示を切り替え
-	 * @param layerTitle レイヤータイトル
-	 * @param visible 表示する場合はtrue
+	 * Toggles visibility of a shapefile layer.
+	 * @param layerTitle layer title
+	 * @param visible true to show, false to hide
 	 */
 	public void setShapefileLayerVisibility(String layerTitle, boolean visible) {
 		for (Layer layer : map.layers()) {
@@ -313,8 +364,8 @@ public class MapView {
 	}
 	
 	/**
-	 * Shapefileレイヤーを削除
-	 * @param layerTitle レイヤータイトル
+	 * Removes a shapefile layer.
+	 * @param layerTitle layer title
 	 */
 	public void removeShapefileLayer(String layerTitle) {
 		java.util.List<Layer> layersToRemove = new java.util.ArrayList<>();
@@ -327,7 +378,6 @@ public class MapView {
 			try {
 				layer.dispose();
 			} catch (Exception e) {
-				// Ignore dispose errors
 			}
 			map.removeLayer(layer);
 		}
@@ -338,24 +388,18 @@ public class MapView {
 		showHypocenters(hypos, null, null);
 	}
 	
-	/**
-	 * 複数カタログを追加
-	 */
 	public void addCatalog(com.treloc.xtreloc.app.gui.model.CatalogInfo catalogInfo) {
 		catalogInfos.add(catalogInfo);
 		updateMultipleCatalogsDisplay();
 	}
 	
-	/**
-	 * カタログを削除
-	 */
 	public void removeCatalog(com.treloc.xtreloc.app.gui.model.CatalogInfo catalogInfo) {
 		catalogInfos.remove(catalogInfo);
 		updateMultipleCatalogsDisplay();
 	}
 	
 	/**
-	 * すべてのカタログをクリア
+	 * Clears all catalogs.
 	 */
 	public void clearAllCatalogs() {
 		catalogInfos.clear();
@@ -368,9 +412,18 @@ public class MapView {
 	 * @param catalogInfo the catalog information
 	 * @param visible true to make the catalog visible, false to hide it
 	 */
+	private java.util.List<Runnable> catalogVisibilityChangeListeners = new java.util.ArrayList<>();
+	
+	public void addCatalogVisibilityChangeListener(Runnable listener) {
+		catalogVisibilityChangeListeners.add(listener);
+	}
+	
 	public void setCatalogVisible(com.treloc.xtreloc.app.gui.model.CatalogInfo catalogInfo, boolean visible) {
 		catalogInfo.setVisible(visible);
 		updateMultipleCatalogsDisplay();
+		for (Runnable listener : catalogVisibilityChangeListeners) {
+			listener.run();
+		}
 	}
 	
 	/**
@@ -400,7 +453,6 @@ public class MapView {
 			try {
 				layer.dispose();
 			} catch (Exception e) {
-				// Ignore dispose errors
 			}
 			map.removeLayer(layer);
 		}
@@ -426,7 +478,6 @@ public class MapView {
 		
 		DefaultFeatureCollection connectionCollection = new DefaultFeatureCollection("ConnectionLayer", connectionType);
 		
-		// カラーマップ表示用のデータを準備
 		double minValue = Double.MAX_VALUE;
 		double maxValue = Double.MIN_VALUE;
 		java.util.Map<Hypocenter, Color> colorMap = new java.util.HashMap<>();
@@ -434,13 +485,11 @@ public class MapView {
 		if (colorMapCatalog != null && colorMapValues != null && 
 		    colorMapCatalog.getHypocenters() != null && 
 		    colorMapCatalog.getHypocenters().size() == colorMapValues.length) {
-			// カラーマップ用の最小値・最大値を計算
 			for (double val : colorMapValues) {
 				if (val < minValue) minValue = val;
 				if (val > maxValue) maxValue = val;
 			}
 			
-			// 各イベントの色を計算
 			java.util.List<Hypocenter> catalogHypocenters = colorMapCatalog.getHypocenters();
 			for (int i = 0; i < catalogHypocenters.size() && i < colorMapValues.length; i++) {
 				double colorValue = colorMapValues[i];
@@ -451,29 +500,25 @@ public class MapView {
 				colorMap.put(catalogHypocenters.get(i), color);
 			}
 			
-			// カラーバーを更新
 			String label = (colorMapColumn != null) ? colorMapColumn : "Value";
 			setColorRange(minValue, maxValue, label);
 		}
 		
-		// 各カタログを表示
 		for (com.treloc.xtreloc.app.gui.model.CatalogInfo catalogInfo : catalogInfos) {
 			if (!catalogInfo.isVisible() || catalogInfo.getHypocenters() == null || catalogInfo.getHypocenters().isEmpty()) {
 				continue;
 			}
 			
-			// カラーマップ表示対象のカタログかどうか
 			boolean isColorMapCatalog = (catalogInfo == colorMapCatalog);
 			
 			if (isColorMapCatalog && !colorMap.isEmpty()) {
-				// カラーマップ表示：色ごとにFeatureCollectionを分割
 				java.util.Map<Color, DefaultFeatureCollection> colorCollections = new java.util.HashMap<>();
 				final String catalogName = catalogInfo.getName();
 				
 				for (Hypocenter h : catalogInfo.getHypocenters()) {
 					Color color = colorMap.get(h);
 					if (color == null) {
-						color = catalogInfo.getColor(); // フォールバック
+						color = catalogInfo.getColor();
 					}
 					final Color finalColor = color;
 					
@@ -487,7 +532,6 @@ public class MapView {
 					col.add(f);
 				}
 				
-				// 色ごとにレイヤーを作成
 				com.treloc.xtreloc.app.gui.model.CatalogInfo.SymbolType symbolType = catalogInfo.getSymbolType();
 				for (java.util.Map.Entry<Color, DefaultFeatureCollection> entry : colorCollections.entrySet()) {
 					Color color = entry.getKey();
@@ -499,7 +543,6 @@ public class MapView {
 					map.addLayer(layer);
 				}
 			} else {
-				// 通常表示：カタログの色とシンボルを使用
 				DefaultFeatureCollection hypoCollection = new DefaultFeatureCollection(
 					"HypoLayer_" + catalogInfo.getName(), hypoType);
 				
@@ -582,9 +625,6 @@ public class MapView {
 		forceMapRepaint();
 	}
 	
-	/**
-	 * Forces a complete repaint of the map pane.
-	 */
 	private void forceMapRepaint() {
 		try {
 			SwingUtilities.invokeLater(() -> {
@@ -606,9 +646,6 @@ public class MapView {
 		}
 	}
 	
-	/**
-	 * Sets up the legend panel to display catalog information.
-	 */
 	private void setupLegendPanel() {
 		legendPanel = new JPanel();
 		legendPanel.setLayout(new BoxLayout(legendPanel, BoxLayout.Y_AXIS));
@@ -616,12 +653,70 @@ public class MapView {
 		legendPanel.setOpaque(true);
 		legendPanel.setBackground(new Color(255, 255, 255, 220));
 		legendPanel.setVisible(false);
-		
-		Component mapPaneComponent = (Component) frame.getMapPane();
-		if (mapPaneComponent instanceof Container) {
-			((Container) mapPaneComponent).setLayout(null);
-			((Container) mapPaneComponent).add(legendPanel);
+	}
+	
+	private void setupStationSymbolLegendPanel() {
+		stationSymbolLegendPanel = new JPanel();
+		stationSymbolLegendPanel.setLayout(new BoxLayout(stationSymbolLegendPanel, BoxLayout.Y_AXIS));
+		stationSymbolLegendPanel.setBorder(BorderFactory.createTitledBorder("Symbols"));
+		stationSymbolLegendPanel.setOpaque(true);
+		stationSymbolLegendPanel.setBackground(new Color(255, 255, 255, 220));
+		stationSymbolLegendPanel.setVisible(false);
+	}
+	
+	/**
+	 * Updates the station symbol legend panel.
+	 */
+	private void updateStationSymbolLegend() {
+		if (stationSymbolLegendPanel == null) {
+			return;
 		}
+		
+		stationSymbolLegendPanel.removeAll();
+		
+		boolean hasStations = false;
+		for (Layer layer : map.layers()) {
+			if ("StationLayer".equals(layer.getTitle())) {
+				hasStations = true;
+				break;
+			}
+		}
+		
+		if (hasStations) {
+			JPanel itemPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 2));
+			itemPanel.setOpaque(false);
+			
+			JLabel symbolLabel = new JLabel() {
+				@Override
+				protected void paintComponent(Graphics g) {
+					super.paintComponent(g);
+					Graphics2D g2 = (Graphics2D) g.create();
+					g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+					g2.setColor(Color.BLACK);
+					int size = 12;
+					int x = (getWidth() - size) / 2;
+					int y = (getHeight() - size) / 2;
+					int[] xPoints = {x + size/2, x, x + size};
+					int[] yPoints = {y + size, y, y};
+					g2.fillPolygon(xPoints, yPoints, 3);
+					g2.dispose();
+				}
+			};
+			symbolLabel.setPreferredSize(new java.awt.Dimension(20, 20));
+			itemPanel.add(symbolLabel);
+			
+			JLabel nameLabel = new JLabel("Station");
+			nameLabel.setFont(nameLabel.getFont().deriveFont(Font.PLAIN, 11f));
+			itemPanel.add(nameLabel);
+			
+			stationSymbolLegendPanel.add(itemPanel);
+			stationSymbolLegendPanel.setVisible(true);
+		} else {
+			stationSymbolLegendPanel.setVisible(false);
+		}
+		
+		stationSymbolLegendPanel.revalidate();
+		stationSymbolLegendPanel.repaint();
 	}
 	
 	/**
@@ -633,6 +728,44 @@ public class MapView {
 		}
 		
 		legendPanel.removeAll();
+		
+		boolean hasStations = false;
+		for (Layer layer : map.layers()) {
+			if ("StationLayer".equals(layer.getTitle())) {
+				hasStations = true;
+				break;
+			}
+		}
+		
+		if (hasStations) {
+			JPanel itemPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 2));
+			itemPanel.setOpaque(false);
+			
+			JLabel symbolLabel = new JLabel() {
+				@Override
+				protected void paintComponent(Graphics g) {
+					super.paintComponent(g);
+					Graphics2D g2 = (Graphics2D) g.create();
+					g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+					g2.setColor(Color.BLACK);
+					int size = 12;
+					int x = (getWidth() - size) / 2;
+					int y = (getHeight() - size) / 2;
+					int[] xPoints = {x + size/2, x, x + size};
+					int[] yPoints = {y + size, y, y};
+					g2.fillPolygon(xPoints, yPoints, 3);
+					g2.dispose();
+				}
+			};
+			symbolLabel.setPreferredSize(new java.awt.Dimension(20, 20));
+			itemPanel.add(symbolLabel);
+			
+			JLabel nameLabel = new JLabel("Station");
+			nameLabel.setFont(nameLabel.getFont().deriveFont(Font.PLAIN, 11f));
+			itemPanel.add(nameLabel);
+			
+			legendPanel.add(itemPanel);
+		}
 		
 		boolean hasVisibleCatalogs = false;
 		for (com.treloc.xtreloc.app.gui.model.CatalogInfo catalogInfo : catalogInfos) {
@@ -745,7 +878,7 @@ public class MapView {
 			}
 		}
 		
-		legendPanel.setVisible(hasVisibleCatalogs);
+		legendPanel.setVisible(hasStations || hasVisibleCatalogs);
 		legendPanel.revalidate();
 		legendPanel.repaint();
 		updateOverlayPositions();
@@ -760,17 +893,8 @@ public class MapView {
 		return new java.util.ArrayList<>(catalogInfos);
 	}
 	
-	/**
-	 * Finds the catalog that contains the given hypocenter.
-	 * 
-	 * @param hypocenter the hypocenter to search for
-	 * @param catalogs the list of catalogs to search in
-	 * @return the catalog containing the hypocenter, or null if not found
-	 */
-	private com.treloc.xtreloc.app.gui.model.CatalogInfo findCatalogForHypocenter(
-			Hypocenter hypocenter, 
-			java.util.List<com.treloc.xtreloc.app.gui.model.CatalogInfo> catalogs) {
-		for (com.treloc.xtreloc.app.gui.model.CatalogInfo catalog : catalogs) {
+	public com.treloc.xtreloc.app.gui.model.CatalogInfo findCatalogForHypocenter(Hypocenter hypocenter) {
+		for (com.treloc.xtreloc.app.gui.model.CatalogInfo catalog : catalogInfos) {
 			if (catalog.getHypocenters() != null && catalog.getHypocenters().contains(hypocenter)) {
 				return catalog;
 			}
@@ -808,12 +932,10 @@ public class MapView {
 	}
 	
 	public void showHypocenters(List<Hypocenter> hypos, String colorColumn, double[] colorValues) throws Exception {
-		// Store hypocenters for palette refresh
 		lastHypocenters = hypos;
 		lastColorColumn = colorColumn;
 		lastColorValues = colorValues;
 		
-		// 既存のHypoレイヤーとエラーバーレイヤーを削除（disposeを呼び出してメモリリークを防ぐ）
 		java.util.List<Layer> layersToRemove = new java.util.ArrayList<>();
 		for (Layer layer : map.layers()) {
 			if (layer.getTitle() != null && 
@@ -825,7 +947,6 @@ public class MapView {
 			try {
 				layer.dispose();
 			} catch (Exception e) {
-				// Ignore dispose errors
 			}
 			map.removeLayer(layer);
 		}
@@ -842,41 +963,33 @@ public class MapView {
 		double maxValue = Double.MIN_VALUE;
 		java.util.List<Color> colors = new java.util.ArrayList<>();
 		
-		// 色を計算
-		for (int i = 0; i < hypos.size(); i++) {
-			double colorValue = (colorValues != null && i < colorValues.length) 
-				? colorValues[i] 
-				: hypos.get(i).depth; // デフォルトは深度
-			
-			if (colorValue < minValue) minValue = colorValue;
-			if (colorValue > maxValue) maxValue = colorValue;
-		}
-		
-		// 各ポイントの色を計算
 		for (int i = 0; i < hypos.size(); i++) {
 			double colorValue = (colorValues != null && i < colorValues.length) 
 				? colorValues[i] 
 				: hypos.get(i).depth;
 			
-			// 正規化（0-1の範囲）
+			if (colorValue < minValue) minValue = colorValue;
+			if (colorValue > maxValue) maxValue = colorValue;
+		}
+		
+		for (int i = 0; i < hypos.size(); i++) {
+			double colorValue = (colorValues != null && i < colorValues.length) 
+				? colorValues[i] 
+				: hypos.get(i).depth;
+			
 			double normalized = (maxValue > minValue) 
 				? (colorValue - minValue) / (maxValue - minValue) 
 				: 0.0;
 			
-			// Apply color palette
 			Color color = getColorFromPalette((float) normalized);
 			colors.add(color);
 		}
 		
-		// カラーバーを更新
-		String label = (colorColumn != null) ? colorColumn : "深度 (km)";
+		String label = (colorColumn != null) ? colorColumn : "Depth (km)";
 		setColorRange(minValue, maxValue, label);
 		
-		// 色ごとにFeatureCollectionを分割してレイヤーを作成
-		// パフォーマンスのため、色をグループ化（同じ色のポイントをまとめる）
 		java.util.Map<Color, DefaultFeatureCollection> colorCollections = new java.util.HashMap<>();
 		
-		// エラーバー用のFeatureCollection
 		SimpleFeatureType errorBarType = DataUtilities.createType("ErrorBar", "geom:Polygon");
 		DefaultFeatureCollection errorBarCollection = new DefaultFeatureCollection("ErrorBarLayer", errorBarType);
 		
@@ -893,7 +1006,6 @@ public class MapView {
 			f.setAttribute("depth", h.depth);
 			col.add(f);
 			
-			// エラーバーを追加（xerr, yerrが有効な場合）
 			if (h.xerr > 0 || h.yerr > 0) {
 				org.locationtech.jts.geom.Polygon errorEllipse = createErrorEllipse(h.lon, h.lat, h.xerr, h.yerr, gf);
 				if (errorEllipse != null) {
@@ -904,7 +1016,6 @@ public class MapView {
 			}
 		}
 		
-		// エラーバーレイヤーを追加（震源ポイントの下に表示）
 		if (!errorBarCollection.isEmpty()) {
 			Style errorBarStyle = StyleFactory.createErrorBarStyle();
 			FeatureLayer errorBarLayer = new FeatureLayer(errorBarCollection, errorBarStyle);
@@ -912,7 +1023,6 @@ public class MapView {
 			map.addLayer(errorBarLayer);
 		}
 		
-		// 各色ごとにレイヤーを作成
 		for (java.util.Map.Entry<Color, DefaultFeatureCollection> entry : colorCollections.entrySet()) {
 			Color color = entry.getKey();
 			DefaultFeatureCollection col = entry.getValue();
@@ -926,34 +1036,28 @@ public class MapView {
 	}
 	
 	/**
-	 * エラー楕円を作成
-	 * @param lon 経度
-	 * @param lat 緯度
-	 * @param xerr x方向誤差 (km)
-	 * @param yerr y方向誤差 (km)
+	 * Creates an error ellipse polygon.
+	 * @param lon longitude
+	 * @param lat latitude
+	 * @param xerr x-direction error (km)
+	 * @param yerr y-direction error (km)
 	 * @param gf GeometryFactory
-	 * @return エラー楕円のPolygon
+	 * @return error ellipse Polygon
 	 */
 	private org.locationtech.jts.geom.Polygon createErrorEllipse(double lon, double lat, double xerr, double yerr, GeometryFactory gf) {
-		// 緯度・経度の変換係数（km -> degree）
-		// 緯度1度 ≈ 111.32 km
-		// 経度1度 ≈ 111.32 km × cos(緯度)
 		final double DEG2KM = 111.32;
 		double latRad = Math.toRadians(lat);
 		double lonErrDeg = xerr / (DEG2KM * Math.cos(latRad));
 		double latErrDeg = yerr / DEG2KM;
 		
-		// 楕円のパラメータ
-		int numPoints = 32; // 楕円の精度（点の数）
+		int numPoints = 32;
 		Coordinate[] coords = new Coordinate[numPoints + 1];
 		
-		// 最初の点を計算
 		double angle0 = 0.0;
 		double x0 = lonErrDeg * Math.cos(angle0);
 		double y0 = latErrDeg * Math.sin(angle0);
 		coords[0] = new Coordinate(lon + x0, lat + y0);
 		
-		// 中間の点を計算
 		for (int i = 1; i < numPoints; i++) {
 			double angle = 2.0 * Math.PI * i / numPoints;
 			double x = lonErrDeg * Math.cos(angle);
@@ -961,10 +1065,8 @@ public class MapView {
 			coords[i] = new Coordinate(lon + x, lat + y);
 		}
 		
-		// 最後の点は最初の点と同じ座標にする（LinearRingを閉じる）
 		coords[numPoints] = new Coordinate(coords[0]);
 		
-		// 閉じたLinearRingを作成
 		LinearRing ring = gf.createLinearRing(coords);
 		return gf.createPolygon(ring);
 	}
@@ -991,11 +1093,7 @@ public class MapView {
 		}
 	}
 	
-	/**
-	 * Refresh map colors when palette changes.
-	 */
 	private void refreshMapColors() {
-		// Re-display hypocenters with new palette if they were previously displayed
 		if (lastHypocenters != null && !lastHypocenters.isEmpty()) {
 			try {
 				showHypocenters(lastHypocenters, lastColorColumn, lastColorValues);
@@ -1007,96 +1105,222 @@ public class MapView {
 		}
 	}
 	
-	/**
-	 * Setup map overlays (color bar with palette selector).
-	 */
 	private void setupMapOverlays() {
-		// Wait for frame to be fully initialized before adding overlays
 		SwingUtilities.invokeLater(() -> {
 			try {
-				// Get the map pane component
-				Component mapPaneComponent = (Component) frame.getMapPane();
-				if (mapPaneComponent == null) {
-					// Retry after a short delay
-					Thread.sleep(200);
-					mapPaneComponent = (Component) frame.getMapPane();
+				Container contentPane = frame.getContentPane();
+				if (contentPane == null) {
+					return;
 				}
 				
-				if (mapPaneComponent != null) {
-					Container mapPaneParent = mapPaneComponent.getParent();
-					
-					// Color bar (top-right corner) with palette selector
-					colorBarPanel.setOpaque(true);
-					colorBarPanel.setBackground(new Color(255, 255, 255, 240)); // Semi-transparent white background
-					colorBarPanel.setBorder(BorderFactory.createCompoundBorder(
+				if (!(contentPane.getLayout() instanceof BorderLayout)) {
+					contentPane.setLayout(new BorderLayout());
+				}
+				
+				BorderLayout layout = (BorderLayout) contentPane.getLayout();
+				Component existingNorth = layout.getLayoutComponent(BorderLayout.NORTH);
+				Component existingSouth = layout.getLayoutComponent(BorderLayout.SOUTH);
+				Component existingWest = layout.getLayoutComponent(BorderLayout.WEST);
+				Component existingCenter = layout.getLayoutComponent(BorderLayout.CENTER);
+				Component existingEast = layout.getLayoutComponent(BorderLayout.EAST);
+				
+				if (existingNorth == null) {
+					Component toolbar = frame.getToolBar();
+					if (toolbar != null && toolbar.getParent() != contentPane) {
+						existingNorth = toolbar;
+					}
+				}
+				
+				if (existingSouth == null) {
+					JPanel statusBar = findStatusBarPanel(contentPane);
+					if (statusBar != null) {
+						existingSouth = statusBar.getParent() != null ? statusBar.getParent() : statusBar;
+					}
+				}
+				
+				if (colorBarPanel.getParent() != null) {
+					colorBarPanel.getParent().remove(colorBarPanel);
+				}
+				if (legendPanel != null && legendPanel.getParent() != null) {
+					legendPanel.getParent().remove(legendPanel);
+				}
+				if (stationSymbolLegendPanel != null && stationSymbolLegendPanel.getParent() != null) {
+					stationSymbolLegendPanel.getParent().remove(stationSymbolLegendPanel);
+				}
+				
+				Color panelBgColor = UIManager.getColor("Panel.background");
+				if (panelBgColor == null) {
+					panelBgColor = new Color(240, 240, 240);
+				}
+				
+				colorBarPanel.setOpaque(true);
+				colorBarPanel.setBackground(panelBgColor);
+				colorBarPanel.setBorder(BorderFactory.createCompoundBorder(
+					BorderFactory.createLineBorder(Color.BLACK, 1),
+					BorderFactory.createEmptyBorder(5, 5, 5, 5)));
+				
+				JComboBox<ColorPalette> paletteCombo = new JComboBox<>(ColorPalette.values());
+				paletteCombo.setSelectedItem(currentPalette);
+				paletteCombo.addActionListener(e -> {
+					currentPalette = (ColorPalette) paletteCombo.getSelectedItem();
+					if (colorBarPanel != null) {
+						colorBarPanel.setPalette(currentPalette);
+					}
+					refreshMapColors();
+				});
+				this.paletteCombo = paletteCombo;
+				colorBarPanel.addPaletteSelector(paletteCombo);
+				
+				colorBarPanel.setRangeChangeListener((min, max) -> {
+					String currentLabel = colorBarPanel.getLabel();
+					setColorRange(min, max, currentLabel);
+					refreshMapColors();
+				});
+				
+				if (legendPanel != null) {
+					legendPanel.setOpaque(true);
+					legendPanel.setBackground(panelBgColor);
+					legendPanel.setBorder(BorderFactory.createCompoundBorder(
 						BorderFactory.createLineBorder(Color.BLACK, 1),
 						BorderFactory.createEmptyBorder(5, 5, 5, 5)));
-					
-					// Add palette selector to color bar panel
-					JComboBox<ColorPalette> paletteCombo = new JComboBox<>(ColorPalette.values());
-					paletteCombo.setSelectedItem(currentPalette);
-					paletteCombo.addActionListener(e -> {
-						currentPalette = (ColorPalette) paletteCombo.getSelectedItem();
-						if (colorBarPanel != null) {
-							colorBarPanel.setPalette(currentPalette);
-						}
-						// Refresh map if hypocenters are displayed
-						refreshMapColors();
-					});
-					this.paletteCombo = paletteCombo;
-					colorBarPanel.addPaletteSelector(paletteCombo);
-					
-					// Add overlay components to map pane's parent without changing layout
-					if (mapPaneParent != null) {
-						// Add component with absolute positioning
-						mapPaneParent.add(colorBarPanel);
-						colorBarPanel.setLocation(0, 0);
-					}
-					
-					// Update component positions when map pane is resized
-					mapPaneComponent.addComponentListener(new java.awt.event.ComponentAdapter() {
-						@Override
-						public void componentResized(java.awt.event.ComponentEvent e) {
-							updateOverlayPositions();
-						}
-					});
-					
-					// Initial position update
-					updateOverlayPositions();
 				}
+				
+				if (stationSymbolLegendPanel != null) {
+					stationSymbolLegendPanel.setOpaque(true);
+					stationSymbolLegendPanel.setBackground(panelBgColor);
+					stationSymbolLegendPanel.setBorder(BorderFactory.createCompoundBorder(
+						BorderFactory.createLineBorder(Color.BLACK, 1),
+						BorderFactory.createEmptyBorder(5, 5, 5, 5)));
+				}
+				
+				JPanel bottomPanel = new JPanel();
+				bottomPanel.setLayout(new BoxLayout(bottomPanel, BoxLayout.Y_AXIS));
+				bottomPanel.setBorder(BorderFactory.createEmptyBorder(5, 5, 5, 5));
+				bottomPanel.setOpaque(true);
+				bottomPanel.setBackground(panelBgColor);
+				
+				JPanel colorBarLegendPanel = new JPanel();
+				colorBarLegendPanel.setLayout(new BoxLayout(colorBarLegendPanel, BoxLayout.X_AXIS));
+				colorBarLegendPanel.setBorder(BorderFactory.createEmptyBorder(0, 0, 0, 0));
+				colorBarLegendPanel.setOpaque(false);
+				
+				if (exportImageButton != null && exportImageButton.getParent() != null) {
+					exportImageButton.getParent().remove(exportImageButton);
+				}
+				
+				colorBarLegendPanel.add(colorBarPanel);
+				colorBarLegendPanel.add(Box.createHorizontalStrut(10));
+				
+				if (legendPanel != null) {
+					colorBarLegendPanel.add(legendPanel);
+				}
+				
+				colorBarLegendPanel.add(Box.createHorizontalGlue());
+				
+				bottomPanel.add(colorBarLegendPanel);
+				
+				Component mapPaneComponent = (Component) frame.getMapPane();
+				Container mapPaneParent = mapPaneComponent != null ? mapPaneComponent.getParent() : null;
+				
+				if (existingCenter != null) {
+					contentPane.remove(existingCenter);
+				}
+				
+				if (mapPaneComponent != null && mapPaneParent != null) {
+					if (mapPaneParent == contentPane) {
+						contentPane.add(mapPaneComponent, BorderLayout.CENTER);
+					} else {
+						Container mapPaneGrandParent = mapPaneParent.getParent();
+						if (mapPaneGrandParent == contentPane) {
+							contentPane.add(mapPaneParent, BorderLayout.CENTER);
+						} else {
+							JPanel mapContainer = new JPanel(new BorderLayout());
+							mapContainer.add(mapPaneComponent, BorderLayout.CENTER);
+							contentPane.add(mapContainer, BorderLayout.CENTER);
+						}
+					}
+				} else if (mapPaneComponent != null) {
+					JPanel mapContainer = new JPanel(new BorderLayout());
+					mapContainer.add(mapPaneComponent, BorderLayout.CENTER);
+					contentPane.add(mapContainer, BorderLayout.CENTER);
+				}
+				
+				if (existingNorth != null) {
+					if (existingNorth.getParent() != contentPane) {
+						contentPane.remove(existingNorth);
+					}
+					contentPane.add(existingNorth, BorderLayout.NORTH);
+				} else {
+					Component toolbar = frame.getToolBar();
+					if (toolbar != null) {
+						contentPane.add(toolbar, BorderLayout.NORTH);
+					}
+				}
+				
+				if (existingWest != null) {
+					if (existingWest.getParent() != contentPane) {
+						contentPane.remove(existingWest);
+					}
+					contentPane.add(existingWest, BorderLayout.WEST);
+				}
+				
+				if (existingEast != null) {
+					if (existingEast.getParent() != contentPane) {
+						contentPane.remove(existingEast);
+					}
+					contentPane.add(existingEast, BorderLayout.EAST);
+				}
+				
+				if (existingSouth != null) {
+					JPanel southContainer = new JPanel(new BorderLayout());
+					southContainer.setOpaque(false);
+					southContainer.add(bottomPanel, BorderLayout.NORTH);
+					if (existingSouth.getParent() != southContainer) {
+						if (existingSouth.getParent() != null) {
+							existingSouth.getParent().remove(existingSouth);
+						}
+						southContainer.add(existingSouth, BorderLayout.SOUTH);
+					}
+					contentPane.add(southContainer, BorderLayout.SOUTH);
+				} else {
+					JPanel statusBar = findStatusBarPanel(contentPane);
+					if (statusBar != null) {
+						JPanel southContainer = new JPanel(new BorderLayout());
+						southContainer.setOpaque(false);
+						southContainer.add(bottomPanel, BorderLayout.NORTH);
+						Container statusBarParent = statusBar.getParent();
+						if (statusBarParent != null && statusBarParent != southContainer) {
+							statusBarParent.remove(statusBar);
+						}
+						southContainer.add(statusBar, BorderLayout.SOUTH);
+						contentPane.add(southContainer, BorderLayout.SOUTH);
+					} else {
+						contentPane.add(bottomPanel, BorderLayout.SOUTH);
+					}
+				}
+				
+				contentPane.revalidate();
+				contentPane.repaint();
 			} catch (Exception e) {
-				// If overlay setup fails, just log and continue
 				System.err.println("Failed to setup map overlays: " + e.getMessage());
+				e.printStackTrace();
 			}
 		});
 	}
 	
-	/**
-	 * Update positions of overlay components (color bar).
-	 */
 	private void updateOverlayPositions() {
-		Component mapPaneComponent = (Component) frame.getMapPane();
-		int mapWidth = mapPaneComponent.getWidth();
-		int mapHeight = mapPaneComponent.getHeight();
-		
-		if (mapWidth > 0 && mapHeight > 0) {
-			// Color bar: top-right corner
-			if (colorBarPanel != null) {
-				int colorBarWidth = 450; // Increased width to accommodate palette selector side by side
-				int colorBarHeight = 100; // Increased height to prevent clipping
-				colorBarPanel.setBounds(mapWidth - colorBarWidth - 10, 10, colorBarWidth, colorBarHeight);
-			}
-		}
 	}
 	
 	private void setupStatusBarExportButton() {
 		SwingUtilities.invokeLater(() -> {
 			try {
-				File saveIconFile = new File("docs/save.png");
-				if (!saveIconFile.exists()) {
-					saveIconFile = new File("save.png");
+				if (exportImageButton != null && exportImageButton.getParent() != null) {
+					exportImageButton.getParent().remove(exportImageButton);
 				}
-				if (saveIconFile.exists()) {
+				
+				File saveIconFile = com.treloc.xtreloc.app.gui.util.AppDirectoryManager.getSaveIconFile();
+				
+				if (saveIconFile != null && saveIconFile.exists()) {
 					ImageIcon saveIcon = new ImageIcon(saveIconFile.getAbsolutePath());
 					Image img = saveIcon.getImage();
 					Image scaledImg = img.getScaledInstance(20, 20, Image.SCALE_SMOOTH);
@@ -1116,47 +1340,56 @@ public class MapView {
 				JPanel statusBar = findStatusBarPanel(contentPane);
 				
 				if (statusBar != null) {
-					LayoutManager layout = statusBar.getLayout();
-					if (layout instanceof FlowLayout || layout instanceof BoxLayout) {
-						statusBar.add(Box.createHorizontalGlue());
+					if (exportImageButton.getParent() != statusBar) {
+						LayoutManager layout = statusBar.getLayout();
+						if (layout instanceof FlowLayout || layout instanceof BoxLayout) {
+							statusBar.add(Box.createHorizontalGlue());
+						}
+						
+						statusBar.add(exportImageButton);
+						statusBar.revalidate();
+						statusBar.repaint();
 					}
-					
-					statusBar.add(exportImageButton);
-					statusBar.revalidate();
-					statusBar.repaint();
 				} else {
-					// ステータスバーが見つからない場合はツールバーに追加
-					frame.getToolBar().add(Box.createHorizontalGlue());
-					frame.getToolBar().add(exportImageButton);
+					if (exportImageButton.getParent() != frame.getToolBar()) {
+						frame.getToolBar().add(Box.createHorizontalGlue());
+						frame.getToolBar().add(exportImageButton);
+						frame.getToolBar().revalidate();
+						frame.getToolBar().repaint();
+					}
 				}
 			} catch (Exception e) {
 				System.err.println("Failed to setup status bar export button: " + e.getMessage());
-				// フォールバック: ツールバーに追加
+				e.printStackTrace();
 				if (exportImageButton != null) {
-					frame.getToolBar().add(Box.createHorizontalGlue());
-					frame.getToolBar().add(exportImageButton);
+					try {
+						if (exportImageButton.getParent() != frame.getToolBar()) {
+							frame.getToolBar().add(Box.createHorizontalGlue());
+							frame.getToolBar().add(exportImageButton);
+							frame.getToolBar().revalidate();
+							frame.getToolBar().repaint();
+						}
+					} catch (Exception ex) {
+						System.err.println("Failed to add export button to toolbar: " + ex.getMessage());
+					}
 				}
 			}
 		});
 	}
 	
 	/**
-	 * コンテナからステータスバーパネルを再帰的に検索
+	 * Recursively searches for a status bar panel in a container.
 	 */
 	private JPanel findStatusBarPanel(Container container) {
 		for (Component comp : container.getComponents()) {
 			if (comp instanceof JPanel) {
 				JPanel panel = (JPanel) comp;
-				// ステータスバーらしいパネルを探す（下部に配置されているパネル）
-				// または特定の名前やクラス名で識別
 				String panelName = panel.getName();
 				if (panelName != null && (panelName.contains("Status") || panelName.contains("status"))) {
 					return panel;
 				}
-				// 子コンポーネントにJLabelがある場合もステータスバーの可能性がある
 				for (Component child : panel.getComponents()) {
 					if (child instanceof JLabel) {
-						// ステータスバーとして扱う
 						return panel;
 					}
 				}
@@ -1181,11 +1414,7 @@ public class MapView {
 		return new Color(r, g, b);
 	}
 	
-	/**
-	 * Viridis color palette (approximation).
-	 */
 	private Color viridisColor(float ratio) {
-		// Simplified Viridis approximation
 		if (ratio < 0.25f) {
 			return interpolateColor(new Color(68, 1, 84), new Color(59, 82, 139), ratio * 4);
 		} else if (ratio < 0.5f) {
@@ -1197,11 +1426,7 @@ public class MapView {
 		}
 	}
 	
-	/**
-	 * Plasma color palette (approximation).
-	 */
 	private Color plasmaColor(float ratio) {
-		// Simplified Plasma approximation
 		if (ratio < 0.25f) {
 			return interpolateColor(new Color(13, 8, 135), new Color(75, 3, 161), ratio * 4);
 		} else if (ratio < 0.5f) {
@@ -1213,11 +1438,8 @@ public class MapView {
 		}
 	}
 	
-	/**
-	 * Rainbow color palette.
-	 */
 	private Color rainbowColor(float ratio) {
-		float hue = ratio * 0.7f; // 0.7 = blue to red range
+		float hue = ratio * 0.7f;
 		return Color.getHSBColor(hue, 1.0f, 1.0f);
 	}
 
@@ -1226,7 +1448,6 @@ public class MapView {
 	}
 	
 	public void showStations(List<Station> stations, String colorColumn, double[] colorValues) throws Exception {
-		// 既存のステーションレイヤーをクリア（disposeを呼び出してメモリリークを防ぐ）
 		java.util.List<Layer> layersToRemove = new java.util.ArrayList<>();
 		for (Layer layer : map.layers()) {
 			if ("StationLayer".equals(layer.getTitle())) {
@@ -1237,7 +1458,6 @@ public class MapView {
 			try {
 				layer.dispose();
 			} catch (Exception e) {
-				// Ignore dispose errors
 			}
 			map.removeLayer(layer);
 		}
@@ -1245,9 +1465,7 @@ public class MapView {
 		SimpleFeatureType type = DataUtilities.createType("Station", "geom:Point,code:String,lat:Double,lon:Double,dep:Double");
 		GeometryFactory gf = new GeometryFactory();
 		
-		// 色付け用の処理
 		if (colorColumn != null && colorValues != null && colorValues.length == stations.size()) {
-			// 最小値と最大値を決定
 			double minValue = Double.MAX_VALUE;
 			double maxValue = Double.MIN_VALUE;
 			for (double val : colorValues) {
@@ -1255,19 +1473,16 @@ public class MapView {
 				if (val > maxValue) maxValue = val;
 			}
 			
-			// 色ごとにFeatureCollectionを分割
 			java.util.Map<Color, DefaultFeatureCollection> colorFeatureCollections = new java.util.HashMap<>();
 			
 			for (int i = 0; i < stations.size(); i++) {
 				Station s = stations.get(i);
 				double valueToColor = colorValues[i];
 				
-				// 正規化（0-1の範囲）
 				double normalized = (maxValue > minValue) 
 					? (valueToColor - minValue) / (maxValue - minValue) 
 					: 0.0;
 				
-				// Apply color palette
 				Color color = getColorFromPalette((float) normalized);
 				
 				DefaultFeatureCollection col = colorFeatureCollections.computeIfAbsent(color, 
@@ -1282,23 +1497,20 @@ public class MapView {
 				col.add(f);
 			}
 			
-			// 各色に対応するレイヤーを追加
 			for (java.util.Map.Entry<Color, DefaultFeatureCollection> entry : colorFeatureCollections.entrySet()) {
 				Color color = entry.getKey();
 				DefaultFeatureCollection col = entry.getValue();
-				Style style = StyleFactory.createColorStyle(color.getRed(), color.getGreen(), color.getBlue());
+				Style style = StyleFactory.createColoredStationStyle(color.getRed(), color.getGreen(), color.getBlue());
 				FeatureLayer layer = new FeatureLayer(col, style);
 				layer.setTitle("StationLayer");
 				map.addLayer(layer);
 			}
 			
-			// カラーバーを更新
 			if (stations.size() > 0) {
 				String label = colorColumn;
 				setColorRange(minValue, maxValue, label);
 			}
 		} else {
-			// 色付けなしの通常表示
 			DefaultFeatureCollection col = new DefaultFeatureCollection("StationLayer", type);
 			for (Station s : stations) {
 				SimpleFeature f = DataUtilities.template(type);
@@ -1313,17 +1525,23 @@ public class MapView {
 			layer.setTitle("StationLayer");
 			map.addLayer(layer);
 		}
+		
+		updateLegend();
+		updateOverlayPositions();
+		forceMapRepaint();
 	}
 	
-	/**
-	 * 選択されたポイントを強調表示
-	 */
 	public void highlightPoint(double lon, double lat) throws Exception {
-		highlightPoint(lon, lat, null);
+		highlightPoint(lon, lat, null, null, null);
 	}
 	
 	public void highlightPoint(double lon, double lat, String type) {
-		clearHighlight(); // 既存のハイライトをクリア
+		highlightPoint(lon, lat, type, null, null);
+	}
+	
+	public void highlightPoint(double lon, double lat, String type, 
+			com.treloc.xtreloc.app.gui.model.CatalogInfo.SymbolType symbolType, Color color) {
+		clearHighlight();
 
 		try {
 			SimpleFeatureType highlightType = DataUtilities.createType("Highlight", "geom:Point");
@@ -1334,25 +1552,28 @@ public class MapView {
 			feature.setDefaultGeometry(gf.createPoint(new Coordinate(lon, lat)));
 			highlightCollection.add(feature);
 
-			FeatureLayer highlightLayer = new FeatureLayer(highlightCollection, StyleFactory.selectedPointStyle());
+			Style highlightStyle;
+			if ("station".equals(type)) {
+				highlightStyle = StyleFactory.selectedPointStyle();
+			} else if (symbolType != null && color != null) {
+				highlightStyle = StyleFactory.selectedSymbolStyle(symbolType, color);
+			} else {
+				highlightStyle = StyleFactory.selectedPointStyle();
+			}
+
+			FeatureLayer highlightLayer = new FeatureLayer(highlightCollection, highlightStyle);
 			highlightLayer.setTitle("Selected");
 			map.addLayer(highlightLayer);
 		} catch (Exception e) {
-			System.err.println("ハイライト表示に失敗: " + e.getMessage());
+			System.err.println("Failed to highlight point: " + e.getMessage());
 			e.printStackTrace();
 		}
 	}
 	
-	/**
-	 * 強調表示をクリア
-	 */
 	public void clearHighlight() {
 		removeHighlightLayer();
 	}
 	
-	/**
-	 * 強調表示レイヤーを削除
-	 */
 	private void removeHighlightLayer() {
 		java.util.List<Layer> layersToRemove = new java.util.ArrayList<>();
 		for (Layer layer : map.layers()) {
@@ -1364,7 +1585,6 @@ public class MapView {
 			try {
 				layer.dispose();
 			} catch (Exception e) {
-				// Ignore dispose errors
 			}
 			map.removeLayer(layer);
 		}
@@ -1416,9 +1636,6 @@ public class MapView {
 		return currentPalette;
 	}
 	
-	/**
-	 * Shows a file chooser dialog and exports the map as an image.
-	 */
 	private void exportMapImage() {
 		JFileChooser fileChooser = new JFileChooser();
 		fileChooser.setDialogTitle("Export Map as Image");
@@ -1426,6 +1643,8 @@ public class MapView {
 			"PNG files (*.png)", "png"));
 		fileChooser.addChoosableFileFilter(new javax.swing.filechooser.FileNameExtensionFilter(
 			"JPEG files (*.jpg, *.jpeg)", "jpg", "jpeg"));
+		
+		com.treloc.xtreloc.app.gui.util.FileChooserHelper.setDefaultDirectory(fileChooser);
 		fileChooser.setSelectedFile(new File("map.png"));
 		
 		int result = fileChooser.showSaveDialog(frame);
@@ -1444,12 +1663,6 @@ public class MapView {
 		}
 	}
 	
-	/**
-	 * Exports the current map view as an image file.
-	 * 
-	 * @param outputFile the output file (PNG or JPEG)
-	 * @throws Exception if export fails
-	 */
 	public void exportMapImageToFile(File outputFile) throws Exception {
 		Component mapPane = frame.getMapPane();
 		BufferedImage image = new BufferedImage(
@@ -1482,24 +1695,33 @@ public class MapView {
 	}
 	
 	/**
-	 * カラーバーを表示するパネル
 	 */
 	private static class ColorBarPanel extends JPanel {
 		private double minValue = 0.0;
 		private double maxValue = 100.0;
-		private String label = "深度 (km)";
+		private String label = "Depth (km)";
 		private ColorPalette palette = ColorPalette.BLUE_TO_RED;
-		private JComboBox<ColorPalette> paletteCombo = null;
 		private JPanel colorBarDrawingPanel;
+		private JTextField minValueField;
+		private JTextField maxValueField;
+		private RangeChangeListener rangeChangeListener;
+		
+		public interface RangeChangeListener {
+			void onRangeChanged(double min, double max);
+		}
+		
+		public void setRangeChangeListener(RangeChangeListener listener) {
+			this.rangeChangeListener = listener;
+		}
 		
 		public ColorBarPanel(ColorPalette palette) {
 			this.palette = palette;
-			setPreferredSize(new java.awt.Dimension(450, 100)); // Increased height to prevent clipping
-			setMinimumSize(new java.awt.Dimension(350, 100));
-			setLayout(new BorderLayout(5, 5));
+			setPreferredSize(new java.awt.Dimension(450, 120));
+			setMinimumSize(new java.awt.Dimension(350, 120));
+			setMaximumSize(new java.awt.Dimension(Integer.MAX_VALUE, 150));
+			setLayout(new BoxLayout(this, BoxLayout.Y_AXIS));
 			setBorder(BorderFactory.createTitledBorder(label));
 			
-			// Create panel for drawing color bar
 			colorBarDrawingPanel = new JPanel() {
 				@Override
 				protected void paintComponent(Graphics g) {
@@ -1508,11 +1730,10 @@ public class MapView {
 					g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
 					
 					int width = getWidth() - 20;
-					int height = getHeight() - 50; // More space for labels to prevent clipping
+					int height = getHeight() - 35;
 					int x = 10;
-					int y = 25;
+					int y = 20;
 					
-					// Draw color bar with current palette
 					for (int i = 0; i < width; i++) {
 						float ratio = (float) i / width;
 						Color color = getColorFromPalette(ratio);
@@ -1520,16 +1741,13 @@ public class MapView {
 						g2d.drawLine(x + i, y, x + i, y + height);
 					}
 					
-					// Draw labels with better visibility (white background with black border)
 					FontMetrics fm = g2d.getFontMetrics();
 					String minLabel = String.format("%.1f", minValue);
 					String maxLabel = String.format("%.1f", maxValue);
 					
-					// Draw labels below the color bar with background for visibility
-					int labelY = y + height + 18;
+					int labelY = y + height + 15;
 					int labelPadding = 3;
 					
-					// Draw background and border for min label
 					int minLabelWidth = fm.stringWidth(minLabel) + labelPadding * 2;
 					int minLabelHeight = fm.getHeight() + labelPadding * 2;
 					g2d.setColor(Color.WHITE);
@@ -1540,7 +1758,6 @@ public class MapView {
 						minLabelWidth, minLabelHeight);
 					g2d.drawString(minLabel, x, labelY);
 					
-					// Draw background and border for max label
 					int maxLabelWidth = fm.stringWidth(maxLabel) + labelPadding * 2;
 					int maxLabelHeight = fm.getHeight() + labelPadding * 2;
 					g2d.setColor(Color.WHITE);
@@ -1608,18 +1825,106 @@ public class MapView {
 				}
 			};
 			colorBarDrawingPanel.setOpaque(false);
-			add(colorBarDrawingPanel, BorderLayout.CENTER);
+			colorBarDrawingPanel.setPreferredSize(new java.awt.Dimension(400, 30));
+			colorBarDrawingPanel.setMaximumSize(new java.awt.Dimension(Integer.MAX_VALUE, 30));
+			
+			minValueField = new JTextField(String.format("%.2f", minValue), 8);
+			maxValueField = new JTextField(String.format("%.2f", maxValue), 8);
+			
+			minValueField.addActionListener(e -> updateRangeFromFields());
+			maxValueField.addActionListener(e -> updateRangeFromFields());
+			
+			minValueField.addFocusListener(new java.awt.event.FocusAdapter() {
+				@Override
+				public void focusLost(java.awt.event.FocusEvent e) {
+					updateRangeFromFields();
+				}
+			});
+			maxValueField.addFocusListener(new java.awt.event.FocusAdapter() {
+				@Override
+				public void focusLost(java.awt.event.FocusEvent e) {
+					updateRangeFromFields();
+				}
+			});
+			
+			JPanel valueInputPanel = new JPanel();
+			valueInputPanel.setLayout(new BoxLayout(valueInputPanel, BoxLayout.Y_AXIS));
+			valueInputPanel.setOpaque(false);
+			
+			JPanel minPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 0));
+			minPanel.setOpaque(false);
+			minPanel.add(new JLabel("Min:"));
+			minPanel.add(minValueField);
+			
+			JPanel maxPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 0));
+			maxPanel.setOpaque(false);
+			maxPanel.add(new JLabel("Max:"));
+			maxPanel.add(maxValueField);
+			
+			valueInputPanel.add(minPanel);
+			valueInputPanel.add(Box.createVerticalStrut(3));
+			valueInputPanel.add(maxPanel);
+			
+			add(Box.createVerticalStrut(5));
+			add(colorBarDrawingPanel);
+			add(Box.createVerticalStrut(5));
+			add(valueInputPanel);
+		}
+		
+		private void updateRangeFromFields() {
+			try {
+				double newMin = Double.parseDouble(minValueField.getText().trim());
+				double newMax = Double.parseDouble(maxValueField.getText().trim());
+				
+				if (newMin < newMax) {
+					this.minValue = newMin;
+					this.maxValue = newMax;
+					if (colorBarDrawingPanel != null) {
+						colorBarDrawingPanel.repaint();
+					}
+					if (rangeChangeListener != null) {
+						rangeChangeListener.onRangeChanged(newMin, newMax);
+					}
+				} else {
+					minValueField.setText(String.format("%.2f", minValue));
+					maxValueField.setText(String.format("%.2f", maxValue));
+				}
+			} catch (NumberFormatException e) {
+				minValueField.setText(String.format("%.2f", minValue));
+				maxValueField.setText(String.format("%.2f", maxValue));
+			}
 		}
 		
 		public void addPaletteSelector(JComboBox<ColorPalette> combo) {
-			this.paletteCombo = combo;
-			// Add palette selector on the left side, next to color bar
+			JPanel topPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 0));
+			topPanel.setOpaque(false);
+			topPanel.setPreferredSize(new java.awt.Dimension(Integer.MAX_VALUE, 30));
+			topPanel.setMaximumSize(new java.awt.Dimension(Integer.MAX_VALUE, 30));
+			
 			JPanel palettePanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 0));
 			palettePanel.setOpaque(false);
-			palettePanel.setPreferredSize(new java.awt.Dimension(100, 30));
 			palettePanel.add(new JLabel("Palette:"));
 			palettePanel.add(combo);
-			add(palettePanel, BorderLayout.WEST);
+			
+			JPanel minPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 0));
+			minPanel.setOpaque(false);
+			minPanel.add(new JLabel("Min:"));
+			minPanel.add(minValueField);
+			
+			JPanel maxPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 0));
+			maxPanel.setOpaque(false);
+			maxPanel.add(new JLabel("Max:"));
+			maxPanel.add(maxValueField);
+			
+			topPanel.add(palettePanel);
+			topPanel.add(minPanel);
+			topPanel.add(maxPanel);
+			topPanel.add(Box.createHorizontalGlue());
+			
+			removeAll();
+			add(topPanel);
+			add(Box.createVerticalStrut(5));
+			add(colorBarDrawingPanel);
 		}
 		
 		public void setRange(double min, double max, String label) {
@@ -1627,6 +1932,12 @@ public class MapView {
 			this.maxValue = max;
 			this.label = label;
 			setBorder(BorderFactory.createTitledBorder(label));
+			if (minValueField != null) {
+				minValueField.setText(String.format("%.2f", min));
+			}
+			if (maxValueField != null) {
+				maxValueField.setText(String.format("%.2f", max));
+			}
 			if (colorBarDrawingPanel != null) {
 				colorBarDrawingPanel.repaint();
 			}
@@ -1638,6 +1949,11 @@ public class MapView {
 				colorBarDrawingPanel.repaint();
 			}
 		}
+		
+		public String getLabel() {
+			return label;
+		}
 	}
 	
 }
+

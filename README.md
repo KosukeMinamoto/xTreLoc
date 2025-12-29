@@ -81,44 +81,44 @@ Available modes: `GRD`, `STD`, `MCMC`, `TRD`, `CLS`, `SYN`
 
 ### macOS (.app Bundle)
 
-macOS用のネイティブアプリケーション（`.app`バンドル）を作成できます。
+You can create a native macOS application (`.app` bundle).
 
-**前提条件:**
-- JDK 14以上（jpackageツールが含まれています）
-- macOS上で実行
+**Prerequisites:**
+- JDK 14 or higher (includes jpackage tool)
+- Run on macOS
 
-**手順:**
+**Steps:**
 
-1. **JARファイルをビルド:**
+1. **Build JAR files:**
 ```bash
 ./gradlew jar
 ```
 
-2. **.appバンドルを作成:**
+2. **Create .app bundle:**
 ```bash
 ./gradlew createApp
 ```
 
-作成されたアプリケーションは `build/dist/xTreLoc.app` に配置されます。
-このアプリケーションは、Finderから直接起動できます。
+The created application will be located at `build/dist/xTreLoc.app`.
+You can launch this application directly from Finder.
 
-3. **DMGインストーラーを作成（オプション）:**
+3. **Create DMG installer (optional):**
 ```bash
 ./gradlew createDmg
 ```
 
-DMGファイルは `build/dist/xTreLoc-1.0-SNAPSHOT.dmg` に作成されます。
-このDMGファイルを配布することで、ユーザーは簡単にアプリケーションをインストールできます。
+The DMG file will be created at `build/dist/xTreLoc-1.0-SNAPSHOT.dmg`.
+By distributing this DMG file, users can easily install the application.
 
-**注意事項:**
-- 初回起動時、macOSのセキュリティ設定により警告が表示される場合があります
-- 警告を回避するには、アプリケーションにコード署名を追加する必要があります
-- コード署名には、Apple Developerアカウントが必要です
+**Notes:**
+- On first launch, macOS security settings may display a warning
+- To avoid the warning, you need to add code signing to the application
+- Code signing requires an Apple Developer account
 
 ### Windows/Linux
 
-WindowsやLinux用のネイティブアプリケーションも、jpackageを使用して作成できます。
-詳細は、[jpackage公式ドキュメント](https://docs.oracle.com/en/java/javase/14/docs/specs/man/jpackage.html)を参照してください。
+You can also create native applications for Windows and Linux using jpackage.
+For details, see the [jpackage official documentation](https://docs.oracle.com/en/java/javase/14/docs/specs/man/jpackage.html).
 
 ## Example Workflow
 
@@ -141,7 +141,7 @@ java -jar build/libs/xTreLoc-CLI-1.0-SNAPSHOT.jar TRD config.json
 ## Documentation
 
 - [User Manual (English)](docs/Turtorial.md)
-- [ユーザーマニュアル (日本語)](docs/TurtorialJP.md)
+- [User Manual (Japanese)](docs/TurtorialJP.md)
 
 ## Demo
 
