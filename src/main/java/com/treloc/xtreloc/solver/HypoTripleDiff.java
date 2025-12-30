@@ -456,35 +456,65 @@ public class HypoTripleDiff extends SolverBase {
                             double[][][] partialTbl = createPartialTblArray(cluster);
                             Object[] dG = matrixDG(filteredTripDiff, cluster, partialTbl, distKm, targMap);
                             double[] d = (double[]) dG[0];
-                            OpenMapRealMatrix G = (OpenMapRealMatrix) dG[1];
+                            Object GObj = dG[1];
                             
                             if (d.length == 0) {
                                 throw new IllegalArgumentException("Empty residual vector d. This may indicate no valid triple differences.");
                             }
-                            if (G.getRowDimension() == 0 || G.getColumnDimension() == 0) {
+                            
+                            int gRows, gCols;
+                            if (GObj instanceof OpenMapRealMatrix) {
+                                OpenMapRealMatrix G = (OpenMapRealMatrix) GObj;
+                                gRows = G.getRowDimension();
+                                gCols = G.getColumnDimension();
+                            } else if (GObj instanceof COOSparseMatrix) {
+                                COOSparseMatrix G = (COOSparseMatrix) GObj;
+                                gRows = G.getRowDimension();
+                                gCols = G.getColumnDimension();
+                            } else {
+                                throw new IllegalArgumentException("Unknown matrix type: " + GObj.getClass().getName());
+                            }
+                            
+                            if (gRows == 0 || gCols == 0) {
                                 throw new IllegalArgumentException("Empty design matrix G. This may indicate no valid triple differences.");
                             }
                             
                             int expectedDmLength = 3 * numTarget;
-                            if (G.getColumnDimension() != expectedDmLength) {
+                            if (gCols != expectedDmLength) {
                                 throw new IllegalArgumentException(
                                     "Design matrix G column dimension mismatch. " +
                                     "Expected: " + expectedDmLength + " (3 * numTarget), " +
-                                    "Actual: " + G.getColumnDimension());
+                                    "Actual: " + gCols);
                             }
                             
-                            ScipyLSQR.LSQRResult result = ScipyLSQR.lsqr(
-                                G,
-                                d,
-                                dampFact,
-                                1e-6,
-                                1e-6,
-                                1e8,
-                                1000,
-                                showLSQR,
-                                false,
-                                null,
-                                logConsumer);
+                            ScipyLSQR.LSQRResult result;
+                            if (GObj instanceof OpenMapRealMatrix) {
+                                result = ScipyLSQR.lsqr(
+                                    (OpenMapRealMatrix) GObj,
+                                    d,
+                                    dampFact,
+                                    1e-6,
+                                    1e-6,
+                                    1e8,
+                                    1000,
+                                    showLSQR,
+                                    false,
+                                    null,
+                                    logConsumer);
+                            } else {
+                                result = ScipyLSQR.lsqr(
+                                    (COOSparseMatrix) GObj,
+                                    d,
+                                    dampFact,
+                                    1e-6,
+                                    1e-6,
+                                    1e8,
+                                    1000,
+                                    showLSQR,
+                                    false,
+                                    null,
+                                    logConsumer);
+                            }
                             
                             double[] dm = result.x;
                             
@@ -659,7 +689,11 @@ public class HypoTripleDiff extends SolverBase {
     }
     
     /**
-     * @return an Object array containing [d (double[]), G (OpenMapRealMatrix)]
+     * @return an Object array containing [d (double[]), G (OpenMapRealMatrix or COOSparseMatrix)]
+     * 
+     * <p>This method automatically selects the appropriate sparse matrix implementation
+     * based on matrix size. For large matrices (M * 3*N > 10^7), COOSparseMatrix is used;
+     * otherwise, OpenMapRealMatrix is used.
      */
     private Object[] matrixDG(List<TripleDifference> trpDiff, Cluster<Point> cluster, 
                               double[][][] partialTbl, double distanceThreshold, int[] targMap) {
@@ -667,41 +701,87 @@ public class HypoTripleDiff extends SolverBase {
         int N = Arrays.stream(targMap).max().getAsInt() + 1;
         
         double[] d = new double[M];
-        OpenMapRealMatrix G = new OpenMapRealMatrix(M, 3 * N);
         
-        for (int m = 0; m < M; m++) {
-            TripleDifference td = trpDiff.get(m);
-            int eve0 = td.eve0;
-            int eve1 = td.eve1;
-            int stnk = td.stn0;
-            int stnl = td.stn1;
+        long matrixSize = (long) M * (long) (3 * N);
+        boolean useCOO = matrixSize > 10_000_000L;
+        
+        if (useCOO) {
+            logger.info(String.format(
+                "Using COOSparseMatrix for large matrix (M=%d, N=%d, size=%d). " +
+                "This avoids array size limitations.",
+                M, N, matrixSize));
+            COOSparseMatrix G = new COOSparseMatrix(M, 3 * N);
             
-            int nCol0 = targMap[eve0];
-            int nCol1 = targMap[eve1];
-            if (nCol0 == -1 && nCol1 == -1) {
-                continue;
+            for (int m = 0; m < M; m++) {
+                TripleDifference td = trpDiff.get(m);
+                int eve0 = td.eve0;
+                int eve1 = td.eve1;
+                int stnk = td.stn0;
+                int stnl = td.stn1;
+                
+                int nCol0 = targMap[eve0];
+                int nCol1 = targMap[eve1];
+                if (nCol0 == -1 && nCol1 == -1) {
+                    continue;
+                }
+                
+                if (nCol1 != -1) {
+                    G.setEntry(m, 3 * nCol1, partialTbl[eve1][stnl][0] - partialTbl[eve1][stnk][0]);
+                    G.setEntry(m, 3 * nCol1 + 1, partialTbl[eve1][stnl][1] - partialTbl[eve1][stnk][1]);
+                    G.setEntry(m, 3 * nCol1 + 2, partialTbl[eve1][stnl][2] - partialTbl[eve1][stnk][2]);
+                }
+                
+                if (nCol0 != -1) {
+                    G.setEntry(m, 3 * nCol0, -(partialTbl[eve0][stnl][0] - partialTbl[eve0][stnk][0]));
+                    G.setEntry(m, 3 * nCol0 + 1, -(partialTbl[eve0][stnl][1] - partialTbl[eve0][stnk][1]));
+                    G.setEntry(m, 3 * nCol0 + 2, -(partialTbl[eve0][stnl][2] - partialTbl[eve0][stnk][2]));
+                }
+                
+                double cal0 = partialTbl[eve0][stnl][3] - partialTbl[eve0][stnk][3];
+                double cal1 = partialTbl[eve1][stnl][3] - partialTbl[eve1][stnk][3];
+                double lagCal = cal1 - cal0;
+                double lagObs = td.tdTime;
+                d[m] = lagObs - lagCal;
             }
             
-            if (nCol1 != -1) {
-                G.setEntry(m, 3 * nCol1, partialTbl[eve1][stnl][0] - partialTbl[eve1][stnk][0]);
-                G.setEntry(m, 3 * nCol1 + 1, partialTbl[eve1][stnl][1] - partialTbl[eve1][stnk][1]);
-                G.setEntry(m, 3 * nCol1 + 2, partialTbl[eve1][stnl][2] - partialTbl[eve1][stnk][2]);
+            return new Object[] { d, G };
+        } else {
+            OpenMapRealMatrix G = new OpenMapRealMatrix(M, 3 * N);
+            
+            for (int m = 0; m < M; m++) {
+                TripleDifference td = trpDiff.get(m);
+                int eve0 = td.eve0;
+                int eve1 = td.eve1;
+                int stnk = td.stn0;
+                int stnl = td.stn1;
+                
+                int nCol0 = targMap[eve0];
+                int nCol1 = targMap[eve1];
+                if (nCol0 == -1 && nCol1 == -1) {
+                    continue;
+                }
+                
+                if (nCol1 != -1) {
+                    G.setEntry(m, 3 * nCol1, partialTbl[eve1][stnl][0] - partialTbl[eve1][stnk][0]);
+                    G.setEntry(m, 3 * nCol1 + 1, partialTbl[eve1][stnl][1] - partialTbl[eve1][stnk][1]);
+                    G.setEntry(m, 3 * nCol1 + 2, partialTbl[eve1][stnl][2] - partialTbl[eve1][stnk][2]);
+                }
+                
+                if (nCol0 != -1) {
+                    G.setEntry(m, 3 * nCol0, -(partialTbl[eve0][stnl][0] - partialTbl[eve0][stnk][0]));
+                    G.setEntry(m, 3 * nCol0 + 1, -(partialTbl[eve0][stnl][1] - partialTbl[eve0][stnk][1]));
+                    G.setEntry(m, 3 * nCol0 + 2, -(partialTbl[eve0][stnl][2] - partialTbl[eve0][stnk][2]));
+                }
+                
+                double cal0 = partialTbl[eve0][stnl][3] - partialTbl[eve0][stnk][3];
+                double cal1 = partialTbl[eve1][stnl][3] - partialTbl[eve1][stnk][3];
+                double lagCal = cal1 - cal0;
+                double lagObs = td.tdTime;
+                d[m] = lagObs - lagCal;
             }
             
-            if (nCol0 != -1) {
-                G.setEntry(m, 3 * nCol0, -(partialTbl[eve0][stnl][0] - partialTbl[eve0][stnk][0]));
-                G.setEntry(m, 3 * nCol0 + 1, -(partialTbl[eve0][stnl][1] - partialTbl[eve0][stnk][1]));
-                G.setEntry(m, 3 * nCol0 + 2, -(partialTbl[eve0][stnl][2] - partialTbl[eve0][stnk][2]));
-            }
-            
-            double cal0 = partialTbl[eve0][stnl][3] - partialTbl[eve0][stnk][3];
-            double cal1 = partialTbl[eve1][stnl][3] - partialTbl[eve1][stnk][3];
-            double lagCal = cal1 - cal0;
-            double lagObs = td.tdTime;
-            d[m] = lagObs - lagCal;
+            return new Object[] { d, G };
         }
-        
-        return new Object[] { d, G };
     }
     
     /**

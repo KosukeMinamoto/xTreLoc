@@ -106,7 +106,7 @@
 
 <span class="token comment"># 両方をビルド</span>
 ./gradlew build cliJar
-</code></pre><p>ビルドされたJARファイルは<code>build/libs/</code>に配置されます:</p>
+</code></pre><p>ビルドされたJARファイルは<code>build/libs/</code>に配置される:</p>
 <ul>
 <li><code>xTreLoc-GUI-1.0-SNAPSHOT.jar</code> (GUI版)</li>
 <li><code>xTreLoc-CLI-1.0-SNAPSHOT.jar</code> (CLI版)</li>
@@ -118,7 +118,7 @@
 
 <span class="token comment"># 両方のJARをビルド</span>
 mvn clean package
-</code></pre><p>ビルドされたJARファイルは<code>target/</code>に配置されます:</p>
+</code></pre><p>ビルドされたJARファイルは<code>target/</code>に配置される:</p>
 <ul>
 <li><code>xTreLoc-GUI-1.0-SNAPSHOT.jar</code> (GUI版)</li>
 <li><code>xTreLoc-CLI-1.0-SNAPSHOT.jar</code> (CLI版)</li>
@@ -237,22 +237,29 @@ SYNモードにおいては全て1.0が設定され, GRD, STD, MCMCモードに�
 <li><code>[config.json]</code>: 設定ファイルのパス (Default:<code>config.json</code>)</li>
 </ul>
 <h3 id="利用可能なモード">利用可能なモード </h3>
+<p>各震源決定モードには, 大まかには以下のような特徴がある:</p>
+<ul>
+<li><strong>GRDモード</strong>: 中程度の速度だが, 大まかな分布の推定や初期震源決定に適する.</li>
+<li><strong>STDモード</strong>: 高速に良好な精度を出すが, 初期値依存性が高いため, GRDモードの次に実行することが推奨される.</li>
+<li><strong>MCMCモード</strong>: 計算に時間を要するが, 良好な決定精度.</li>
+<li><strong>TRDモード</strong>: インプットデータの震源決定精度が大きく影響するため, 上記のモードを実行後の再決定手法として用いられる. また一部の解は発散するためにデータ数が減る場合が多い. なお計算が重いため, ブートストラップ法を用いた誤差推定は現時点で未実装.</li>
+</ul>
 <h4 id="grdモード-グリッドサーチ">GRDモード (グリッドサーチ) </h4>
 <pre data-role="codeBlock" data-info="bash" class="language-bash bash"><code><span class="token function">java</span> <span class="token parameter variable">-jar</span> xTreLoc-CLI-1.0-SNAPSHOT.jar GRD config.json
 </code></pre><p>指定されたディレクトリ内のすべての<code>.dat</code>ファイルに対して, フォーカスドランダムサーチを使用したグリッドサーチ震源決定を実行.</p>
 <h4 id="stdモード">STDモード </h4>
 <pre data-role="codeBlock" data-info="bash" class="language-bash bash"><code><span class="token function">java</span> <span class="token parameter variable">-jar</span> xTreLoc-CLI-1.0-SNAPSHOT.jar STD config.json
-</code></pre><p>すべての<code>.dat</code>ファイルに対してStation-pair Double Difference法を適用します.</p>
+</code></pre><p>すべての<code>.dat</code>ファイルに対してStation-pair Double Difference法を適用.</p>
 <h4 id="mcmcモード">MCMCモード </h4>
 <pre data-role="codeBlock" data-info="bash" class="language-bash bash"><code><span class="token function">java</span> <span class="token parameter variable">-jar</span> xTreLoc-CLI-1.0-SNAPSHOT.jar MCMC config.json
 </code></pre><p>すべての<code>.dat</code>ファイルに対してMCMCを用いた震源決定を実行.</p>
-<h4 id="clsモード-空間クラスタリング">CLSモード (空間クラスタリング) </h4>
+<h4 id="clsモード">CLSモード </h4>
 <pre data-role="codeBlock" data-info="bash" class="language-bash bash"><code><span class="token function">java</span> <span class="token parameter variable">-jar</span> xTreLoc-CLI-1.0-SNAPSHOT.jar CLS config.json
 </code></pre><p>DBSCANアルゴリズムを使用して, カタログファイルに対して空間クラスタリングを実行し, 「走時差の差」データをバイナリ形式で作成. <code>hypoDD</code>の<code>ph2dt</code>と同等の機能.</p>
 <h4 id="trdモード">TRDモード </h4>
 <pre data-role="codeBlock" data-info="bash" class="language-bash bash"><code><span class="token function">java</span> <span class="token parameter variable">-jar</span> xTreLoc-CLI-1.0-SNAPSHOT.jar TRD config.json
 </code></pre><p>Guo &amp; Zhang (2016) の方法を使用して, カタログファイルに対してTriple-Difference法を実行. CLSモードによるバイナリファイルが必要.</p>
-<h4 id="synモード-シンセティックテストデータ生成">SYNモード (シンセティックテストデータ生成) </h4>
+<h4 id="synモード">SYNモード </h4>
 <pre data-role="codeBlock" data-info="bash" class="language-bash bash"><code><span class="token function">java</span> <span class="token parameter variable">-jar</span> xTreLoc-CLI-1.0-SNAPSHOT.jar SYN config.json
 </code></pre><p>正解値カタログからdat形式のシンセティックデータを生成.</p>
 <h3 id="ヘルプ">ヘルプ </h3>
@@ -262,7 +269,7 @@ SYNモードにおいては全て1.0が設定され, GRD, STD, MCMCモードに�
 </code></pre><hr>
 <h2 id="デモデータセットチュートリアル">デモデータセットチュートリアル </h2>
 <p>このチュートリアルでは, <code>demo/</code>ディレクトリ内のサンプルデータを使用してxTreLocを使用する手順を説明する.</p>
-<p><strong>重要</strong>: このチュートリアルのすべてのコマンドは, プロジェクトルートディレクトリ（<code>demo/</code>フォルダを含むディレクトリ）から実行してください. <code>config.json</code>内のパスはこのディレクトリを基準とした相対パスです. つまり, コマンドを実行する際のカレントディレクトリは, プロジェクトルート（<code>demo/</code>の1つ上のディレクトリ）である必要があります.</p>
+<p><strong>重要</strong>: このチュートリアルのすべてのコマンドは, プロジェクトルートディレクトリ（<code>demo/</code>フォルダを含むディレクトリ）から実行する必要がある. <code>config.json</code>内のパスはこのディレクトリを基準とした相対パス, つまりコマンドを実行する際のカレントディレクトリは, プロジェクトルート（<code>demo/</code>の1つ上のディレクトリ）である必要がある.</p>
 <h3 id="準備">準備 </h3>
 <ul>
 <li>
@@ -349,10 +356,14 @@ SYNモードにおいては全て1.0が設定され, GRD, STD, MCMCモードに�
 </ul>
 <h3 id="デモデータセット構造">デモデータセット構造 </h3>
 <pre data-role="codeBlock" data-info="sh" class="language-bash sh"><code><span class="token function">mkdir</span> <span class="token parameter variable">-p</span> ./demo/dat
-</code></pre><pre data-role="codeBlock" data-info="" class="language-text"><code>demo/
-├── catalog_ground_truth.csv  # SYNモード用の正解値カタログ
-├── station.tbl                # 観測点ファイル
-└── dat/                       # 入力.datファイル (SYNモードで生成)
+</code></pre><pre data-role="codeBlock" data-info="" class="language-text"><code>.
+├── config.json                    # CLIモードでのみ使用
+└── demo/
+    ├── catalog_ground_truth.csv   # SYNモード用の正解値カタログ
+    ├── station.tbl                # 観測点ファイル
+    ├── map_njt.plt                # 描画用のGnuplot Script
+    ├── map_njt.m                  # 描画用のMatlab Script
+    └── dat/                       # 入力.datファイル
 </code></pre><h3 id="ワークフロー概要">ワークフロー概要 </h3>
 <pre data-role="codeBlock" data-info="" class="language-text"><code>ステップ1: SYN → .datファイルの生成
   ↓
@@ -363,15 +374,8 @@ SYNモードにおいては全て1.0が設定され, GRD, STD, MCMCモードに�
 ステップ4: CLS → クラスタ化されたcatalog.csv, 走時差の差データ (triple_diff_*.bin)
   ↓
 ステップ5: TRD
-</code></pre><p>各震源決定モードには, 大まかには以下のような特徴がある:</p>
-<ul>
-<li><strong>GRDモード</strong>: 大まかな分布の推定や初期震源決定に適する</li>
-<li><strong>STDモード</strong>: 高速に良好な精度を出すが, 検測値の外れ値の影響を大きく受けるため, GRDモードの次に実行することが推奨される.</li>
-<li><strong>MCMCモード</strong>: 中程度の速度だが, 良好な決定精度.</li>
-<li><strong>TRDモード</strong>: ただし検測データ数が少ないイベントなど, 一部のデータは発散するためにデータ数が減る場合が多い. またインプットデータの震源決定精度が大きく影響. 計算が重いため, ブートストラップ法を用いた誤差推定は現時点で未実装.</li>
-</ul>
-<h3 id="ステップ1-シンセティックデータの生成">ステップ1: シンセティックデータの生成 </h3>
-<p><strong>目的</strong>: 正解値カタログからシンセティック走時差データを作成します.</p>
+</code></pre><h3 id="ステップ1-シンセティックデータの生成">ステップ1: シンセティックデータの生成 </h3>
+<p><strong>目的</strong>: 正解値カタログからシンセティック走時差データを作成.</p>
 <p><strong>GUIを使用</strong>:</p>
 <ol>
 <li>アプリケーションを起動: <code>java -jar build/libs/xTreLoc-GUI-1.0-SNAPSHOT.jar</code></li>
@@ -523,7 +527,7 @@ LM法に関するパラメータの変更は基本的に非推奨.</li>
 <img src="kdist.png" alt="K-Distance Graph"></p>
 <p><strong>CLIを使用</strong>:</p>
 <pre data-role="codeBlock" data-info="bash" class="language-bash bash"><code><span class="token function">java</span> <span class="token parameter variable">-jar</span> build/libs/xTreLoc-CLI-1.0-SNAPSHOT.jar CLS config.json
-</code></pre><p><strong>注意</strong>: クラスタIDは1から始まる連番であり, 0はクラスタに分類されないイベントに対応する. なお, カタログファイルの11列目 (cid) に整数値が記載されている場合にはそのクラスタIDが使用される (走時差の差データの計算のみが実行されるため, 事前に別手法でクラスタリングを行う場合に用いられる). クラスタ番号が付与されず, 該当列が空白の場合には<code>minPts</code>と<code>eps</code>をパラメータとするDBSCANクラスタリングが実行されます. ただし, <code>eps</code>が負の場合にはk-distance graph (に加え, Data Inclusion Rateが未指定の場合にはエルボー法) によって自動推定された<code>eps</code>によりクラスタリングされる.<br>
+</code></pre><p><strong>注意</strong>: クラスタIDは1から始まる連番であり, 0はクラスタに分類されないイベントに対応する. なお, カタログファイルの11列目 (cid) に整数値が記載されている場合にはそのクラスタIDが使用される (走時差の差データの計算のみが実行されるため, 事前に別手法でクラスタリングを行う場合に用いられる). クラスタ番号が付与されず, 該当列が空白の場合には<code>minPts</code>と<code>eps</code>をパラメータとするDBSCANクラスタリングが実行される. ただし, <code>eps</code>が負の場合にはk-distance graph (に加え, Data Inclusion Rateが未指定の場合にはエルボー法) によって自動推定された<code>eps</code>によりクラスタリングされる.<br>
 CLSモードはhypoDDにおける<code>dt.ct</code>に対応するファイルである<code>triple_diff_&lt;cid&gt;.bin</code>（バイナリ形式）を出力する. これを用いて相対震源決定を行う.</p>
 <p><strong>GUIを使用</strong>:</p>
 <ol>
@@ -767,16 +771,16 @@ Iteration Count, Distance Threshold, Damp. Factorの与え方はリストで与�
             <p>MCMCモード</p>
 
           </a></div><div class="md-toc-link-wrapper" style="padding:0;;display:list-item;list-style:square;margin-left:42px">
-          <a href="#clsモード-空間クラスタリング" class="md-toc-link">
-            <p>CLSモード (空間クラスタリング)</p>
+          <a href="#clsモード" class="md-toc-link">
+            <p>CLSモード</p>
 
           </a></div><div class="md-toc-link-wrapper" style="padding:0;;display:list-item;list-style:square;margin-left:42px">
           <a href="#trdモード" class="md-toc-link">
             <p>TRDモード</p>
 
           </a></div><div class="md-toc-link-wrapper" style="padding:0;;display:list-item;list-style:square;margin-left:42px">
-          <a href="#synモード-シンセティックテストデータ生成" class="md-toc-link">
-            <p>SYNモード (シンセティックテストデータ生成)</p>
+          <a href="#synモード" class="md-toc-link">
+            <p>SYNモード</p>
 
           </a></div>
         </div>

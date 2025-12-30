@@ -42,6 +42,38 @@ public class HypoStationPairDiff extends SolverBase {
     private double orthoTolerance = 1e-6;
     private int maxEvaluations = 1000;
     private int maxIterations = 1000;
+    
+    // Cache for partial derivative matrix (for same initial value in outlier removal loop)
+    private static class PartialDerivativeCache {
+        double lon;
+        double lat;
+        double dep;
+        double[][] dtdr;
+        double[] trvTime;
+        int[] usedIdx;
+        
+        boolean matches(double lon, double lat, double dep, int[] usedIdx) {
+            if (this.dtdr == null || this.trvTime == null) {
+                return false;
+            }
+            if (this.usedIdx == null || this.usedIdx.length != usedIdx.length) {
+                return false;
+            }
+            if (Math.abs(this.lon - lon) > 1e-9 || 
+                Math.abs(this.lat - lat) > 1e-9 || 
+                Math.abs(this.dep - dep) > 1e-6) {
+                return false;
+            }
+            for (int i = 0; i < usedIdx.length; i++) {
+                if (this.usedIdx[i] != usedIdx[i]) {
+                    return false;
+                }
+            }
+            return true;
+        }
+    }
+    
+    private PartialDerivativeCache partialDerivativeCache = null;
 
     /**
      * Constructs a HypoStationPairDiff object with the specified configuration.
@@ -135,6 +167,9 @@ public class HypoStationPairDiff extends SolverBase {
         boolean[] isOutlier = new boolean[numPhase];
         int nIter = 0;
         int nEval = 0;
+        
+        partialDerivativeCache = null;
+        
         for (int n = 0; n < 10; n++) {
             LeastSquaresProblem problem = new LeastSquaresBuilder()
                     .start(hypvec)
@@ -314,11 +349,32 @@ public class HypoStationPairDiff extends SolverBase {
                 RealMatrix jacobian = new Array2DRowRealMatrix(lagTable.length, 3);
 
                 try {
-                    Point point = new Point("", hypoVector.getEntry(1), hypoVector.getEntry(0), hypoVector.getEntry(2),
-                        0, 0, 0, 0, "", "", -999);
-                    Object[] tmp = partialDerivativeMatrix(stationTable, usedIdx, point);
-                    double[][] dtdr = (double[][]) tmp[0];
-                    double[] trvTime = (double[]) tmp[1];
+                    double currentLon = hypoVector.getEntry(0);
+                    double currentLat = hypoVector.getEntry(1);
+                    double currentDep = hypoVector.getEntry(2);
+                    
+                    double[][] dtdr;
+                    double[] trvTime;
+                    
+                    if (partialDerivativeCache != null && 
+                        partialDerivativeCache.matches(currentLon, currentLat, currentDep, usedIdx)) {
+                        dtdr = partialDerivativeCache.dtdr;
+                        trvTime = partialDerivativeCache.trvTime;
+                    } else {
+                        Point point = new Point("", currentLat, currentLon, currentDep,
+                            0, 0, 0, 0, "", "", -999);
+                        Object[] tmp = partialDerivativeMatrix(stationTable, usedIdx, point);
+                        dtdr = (double[][]) tmp[0];
+                        trvTime = (double[]) tmp[1];
+                        
+                        partialDerivativeCache = new PartialDerivativeCache();
+                        partialDerivativeCache.lon = currentLon;
+                        partialDerivativeCache.lat = currentLat;
+                        partialDerivativeCache.dep = currentDep;
+                        partialDerivativeCache.dtdr = dtdr;
+                        partialDerivativeCache.trvTime = trvTime;
+                        partialDerivativeCache.usedIdx = usedIdx.clone();
+                    }
 
                     for (int i = 0; i < lagTable.length; i++) {
                         int nstnk = (int) lagTable[i][0];

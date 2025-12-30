@@ -32,9 +32,74 @@ public class HypoUtils {
     /** Conversion factor from degrees to kilometers (approximately 111.32 km per degree) */
     private static final double DEG2KM = 111.32;
     
+    /** Distance threshold for cache reuse (0.01 degrees ≈ 1.1 km) */
+    private static final double CACHE_DISTANCE_THRESHOLD = 0.01;
+    
     private final VelocityModel velMod;
     private TauModel tauMod;
     private final double threshold;
+    
+    private static class TravelTimeCacheEntry {
+        double lon;
+        double lat;
+        double dep;
+        int[] usedIdx;
+        double[] trvTime;
+        
+        boolean matches(double lon, double lat, double dep, int[] usedIdx) {
+            if (this.trvTime == null || this.usedIdx == null) {
+                return false;
+            }
+            if (this.usedIdx.length != usedIdx.length) {
+                return false;
+            }
+            GeodesicData g = Geodesic.WGS84.Inverse(this.lat, this.lon, lat, lon);
+            double distanceDeg = Math.toDegrees(g.s12 / 1000.0 / 6371.0);
+            double depthDiff = Math.abs(this.dep - dep);
+            if (distanceDeg > CACHE_DISTANCE_THRESHOLD || depthDiff > 0.1) {
+                return false;
+            }
+            for (int i = 0; i < usedIdx.length; i++) {
+                if (this.usedIdx[i] != usedIdx[i]) {
+                    return false;
+                }
+            }
+            return true;
+        }
+    }
+    
+    private static class PartialDerivativeCacheEntry {
+        double lon;
+        double lat;
+        double dep;
+        int[] usedIdx;
+        double[][] dtdr;
+        double[] trvTime;
+        
+        boolean matches(double lon, double lat, double dep, int[] usedIdx) {
+            if (this.dtdr == null || this.trvTime == null || this.usedIdx == null) {
+                return false;
+            }
+            if (this.usedIdx.length != usedIdx.length) {
+                return false;
+            }
+            GeodesicData g = Geodesic.WGS84.Inverse(this.lat, this.lon, lat, lon);
+            double distanceDeg = Math.toDegrees(g.s12 / 1000.0 / 6371.0);
+            double depthDiff = Math.abs(this.dep - dep);
+            if (distanceDeg > CACHE_DISTANCE_THRESHOLD || depthDiff > 0.1) {
+                return false;
+            }
+            for (int i = 0; i < usedIdx.length; i++) {
+                if (this.usedIdx[i] != usedIdx[i]) {
+                    return false;
+                }
+            }
+            return true;
+        }
+    }
+    
+    private TravelTimeCacheEntry travelTimeCache = null;
+    private PartialDerivativeCacheEntry partialDerivativeCache = null;
 
     /**
      * Constructs a HypoUtils object with the specified configuration.
@@ -110,6 +175,10 @@ public class HypoUtils {
         double hypLon = point.getLon();
         double hypLat = point.getLat();
         double hypDep = point.getDep();
+        
+        if (travelTimeCache != null && travelTimeCache.matches(hypLon, hypLat, hypDep, idxList)) {
+            return travelTimeCache.trvTime.clone();
+        }
 
         TauP_Time taup_time = new TauP_Time();
         taup_time.setTauModel(tauMod);
@@ -152,6 +221,14 @@ public class HypoUtils {
                 trvTime[i] = Double.MAX_VALUE;
             }
         }
+        
+        travelTimeCache = new TravelTimeCacheEntry();
+        travelTimeCache.lon = hypLon;
+        travelTimeCache.lat = hypLat;
+        travelTimeCache.dep = hypDep;
+        travelTimeCache.usedIdx = idxList.clone();
+        travelTimeCache.trvTime = trvTime.clone();
+        
         return trvTime;
     }
 
@@ -190,6 +267,14 @@ public class HypoUtils {
         double hypLon = point.getLon();
         double hypLat = point.getLat();
         double hypDep = point.getDep();
+        
+        if (partialDerivativeCache != null && partialDerivativeCache.matches(hypLon, hypLat, hypDep, idxList)) {
+            double[][] dtdrCopy = new double[partialDerivativeCache.dtdr.length][];
+            for (int i = 0; i < partialDerivativeCache.dtdr.length; i++) {
+                dtdrCopy[i] = partialDerivativeCache.dtdr[i].clone();
+            }
+            return new Object[]{dtdrCopy, partialDerivativeCache.trvTime.clone()};
+        }
 
         int layerNumber = velMod.layerNumberBelow(hypDep);
         VelocityLayer velocityLayer = velMod.getVelocityLayer(layerNumber);
@@ -262,7 +347,20 @@ public class HypoUtils {
 
             trvTime[i] = fastestArr.getTime() + stnTable[i][4];
         }
-        return new Object[]{dtdr, trvTime};
+        
+        partialDerivativeCache = new PartialDerivativeCacheEntry();
+        partialDerivativeCache.lon = hypLon;
+        partialDerivativeCache.lat = hypLat;
+        partialDerivativeCache.dep = hypDep;
+        partialDerivativeCache.usedIdx = idxList.clone();
+        partialDerivativeCache.dtdr = dtdr;
+        partialDerivativeCache.trvTime = trvTime;
+        
+        double[][] dtdrCopy = new double[dtdr.length][];
+        for (int i = 0; i < dtdr.length; i++) {
+            dtdrCopy[i] = dtdr[i].clone();
+        }
+        return new Object[]{dtdrCopy, trvTime.clone()};
     }
 
     /**

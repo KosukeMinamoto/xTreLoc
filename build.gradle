@@ -59,7 +59,6 @@ dependencies {
     implementation 'org.locationtech.jts:jts-core:1.19.0'
 }
 
-// GUI用JAR
 jar {
     manifest {
         attributes(
@@ -67,21 +66,18 @@ jar {
                 'Implementation-Version': project.version
         )
     }
-    // Fat JARを作成（すべての依存関係を含む）
     from {
         configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
     }
     // Use INCLUDE for META-INF/services to merge function factory registrations
     // But exclude signature files to avoid SecurityException
     duplicatesStrategy = DuplicatesStrategy.INCLUDE
-    // 署名ファイルを除外（SecurityExceptionを防ぐため）
     exclude 'META-INF/*.SF'
     exclude 'META-INF/*.DSA'
     exclude 'META-INF/*.RSA'
     archiveBaseName = 'xTreLoc-GUI'
 }
 
-// CLI用JAR
 task cliJar(type: Jar) {
     group = 'build'
     description = 'Creates a CLI-only JAR file'
@@ -96,7 +92,6 @@ task cliJar(type: Jar) {
     }
     from sourceSets.main.output
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
-    // 署名ファイルを除外（SecurityExceptionを防ぐため）
     exclude 'META-INF/*.SF'
     exclude 'META-INF/*.DSA'
     exclude 'META-INF/*.RSA'
@@ -115,7 +110,6 @@ test {
     useJUnit()
 }
 
-// CLI版を実行するためのタスク
 task runCLI(type: JavaExec) {
     group = 'application'
     description = 'Run the CLI version of xTreLoc'
@@ -124,13 +118,12 @@ task runCLI(type: JavaExec) {
     args = project.hasProperty('cliArgs') ? project.cliArgs.tokenize() : ['--help']
 }
 
-// PNGから.icnsファイルを生成するタスク（macOS用）
 task createIcons {
     group = 'distribution'
     description = 'Creates .icns file from PNG for macOS app icon'
     onlyIf { System.getProperty('os.name').toLowerCase().contains('mac') }
     
-    def pngFile = "${project.projectDir}/docs/logo.png"
+    def pngFile = "${project.projectDir}/src/main/resources/images/logo.png"
     def iconsetDir = "${project.buildDir}/logo.iconset"
     def icnsFile = "${project.buildDir}/logo.icns"
     
@@ -140,14 +133,12 @@ task createIcons {
             throw new GradleException("Logo file not found: ${pngFile}")
         }
         
-        // iconsetディレクトリを作成
         def iconset = new File(iconsetDir)
         if (iconset.exists()) {
             iconset.deleteDir()
         }
         iconset.mkdirs()
         
-        // 必要なサイズのアイコンを生成（macOSの.iconset形式）
         def iconSizes = [
             [16, 'icon_16x16.png', 'icon_16x16@2x.png'],
             [32, 'icon_32x32.png', 'icon_32x32@2x.png'],
@@ -162,14 +153,12 @@ task createIcons {
             def name2x = sizeInfo[2]
             def size2x = size * 2
             
-            // 1xサイズ
             def proc1x = new ProcessBuilder('sips', '-z', size.toString(), size.toString(), pngFile, '--out', "${iconsetDir}/${name1x}").start()
             proc1x.waitFor()
             if (proc1x.exitValue() != 0) {
                 throw new GradleException("Failed to create icon ${name1x}")
             }
             
-            // 2xサイズ
             def proc2x = new ProcessBuilder('sips', '-z', size2x.toString(), size2x.toString(), pngFile, '--out', "${iconsetDir}/${name2x}").start()
             proc2x.waitFor()
             if (proc2x.exitValue() != 0) {
@@ -177,19 +166,16 @@ task createIcons {
             }
         }
         
-        // iconutilで.icnsファイルを生成
         def procIconutil = new ProcessBuilder('iconutil', '-c', 'icns', iconsetDir, '-o', icnsFile).start()
         procIconutil.waitFor()
         if (procIconutil.exitValue() != 0) {
             throw new GradleException("Failed to create .icns file")
         }
         
-        // iconsetディレクトリを削除
         iconset.deleteDir()
     }
 }
 
-// macOS用.appバンドルを作成するタスク
 task createApp(type: Exec) {
     group = 'distribution'
     description = 'Creates a macOS .app bundle using jpackage'
@@ -198,10 +184,9 @@ task createApp(type: Exec) {
     def jpackageExec = "${System.getProperty('java.home')}/bin/jpackage"
     def jarFile = "${project.buildDir}/libs/${project.jar.archiveBaseName.get()}-${project.version}.jar"
     def appName = 'xTreLoc'
-    def pngIconFile = "${project.projectDir}/docs/logo.png"
+    def pngIconFile = "${project.projectDir}/src/main/resources/images/logo.png"
     def icnsIconFile = "${project.buildDir}/logo.icns"
     
-    // jpackageが利用可能かチェックし、コマンドラインを構築
     doFirst {
         def jpackageFile = new File(jpackageExec)
         if (!jpackageFile.exists()) {
@@ -213,15 +198,14 @@ task createApp(type: Exec) {
             throw new GradleException("JAR file not found: ${jarFile}. Please run 'gradle jar' first.")
         }
         
-        // 既存の.appバンドルを削除
         def existingApp = new File("${project.buildDir}/dist/${appName}.app")
         if (existingApp.exists()) {
             existingApp.deleteDir()
         }
         
-        // jpackage用の有効なバージョン番号を生成（-SNAPSHOTを削除し、3つの数字形式に変換）
+        // Generate valid version number for jpackage (remove -SNAPSHOT and convert to three-digit format)
         def appVersion = project.version.toString().replace('-SNAPSHOT', '')
-        // バージョンが2つの数字のみの場合は、3つ目の数字を追加
+        // Add third digit if version has only two digits
         if (appVersion.split('\\.').length == 2) {
             appVersion = "${appVersion}.0"
         }
@@ -241,14 +225,13 @@ task createApp(type: Exec) {
             '--copyright', 'Copyright © 2024 xTreLoc'
         ]
         
-        // アイコンを設定（.icnsファイルが存在する場合は優先、なければPNGを使用）
+        // Set icon (prefer .icns file if exists, otherwise use PNG)
         def iconToUse = null
         if (System.getProperty('os.name').toLowerCase().contains('mac')) {
             def icnsFile = new File(icnsIconFile)
             if (icnsFile.exists()) {
                 iconToUse = icnsIconFile
             } else {
-                // .icnsファイルが存在しない場合はPNGを使用
                 def pngFile = new File(pngIconFile)
                 if (pngFile.exists()) {
                     iconToUse = pngIconFile
@@ -265,7 +248,6 @@ task createApp(type: Exec) {
             cmd.addAll(['--icon', iconToUse])
         }
         
-        // macOS固有のオプション
         if (System.getProperty('os.name').toLowerCase().contains('mac')) {
             cmd.addAll([
                 '--mac-package-identifier', 'com.treloc.xtreloc',
@@ -277,7 +259,6 @@ task createApp(type: Exec) {
     }
 }
 
-// DMGファイルを作成するタスク（macOS用）
 task createDmg(type: Exec) {
     group = 'distribution'
     description = 'Creates a macOS .dmg installer using jpackage'
@@ -286,7 +267,7 @@ task createDmg(type: Exec) {
     def jpackageExec = "${System.getProperty('java.home')}/bin/jpackage"
     def jarFile = "${project.buildDir}/libs/${project.jar.archiveBaseName.get()}-${project.version}.jar"
     def appName = 'xTreLoc'
-    def pngIconFile = "${project.projectDir}/docs/logo.png"
+    def pngIconFile = "${project.projectDir}/src/main/resources/images/logo.png"
     def icnsIconFile = "${project.buildDir}/logo.icns"
     
     doFirst {
@@ -304,15 +285,14 @@ task createDmg(type: Exec) {
             throw new GradleException("JAR file not found: ${jarFile}. Please run 'gradle jar' first.")
         }
         
-        // 既存のDMGファイルを削除
         def existingDmg = new File("${project.buildDir}/dist/${appName}-${project.version.toString().replace('-SNAPSHOT', '')}.dmg")
         if (existingDmg.exists()) {
             existingDmg.delete()
         }
         
-        // jpackage用の有効なバージョン番号を生成（-SNAPSHOTを削除し、3つの数字形式に変換）
+        // Generate valid version number for jpackage (remove -SNAPSHOT and convert to three-digit format)
         def appVersion = project.version.toString().replace('-SNAPSHOT', '')
-        // バージョンが2つの数字のみの場合は、3つ目の数字を追加
+        // Add third digit if version has only two digits
         if (appVersion.split('\\.').length == 2) {
             appVersion = "${appVersion}.0"
         }
@@ -334,13 +314,12 @@ task createDmg(type: Exec) {
             '--mac-package-name', appName
         ]
         
-        // アイコンを設定（.icnsファイルが存在する場合は優先、なければPNGを使用）
+        // Set icon (prefer .icns file if exists, otherwise use PNG)
         def iconToUse = null
         def icnsFile = new File(icnsIconFile)
         if (icnsFile.exists()) {
             iconToUse = icnsIconFile
         } else {
-            // .icnsファイルが存在しない場合はPNGを使用
             def pngFile = new File(pngIconFile)
             if (pngFile.exists()) {
                 iconToUse = pngIconFile

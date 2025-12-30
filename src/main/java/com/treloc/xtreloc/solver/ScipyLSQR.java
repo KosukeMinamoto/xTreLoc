@@ -72,29 +72,52 @@ public class ScipyLSQR {
 
 	public static class SparseLinearOperator {
 		private final OpenMapRealMatrix matrix;
+		private final COOSparseMatrix cooMatrix;
 
 		public SparseLinearOperator(OpenMapRealMatrix matrix) {
 			this.matrix = matrix;
+			this.cooMatrix = null;
+		}
+		
+		public SparseLinearOperator(COOSparseMatrix cooMatrix) {
+			this.matrix = null;
+			this.cooMatrix = cooMatrix;
 		}
 
 		public int getRowDimension() {
+			if (cooMatrix != null) {
+				return cooMatrix.getRowDimension();
+			}
 			return matrix.getRowDimension();
 		}
 
 		public int getColumnDimension() {
+			if (cooMatrix != null) {
+				return cooMatrix.getColumnDimension();
+			}
 			return matrix.getColumnDimension();
 		}
 
 		public double[] matvec(double[] x) {
+			if (cooMatrix != null) {
+				return cooMatrix.operate(x);
+			}
 			return matrix.operate(x);
 		}
 
 		public double[] rmatvec(double[] x) {
+			if (cooMatrix != null) {
+				return cooMatrix.transposeOperate(x);
+			}
 			return matrix.transpose().operate(x);
 		}
 	}
 
 	public static SparseLinearOperator convertToSparseOperator(OpenMapRealMatrix A) {
+		return new SparseLinearOperator(A);
+	}
+	
+	public static SparseLinearOperator convertToSparseOperator(COOSparseMatrix A) {
 		return new SparseLinearOperator(A);
 	}
 
@@ -269,6 +292,43 @@ public class ScipyLSQR {
 	public static LSQRResult lsqr(OpenMapRealMatrix A, double[] b, double damp, double atol, double btol,
 			double conlim, Integer iter_lim, boolean show, boolean calc_var, double[] x0, java.util.function.Consumer<String> logConsumer) {
 		SparseLinearOperator Aop = convertToSparseOperator(A);
+		return lsqrInternal(Aop, b, damp, atol, btol, conlim, iter_lim, show, calc_var, x0, logConsumer);
+	}
+	
+	/**
+	 * LSQR method overload for COOSparseMatrix.
+	 * 
+	 * @param A COO format sparse matrix
+	 * @param b right-hand side vector
+	 * @param damp damping coefficient
+	 * @param atol stopping tolerance
+	 * @param btol stopping tolerance
+	 * @param conlim additional stopping tolerance
+	 * @param iter_lim maximum number of iterations
+	 * @param show whether to display log
+	 * @param calc_var whether to calculate variance
+	 * @param x0 initial value
+	 * @return LSQRResult
+	 */
+	public static LSQRResult lsqr(COOSparseMatrix A, double[] b, double damp, double atol, double btol,
+			double conlim, Integer iter_lim, boolean show, boolean calc_var, double[] x0) {
+		return lsqr(A, b, damp, atol, btol, conlim, iter_lim, show, calc_var, x0, null);
+	}
+	
+	/**
+	 * LSQR method overload for COOSparseMatrix with log consumer.
+	 */
+	public static LSQRResult lsqr(COOSparseMatrix A, double[] b, double damp, double atol, double btol,
+			double conlim, Integer iter_lim, boolean show, boolean calc_var, double[] x0, java.util.function.Consumer<String> logConsumer) {
+		SparseLinearOperator Aop = convertToSparseOperator(A);
+		return lsqrInternal(Aop, b, damp, atol, btol, conlim, iter_lim, show, calc_var, x0, logConsumer);
+	}
+	
+	/**
+	 * Internal implementation of LSQR algorithm (common processing).
+	 */
+	private static LSQRResult lsqrInternal(SparseLinearOperator Aop, double[] b, double damp, double atol, double btol,
+			double conlim, Integer iter_lim, boolean show, boolean calc_var, double[] x0, java.util.function.Consumer<String> logConsumer) {
 		int m = Aop.getRowDimension();
 		int n = Aop.getColumnDimension();
 		if (iter_lim == null) {

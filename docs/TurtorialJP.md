@@ -87,7 +87,7 @@ cd xTreLoc
 ./gradlew build cliJar
 ```
 
-ビルドされたJARファイルは`build/libs/`に配置されます: 
+ビルドされたJARファイルは`build/libs/`に配置される: 
 - `xTreLoc-GUI-1.0-SNAPSHOT.jar` (GUI版)
 - `xTreLoc-CLI-1.0-SNAPSHOT.jar` (CLI版)
 
@@ -102,7 +102,7 @@ cd xTreLoc
 mvn clean package
 ```
 
-ビルドされたJARファイルは`target/`に配置されます: 
+ビルドされたJARファイルは`target/`に配置される: 
 - `xTreLoc-GUI-1.0-SNAPSHOT.jar` (GUI版)
 - `xTreLoc-CLI-1.0-SNAPSHOT.jar` (CLI版)
 
@@ -273,6 +273,12 @@ java -jar xTreLoc-CLI-1.0-SNAPSHOT.jar <MODE> [config.json]
 
 ### 利用可能なモード
 
+各震源決定モードには, 大まかには以下のような特徴がある:
+- **GRDモード**: 中程度の速度だが, 大まかな分布の推定や初期震源決定に適する.
+- **STDモード**: 高速に良好な精度を出すが, 初期値依存性が高いため, GRDモードの次に実行することが推奨される.
+- **MCMCモード**: 計算に時間を要するが, 良好な決定精度. 
+- **TRDモード**: インプットデータの震源決定精度が大きく影響するため, 上記のモードを実行後の再決定手法として用いられる. また一部の解は発散するためにデータ数が減る場合が多い. なお計算が重いため, ブートストラップ法を用いた誤差推定は現時点で未実装. 
+
 #### GRDモード (グリッドサーチ)
 
 ```bash
@@ -287,7 +293,7 @@ java -jar xTreLoc-CLI-1.0-SNAPSHOT.jar GRD config.json
 java -jar xTreLoc-CLI-1.0-SNAPSHOT.jar STD config.json
 ```
 
-すべての`.dat`ファイルに対してStation-pair Double Difference法を適用します.
+すべての`.dat`ファイルに対してStation-pair Double Difference法を適用.
 
 #### MCMCモード
 
@@ -297,7 +303,7 @@ java -jar xTreLoc-CLI-1.0-SNAPSHOT.jar MCMC config.json
 
 すべての`.dat`ファイルに対してMCMCを用いた震源決定を実行. 
 
-#### CLSモード (空間クラスタリング)
+#### CLSモード
 
 ```bash
 java -jar xTreLoc-CLI-1.0-SNAPSHOT.jar CLS config.json
@@ -313,7 +319,7 @@ java -jar xTreLoc-CLI-1.0-SNAPSHOT.jar TRD config.json
 
 Guo & Zhang (2016) の方法を使用して, カタログファイルに対してTriple-Difference法を実行. CLSモードによるバイナリファイルが必要.
 
-#### SYNモード (シンセティックテストデータ生成)
+#### SYNモード
 
 ```bash
 java -jar xTreLoc-CLI-1.0-SNAPSHOT.jar SYN config.json
@@ -339,7 +345,7 @@ java -jar xTreLoc-CLI-1.0-SNAPSHOT.jar
 
 このチュートリアルでは, `demo/`ディレクトリ内のサンプルデータを使用してxTreLocを使用する手順を説明する.
 
-**重要**: このチュートリアルのすべてのコマンドは, プロジェクトルートディレクトリ（`demo/`フォルダを含むディレクトリ）から実行してください. `config.json`内のパスはこのディレクトリを基準とした相対パスです. つまり, コマンドを実行する際のカレントディレクトリは, プロジェクトルート（`demo/`の1つ上のディレクトリ）である必要があります.
+**重要**: このチュートリアルのすべてのコマンドは, プロジェクトルートディレクトリ（`demo/`フォルダを含むディレクトリ）から実行する必要がある. `config.json`内のパスはこのディレクトリを基準とした相対パス, つまりコマンドを実行する際のカレントディレクトリは, プロジェクトルート（`demo/`の1つ上のディレクトリ）である必要がある.
 
 ### 準備
 
@@ -421,10 +427,14 @@ mkdir -p ./demo/dat
 ```
 
 ```
-demo/
-├── catalog_ground_truth.csv  # SYNモード用の正解値カタログ
-├── station.tbl                # 観測点ファイル
-└── dat/                       # 入力.datファイル (SYNモードで生成)
+.
+├── config.json                    # CLIモードでのみ使用
+└── demo/
+    ├── catalog_ground_truth.csv   # SYNモード用の正解値カタログ
+    ├── station.tbl                # 観測点ファイル
+    ├── map_njt.plt                # 描画用のGnuplot Script
+    ├── map_njt.m                  # 描画用のMatlab Script
+    └── dat/                       # 入力.datファイル
 ```
 
 ### ワークフロー概要
@@ -441,15 +451,9 @@ demo/
 ステップ5: TRD
 ```
 
-各震源決定モードには, 大まかには以下のような特徴がある:
-- **GRDモード**: 大まかな分布の推定や初期震源決定に適する
-- **STDモード**: 高速に良好な精度を出すが, 検測値の外れ値の影響を大きく受けるため, GRDモードの次に実行することが推奨される.
-- **MCMCモード**: 中程度の速度だが, 良好な決定精度. 
-- **TRDモード**: ただし検測データ数が少ないイベントなど, 一部のデータは発散するためにデータ数が減る場合が多い. またインプットデータの震源決定精度が大きく影響. 計算が重いため, ブートストラップ法を用いた誤差推定は現時点で未実装. 
-
 ### ステップ1: シンセティックデータの生成
 
-**目的**: 正解値カタログからシンセティック走時差データを作成します. 
+**目的**: 正解値カタログからシンセティック走時差データを作成. 
 
 **GUIを使用**: 
 1. アプリケーションを起動: `java -jar build/libs/xTreLoc-GUI-1.0-SNAPSHOT.jar`
@@ -576,7 +580,7 @@ CLSモードによるクラスタリングと, 震源ペア間における走時
 java -jar build/libs/xTreLoc-CLI-1.0-SNAPSHOT.jar CLS config.json
 ```
 
-**注意**: クラスタIDは1から始まる連番であり, 0はクラスタに分類されないイベントに対応する. なお, カタログファイルの11列目 (cid) に整数値が記載されている場合にはそのクラスタIDが使用される (走時差の差データの計算のみが実行されるため, 事前に別手法でクラスタリングを行う場合に用いられる). クラスタ番号が付与されず, 該当列が空白の場合には`minPts`と`eps`をパラメータとするDBSCANクラスタリングが実行されます. ただし, `eps`が負の場合にはk-distance graph (に加え, Data Inclusion Rateが未指定の場合にはエルボー法) によって自動推定された`eps`によりクラスタリングされる. 
+**注意**: クラスタIDは1から始まる連番であり, 0はクラスタに分類されないイベントに対応する. なお, カタログファイルの11列目 (cid) に整数値が記載されている場合にはそのクラスタIDが使用される (走時差の差データの計算のみが実行されるため, 事前に別手法でクラスタリングを行う場合に用いられる). クラスタ番号が付与されず, 該当列が空白の場合には`minPts`と`eps`をパラメータとするDBSCANクラスタリングが実行される. ただし, `eps`が負の場合にはk-distance graph (に加え, Data Inclusion Rateが未指定の場合にはエルボー法) によって自動推定された`eps`によりクラスタリングされる. 
 CLSモードはhypoDDにおける`dt.ct`に対応するファイルである`triple_diff_<cid>.bin`（バイナリ形式）を出力する. これを用いて相対震源決定を行う. 
 
 **GUIを使用**: 

@@ -37,16 +37,16 @@ public class HypoMCMC extends SolverBase {
         // Load MCMC parameters from config
         JsonNode mcmcSolver = appConfig.solver != null ? appConfig.solver.get("MCMC") : null;
         if (mcmcSolver != null) {
-            this.nSamples = mcmcSolver.has("nSamples") ? mcmcSolver.get("nSamples").asInt() : 10000;
-            this.burnIn = mcmcSolver.has("burnIn") ? mcmcSolver.get("burnIn").asInt() : 2000;
+            this.nSamples = mcmcSolver.has("nSamples") ? mcmcSolver.get("nSamples").asInt() : 1000;
+            this.burnIn = mcmcSolver.has("burnIn") ? mcmcSolver.get("burnIn").asInt() : 200;
             this.stepSize = mcmcSolver.has("stepSize") ? mcmcSolver.get("stepSize").asDouble() : 0.1;
             // Depth step size in km (default: 1.0 km, which is approximately stepSize in degrees converted to km)
             this.stepSizeDepth = mcmcSolver.has("stepSizeDepth") ? mcmcSolver.get("stepSizeDepth").asDouble() : 1.0;
             this.temperature = mcmcSolver.has("temperature") ? mcmcSolver.get("temperature").asDouble() : 1.0;
         } else {
             // Default values
-            this.nSamples = 10000;
-            this.burnIn = 2000;
+            this.nSamples = 1000;
+            this.burnIn = 200;
             this.stepSize = 0.1;
             this.stepSizeDepth = 1.0; // Default depth step size: 1.0 km
             this.temperature = 1.0;

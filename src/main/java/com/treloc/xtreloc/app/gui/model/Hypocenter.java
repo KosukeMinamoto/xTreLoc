@@ -5,13 +5,13 @@ public class Hypocenter {
     public final double lon;
     public final double depth;
     public final String time;
-    public final double xerr; // x方向誤差 (km)
-    public final double yerr; // y方向誤差 (km)
-    public final double zerr; // z方向誤差 (km)
-    public final double rms;  // RMS残差
-    public final Integer clusterId; // クラスタ番号（オプショナル）
-    public final String datFilePath; // datファイルの相対パス（オプショナル）
-    public final String type; // タイプ（SYN, STD, GRD, ERRなど）
+    public final double xerr; // x error (km)
+    public final double yerr; // y error (km)
+    public final double zerr; // z error (km)
+    public final double rms;  // RMS residual
+    public final Integer clusterId; // cluster number (optional)
+    public final String datFilePath; // relative path of the dat file (optional)
+    public final String type; // type (SYN, STD, GRD, ERR etc.)
 
     public Hypocenter(String time, double lat, double lon, double depth) {
         this(time, lat, lon, depth, 0.0, 0.0, 0.0, 0.0, null, null, null);

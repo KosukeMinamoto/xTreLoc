@@ -219,6 +219,15 @@ public class StyleFactory {
         return sb.createStyle(sb.createLineSymbolizer(stroke));
     }
     
+    public static Style createGraticuleStyle() {
+        StyleBuilder sb = new StyleBuilder();
+        org.geotools.api.style.Stroke stroke = sb.createStroke();
+        stroke.setColor(sb.literalExpression(new Color(200, 200, 200, 150)));
+        stroke.setWidth(sb.literalExpression(0.8));
+        stroke.setOpacity(sb.literalExpression(0.6));
+        return sb.createStyle(sb.createLineSymbolizer(stroke));
+    }
+    
     /**
      * Error bar style (black outline only, no fill).
      */

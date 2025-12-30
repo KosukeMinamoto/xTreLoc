@@ -39,7 +39,7 @@ public class ControlPanel extends JPanel {
         setLayout(new BorderLayout());
         setBorder(new TitledBorder("Execution Settings"));
         
-        // モード選択パネル
+        // Mode selection panel
         JPanel modePanel = new JPanel(new GridBagLayout());
         GridBagConstraints modeGbc = new GridBagConstraints();
         modeGbc.insets = new Insets(5, 5, 5, 5);
@@ -52,16 +52,16 @@ public class ControlPanel extends JPanel {
         modeCombo.addActionListener(e -> updateParameterFields());
         modePanel.add(modeCombo, modeGbc);
         
-        // TauPモデル選択
+        // TauP model selection
         modeGbc.gridx = 0; modeGbc.gridy = 1;
         modePanel.add(new JLabel("TauP Model:"), modeGbc);
         modeGbc.gridx = 1;
-        // TauPの標準モデル
+        // Standard TauP models
         taupModelCombo = new JComboBox<>(new String[]{"prem", "iasp91", "ak135", "ak135f"});
-        taupModelCombo.setSelectedItem("prem"); // デフォルト
+        taupModelCombo.setSelectedItem("prem"); // Default
         modePanel.add(taupModelCombo, modeGbc);
         
-        // パラメータパネル
+        // Parameter panel
         JPanel paramPanel = new JPanel(new GridBagLayout());
         GridBagConstraints gbc = new GridBagConstraints();
         gbc.insets = new Insets(5, 5, 5, 5);
@@ -88,7 +88,7 @@ public class ControlPanel extends JPanel {
         hypBottomField = new JTextField("100.0", 10);
         paramPanel.add(hypBottomField, gbc);
         
-        // ボタンパネル
+        // Button panel
         JPanel buttonPanel = new JPanel(new FlowLayout());
         executeButton = new JButton("Execute");
         executeButton.addActionListener(e -> executeSolver());
@@ -98,7 +98,7 @@ public class ControlPanel extends JPanel {
         exportCsvButton.addActionListener(e -> exportToCsv());
         buttonPanel.add(exportCsvButton);
         
-        // レイアウト
+        // Layout
         JPanel topPanel = new JPanel(new BorderLayout());
         topPanel.add(modePanel, BorderLayout.NORTH);
         topPanel.add(paramPanel, BorderLayout.CENTER);
@@ -110,8 +110,8 @@ public class ControlPanel extends JPanel {
     }
     
     private void updateParameterFields() {
-        // モードに応じてパラメータフィールドを更新
-        // 現在はGRDモードのみ対応
+        // Update parameter fields according to the mode
+        // Currently only GRD mode is supported
     }
     
     public void setConfig(AppConfig config) {
@@ -131,14 +131,14 @@ public class ControlPanel extends JPanel {
     private void executeSolver() {
         String mode = (String) modeCombo.getSelectedItem();
         
-        // TauPモデルを選択してconfigを更新
+        // Select TauP model and update config
         String selectedModel = (String) taupModelCombo.getSelectedItem();
         if (config != null && selectedModel != null) {
-            // 選択されたモデル名でtaupFileを更新（拡張子なしでモデル名のみ）
+            // Update taupFile with the selected model name (without extension)
             config.taupFile = selectedModel;
         }
         
-        // 入力ディレクトリ選択（走時差データ）
+        // Select input directory (travel time difference data)
         File inputDir = com.treloc.xtreloc.app.gui.util.DirectoryChooserHelper.selectDirectory(
             this, "Select Directory for Travel Time Difference Data");
         
@@ -146,7 +146,7 @@ public class ControlPanel extends JPanel {
             return;
         }
         
-        // ディレクトリ内の全ての.datファイルを取得
+        // Get all .dat files in the directory
         java.util.List<File> datFiles = findDatFiles(inputDir);
         if (datFiles.isEmpty()) {
             JOptionPane.showMessageDialog(this,
@@ -155,7 +155,7 @@ public class ControlPanel extends JPanel {
             return;
         }
         
-        // 出力ディレクトリ選択
+        // Select output directory
         File outputDir = com.treloc.xtreloc.app.gui.util.DirectoryChooserHelper.selectDirectory(
             this, "Select Output Directory");
         
@@ -163,7 +163,7 @@ public class ControlPanel extends JPanel {
             return;
         }
         
-        // 実行
+        // Execute
         SwingWorker<Void, String> worker = new SwingWorker<Void, String>() {
             @Override
             protected Void doInBackground() throws Exception {
@@ -172,7 +172,7 @@ public class ControlPanel extends JPanel {
                 
                 try {
                     if ("GRD".equals(mode)) {
-                        // 全ての.datファイルを処理
+                        // Process all .dat files
                         int processedCount = 0;
                         java.util.List<com.treloc.xtreloc.app.gui.model.Hypocenter> allHypocenters = 
                             new java.util.ArrayList<>();
@@ -181,13 +181,13 @@ public class ControlPanel extends JPanel {
                             String inputPath = datFile.getAbsolutePath();
                             String outputPath = new File(outputDir, datFile.getName()).getAbsolutePath();
                             
-                            // 各ファイルごとに新しいsolverインスタンスを作成
+                            // Create a new solver instance for each file
                             HypoGridSearch solver = new HypoGridSearch(config);
                             solver.start(inputPath, outputPath);
                             processedCount++;
                             publish(String.format("Processing: %d/%d - %s", processedCount, datFiles.size(), datFile.getName()));
                             
-                            // 実行結果を読み込んで可視化用リストに追加
+                            // Load execution results and add to the visualization list
                             try {
                                 java.util.List<com.treloc.xtreloc.app.gui.model.Hypocenter> hypocenters = 
                                     loadHypocentersFromDatFile(new File(outputPath));
@@ -199,7 +199,7 @@ public class ControlPanel extends JPanel {
                         
                         publish(String.format("Execution completed: %d files processed", processedCount));
                         
-                        // 実行結果を可視化
+                        // Visualize the execution results
                         SwingUtilities.invokeLater(() -> {
                             try {
                                 if (!allHypocenters.isEmpty()) {
@@ -288,7 +288,7 @@ public class ControlPanel extends JPanel {
     private java.util.List<com.treloc.xtreloc.app.gui.model.Hypocenter> loadHypocentersFromDatFile(File datFile) {
         java.util.List<com.treloc.xtreloc.app.gui.model.Hypocenter> hypocenters = new java.util.ArrayList<>();
         try (java.io.BufferedReader br = new java.io.BufferedReader(new java.io.FileReader(datFile))) {
-            // 1行目: 緯度 経度 深度 タイプ
+            // 1st line: latitude, longitude, depth, type
             String line1 = br.readLine();
             if (line1 != null) {
                 String[] parts1 = line1.trim().split("\\s+");
@@ -296,11 +296,11 @@ public class ControlPanel extends JPanel {
                     double lat = Double.parseDouble(parts1[0]);
                     double lon = Double.parseDouble(parts1[1]);
                     double depth = Double.parseDouble(parts1[2]);
-                    // ファイル名から時刻を取得（例: 071201.000030.dat → 071201.000030）
-                    // parts1[3]はタイプ（STD, INI, ERRなど）なので、常にファイル名から取得
+                    // Get the time from the file name (e.g. 071201.000030.dat → 071201.000030)
+                    // parts1[3] is the type (STD, INI, ERR etc.) so always get it from the file name
                     String time = datFile.getName().replace(".dat", "");
                     
-                    // 2行目: xerr in km, yerr in km, zerr in km, rms residual
+                    // 2nd line: xerr in km, yerr in km, zerr in km, rms residual
                     double xerr = 0.0;
                     double yerr = 0.0;
                     double zerr = 0.0;
@@ -309,11 +309,8 @@ public class ControlPanel extends JPanel {
                     String line2 = br.readLine();
                     if (line2 != null && !line2.trim().isEmpty()) {
                         String[] parts2 = line2.trim().split("\\s+");
-                        // 2行目が数値のみ（エラー情報）か、観測点コードを含むかで判定
                         try {
-                            // 最初の要素が数値かどうかで判定
                             Double.parseDouble(parts2[0]);
-                            // 数値のみの場合（エラー情報行）
                             if (parts2.length >= 4) {
                                 xerr = Double.parseDouble(parts2[0]);
                                 yerr = Double.parseDouble(parts2[1]);
@@ -321,8 +318,8 @@ public class ControlPanel extends JPanel {
                                 rms = Double.parseDouble(parts2[3]);
                             }
                         } catch (NumberFormatException e) {
-                            // 2行目が観測点ペアの場合（エラー情報行がない形式）
-                            // エラー情報はデフォルト値（0.0）のまま
+                            // If the first element is not a number, 
+                            // it is not an error information line
                         }
                     }
                     
@@ -369,7 +366,6 @@ public class ControlPanel extends JPanel {
         if (files != null) {
             for (File file : files) {
                 if (file.isDirectory()) {
-                    // 再帰的に検索
                     datFiles.addAll(findDatFiles(file));
                 } else if (file.getName().toLowerCase().endsWith(".dat")) {
                     datFiles.add(file);

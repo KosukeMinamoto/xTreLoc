@@ -24,6 +24,8 @@ import java.io.File;
 import java.text.DecimalFormat;
 import java.util.List;
 import org.geotools.swing.MapPane;
+import net.sf.geographiclib.Geodesic;
+import net.sf.geographiclib.GeodesicData;
 
 public class MapView {
 
@@ -31,8 +33,8 @@ public class MapView {
 	private final JMapFrame frame = new JMapFrame(map);
 	private JLabel coordLabel = new JLabel(" ");
 	private ColorBarPanel colorBarPanel;
-	private JComboBox<ColorPalette> paletteCombo;
 	private int symbolSize = 10;
+	private ScaleBarPanel scaleBarPanel;
 	
 	private java.util.List<Hypocenter> lastHypocenters = null;
 	private String lastColorColumn = null;
@@ -79,6 +81,7 @@ public class MapView {
 		frame.enableStatusBar(true);
 		frame.setSize(900, 700);
 		
+		updateGraticule();
 		updateMapBackground();
 		
 		try {
@@ -98,9 +101,10 @@ public class MapView {
 		frame.getToolBar().add(Box.createHorizontalStrut(10));
 		frame.getToolBar().add(coordLabel);
 		
-		this.paletteCombo = null;
 		
 		colorBarPanel = new ColorBarPanel(currentPalette);
+		
+		scaleBarPanel = new ScaleBarPanel();
 		
 		setupLegendPanel();
 		setupStationSymbolLegendPanel();
@@ -161,19 +165,43 @@ public class MapView {
 	}
 	
 	private void setupMouseListener() {
-		frame.getMapPane().addMouseListener(new MouseAdapter() {
+		MapPane mapPane = frame.getMapPane();
+		Component mapPaneComponent = (Component) mapPane;
+		
+		mapPaneComponent.addMouseListener(new MouseAdapter() {
 			@Override
 			public void mouseClicked(MouseEvent e) {
 				updateCoordinates(e);
 			}
 		});
 		
-		frame.getMapPane().addMouseMotionListener(new MouseAdapter() {
+		mapPaneComponent.addMouseMotionListener(new MouseAdapter() {
 			@Override
 			public void mouseMoved(MouseEvent e) {
 				updateCoordinates(e);
 			}
 		});
+		
+		mapPaneComponent.addComponentListener(new java.awt.event.ComponentAdapter() {
+			@Override
+			public void componentResized(java.awt.event.ComponentEvent e) {
+				SwingUtilities.invokeLater(() -> {
+					try {
+						Thread.sleep(50);
+					} catch (InterruptedException ex) {
+						Thread.currentThread().interrupt();
+					}
+					updateScaleBar();
+				});
+			}
+		});
+		
+		try {
+			javax.swing.Timer timer = new javax.swing.Timer(500, e -> updateScaleBar());
+			timer.setRepeats(true);
+			timer.start();
+		} catch (Exception e) {
+		}
 	}
 	
 	private void updateCoordinates(MouseEvent e) {
@@ -632,8 +660,10 @@ public class MapView {
 					MapPane mapPane = frame.getMapPane();
 					if (mapPane != null) {
 						Component mapPaneComponent = (Component) mapPane;
-						mapPaneComponent.revalidate();
-						mapPaneComponent.repaint();
+					mapPaneComponent.revalidate();
+					mapPaneComponent.repaint();
+					updateScaleBar();
+					updateGraticule();
 					}
 				} catch (Exception e) {
 					java.util.logging.Logger.getLogger(MapView.class.getName())
@@ -643,6 +673,82 @@ public class MapView {
 		} catch (Exception e) {
 			java.util.logging.Logger.getLogger(MapView.class.getName())
 				.warning("Failed to schedule map update: " + e.getMessage());
+		}
+	}
+	
+	private void updateScaleBar() {
+		if (scaleBarPanel == null) {
+			return;
+		}
+		try {
+			MapPane mapPane = frame.getMapPane();
+			if (mapPane == null) {
+				return;
+			}
+			ReferencedEnvelope bounds = mapPane.getDisplayArea();
+			if (bounds == null) {
+				return;
+			}
+			Component mapPaneComponent = (Component) mapPane;
+			int mapWidth = mapPaneComponent.getWidth();
+			if (mapWidth <= 0) {
+				return;
+			}
+			
+			double centerLat = (bounds.getMinY() + bounds.getMaxY()) / 2.0;
+			double leftLon = bounds.getMinX();
+			double rightLon = bounds.getMaxX();
+			
+			GeodesicData data = Geodesic.WGS84.Inverse(centerLat, leftLon, centerLat, rightLon);
+			double mapWidthMeters = data.s12;
+			
+			double targetPixelWidth = 150.0;
+			double metersPerPixel = mapWidthMeters / mapWidth;
+			double targetMeters = targetPixelWidth * metersPerPixel;
+			
+			double[] niceValues = {1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000, 50000, 100000, 200000, 500000, 1000000};
+			double niceValue = niceValues[0];
+			for (double val : niceValues) {
+				if (val <= targetMeters) {
+					niceValue = val;
+				} else {
+					break;
+				}
+			}
+			
+			double scaleBarWidthPixels = niceValue / metersPerPixel;
+			String unit = "m";
+			double displayValue = niceValue;
+			if (niceValue >= 1000) {
+				displayValue = niceValue / 1000.0;
+				unit = "km";
+			}
+			
+			scaleBarPanel.updateScale(scaleBarWidthPixels, displayValue, unit);
+			updateScaleBarPosition();
+		} catch (Exception e) {
+		}
+	}
+	
+	private void updateScaleBarPosition() {
+		if (scaleBarPanel == null) {
+			return;
+		}
+		try {
+			Container parent = scaleBarPanel.getParent();
+			if (parent instanceof JLayeredPane) {
+				JLayeredPane layeredPane = (JLayeredPane) parent;
+				int margin = 15;
+				int x = margin;
+				int y = layeredPane.getHeight() - scaleBarPanel.getPreferredSize().height - margin;
+				if (y < 0) {
+					y = margin;
+				}
+				if (layeredPane.getWidth() > 0 && layeredPane.getHeight() > 0) {
+					scaleBarPanel.setBounds(x, y, scaleBarPanel.getPreferredSize().width, scaleBarPanel.getPreferredSize().height);
+				}
+			}
+		} catch (Exception e) {
 		}
 	}
 	
@@ -1147,6 +1253,9 @@ public class MapView {
 				if (stationSymbolLegendPanel != null && stationSymbolLegendPanel.getParent() != null) {
 					stationSymbolLegendPanel.getParent().remove(stationSymbolLegendPanel);
 				}
+				if (scaleBarPanel != null && scaleBarPanel.getParent() != null) {
+					scaleBarPanel.getParent().remove(scaleBarPanel);
+				}
 				
 				Color panelBgColor = UIManager.getColor("Panel.background");
 				if (panelBgColor == null) {
@@ -1155,21 +1264,11 @@ public class MapView {
 				
 				colorBarPanel.setOpaque(true);
 				colorBarPanel.setBackground(panelBgColor);
-				colorBarPanel.setBorder(BorderFactory.createCompoundBorder(
-					BorderFactory.createLineBorder(Color.BLACK, 1),
-					BorderFactory.createEmptyBorder(5, 5, 5, 5)));
-				
-				JComboBox<ColorPalette> paletteCombo = new JComboBox<>(ColorPalette.values());
-				paletteCombo.setSelectedItem(currentPalette);
-				paletteCombo.addActionListener(e -> {
-					currentPalette = (ColorPalette) paletteCombo.getSelectedItem();
-					if (colorBarPanel != null) {
-						colorBarPanel.setPalette(currentPalette);
-					}
-					refreshMapColors();
-				});
-				this.paletteCombo = paletteCombo;
-				colorBarPanel.addPaletteSelector(paletteCombo);
+				colorBarPanel.setBorder(BorderFactory.createEmptyBorder(5, 5, 5, 5));
+				java.awt.Window parentWindow = SwingUtilities.getWindowAncestor(contentPane);
+				if (parentWindow != null) {
+					colorBarPanel.setDialogParent(parentWindow);
+				}
 				
 				colorBarPanel.setRangeChangeListener((min, max) -> {
 					String currentLabel = colorBarPanel.getLabel();
@@ -1226,23 +1325,38 @@ public class MapView {
 					contentPane.remove(existingCenter);
 				}
 				
-				if (mapPaneComponent != null && mapPaneParent != null) {
-					if (mapPaneParent == contentPane) {
-						contentPane.add(mapPaneComponent, BorderLayout.CENTER);
-					} else {
-						Container mapPaneGrandParent = mapPaneParent.getParent();
-						if (mapPaneGrandParent == contentPane) {
-							contentPane.add(mapPaneParent, BorderLayout.CENTER);
-						} else {
-							JPanel mapContainer = new JPanel(new BorderLayout());
-							mapContainer.add(mapPaneComponent, BorderLayout.CENTER);
-							contentPane.add(mapContainer, BorderLayout.CENTER);
-						}
+				JLayeredPane mapLayeredPane = new JLayeredPane();
+				mapLayeredPane.setLayout(null);
+				
+				JPanel mapContainer = null;
+				if (mapPaneComponent != null) {
+					if (mapPaneParent != null && mapPaneParent != contentPane) {
+						mapPaneParent.remove(mapPaneComponent);
 					}
-				} else if (mapPaneComponent != null) {
-					JPanel mapContainer = new JPanel(new BorderLayout());
-					mapContainer.add(mapPaneComponent, BorderLayout.CENTER);
+					
+					mapLayeredPane.add(mapPaneComponent, JLayeredPane.DEFAULT_LAYER);
+					mapPaneComponent.setBounds(0, 0, mapPaneComponent.getWidth() > 0 ? mapPaneComponent.getWidth() : 800, 
+						mapPaneComponent.getHeight() > 0 ? mapPaneComponent.getHeight() : 600);
+					
+					mapContainer = new JPanel(new BorderLayout());
+					mapContainer.add(mapLayeredPane, BorderLayout.CENTER);
 					contentPane.add(mapContainer, BorderLayout.CENTER);
+					
+					if (scaleBarPanel != null) {
+						scaleBarPanel.setOpaque(false);
+						mapLayeredPane.add(scaleBarPanel, JLayeredPane.PALETTE_LAYER);
+						updateScaleBar();
+					}
+					
+					mapLayeredPane.addComponentListener(new java.awt.event.ComponentAdapter() {
+						@Override
+						public void componentResized(java.awt.event.ComponentEvent e) {
+							if (mapPaneComponent != null) {
+								mapPaneComponent.setBounds(0, 0, mapLayeredPane.getWidth(), mapLayeredPane.getHeight());
+							}
+							updateScaleBarPosition();
+						}
+					});
 				}
 				
 				if (existingNorth != null) {
@@ -1309,6 +1423,98 @@ public class MapView {
 	}
 	
 	private void updateOverlayPositions() {
+		updateScaleBarPosition();
+	}
+	
+	private void updateGraticule() {
+		java.util.List<Layer> layersToRemove = new java.util.ArrayList<>();
+		for (Layer layer : map.layers()) {
+			if ("GraticuleLayer".equals(layer.getTitle())) {
+				layersToRemove.add(layer);
+			}
+		}
+		for (Layer layer : layersToRemove) {
+			try {
+				layer.dispose();
+			} catch (Exception e) {
+			}
+			map.removeLayer(layer);
+		}
+		
+		try {
+			MapPane mapPane = frame.getMapPane();
+			if (mapPane == null) {
+				return;
+			}
+			ReferencedEnvelope bounds = mapPane.getDisplayArea();
+			if (bounds == null) {
+				return;
+			}
+			
+			GeometryFactory gf = new GeometryFactory();
+			SimpleFeatureType lineType = DataUtilities.createType("Graticule", "geom:LineString");
+			DefaultFeatureCollection graticuleCollection = new DefaultFeatureCollection("GraticuleLayer", lineType);
+			
+			double minLon = bounds.getMinX();
+			double maxLon = bounds.getMaxX();
+			double minLat = bounds.getMinY();
+			double maxLat = bounds.getMaxY();
+			
+			double lonRange = maxLon - minLon;
+			double latRange = maxLat - minLat;
+			
+			double lonStep = calculateStep(lonRange);
+			double latStep = calculateStep(latRange);
+			
+			for (double lon = Math.ceil(minLon / lonStep) * lonStep; lon <= maxLon; lon += lonStep) {
+				Coordinate[] coords = new Coordinate[] {
+					new Coordinate(lon, minLat),
+					new Coordinate(lon, maxLat)
+				};
+				LineString line = gf.createLineString(coords);
+				SimpleFeature feature = DataUtilities.template(lineType);
+				feature.setDefaultGeometry(line);
+				graticuleCollection.add(feature);
+			}
+			
+			for (double lat = Math.ceil(minLat / latStep) * latStep; lat <= maxLat; lat += latStep) {
+				Coordinate[] coords = new Coordinate[] {
+					new Coordinate(minLon, lat),
+					new Coordinate(maxLon, lat)
+				};
+				LineString line = gf.createLineString(coords);
+				SimpleFeature feature = DataUtilities.template(lineType);
+				feature.setDefaultGeometry(line);
+				graticuleCollection.add(feature);
+			}
+			
+			if (!graticuleCollection.isEmpty()) {
+				Style graticuleStyle = StyleFactory.createGraticuleStyle();
+				FeatureLayer graticuleLayer = new FeatureLayer(graticuleCollection, graticuleStyle);
+				graticuleLayer.setTitle("GraticuleLayer");
+				map.addLayer(graticuleLayer);
+			}
+		} catch (Exception e) {
+		}
+	}
+	
+	private double calculateStep(double range) {
+		if (range <= 0) {
+			return 1.0;
+		}
+		double magnitude = Math.pow(10, Math.floor(Math.log10(range)));
+		double normalized = range / magnitude;
+		double step;
+		if (normalized <= 1.5) {
+			step = 0.1 * magnitude;
+		} else if (normalized <= 3) {
+			step = 0.2 * magnitude;
+		} else if (normalized <= 7) {
+			step = 0.5 * magnitude;
+		} else {
+			step = 1.0 * magnitude;
+		}
+		return step;
 	}
 	
 	private void setupStatusBarExportButton() {
@@ -1341,21 +1547,16 @@ public class MapView {
 				
 				if (statusBar != null) {
 					if (exportImageButton.getParent() != statusBar) {
+						if (exportImageButton.getParent() != null) {
+							exportImageButton.getParent().remove(exportImageButton);
+						}
 						LayoutManager layout = statusBar.getLayout();
 						if (layout instanceof FlowLayout || layout instanceof BoxLayout) {
 							statusBar.add(Box.createHorizontalGlue());
 						}
-						
 						statusBar.add(exportImageButton);
 						statusBar.revalidate();
 						statusBar.repaint();
-					}
-				} else {
-					if (exportImageButton.getParent() != frame.getToolBar()) {
-						frame.getToolBar().add(Box.createHorizontalGlue());
-						frame.getToolBar().add(exportImageButton);
-						frame.getToolBar().revalidate();
-						frame.getToolBar().repaint();
 					}
 				}
 			} catch (Exception e) {
@@ -1621,8 +1822,8 @@ public class MapView {
 		if (colorBarPanel != null) {
 			colorBarPanel.setPalette(palette);
 		}
-		if (paletteCombo != null) {
-			paletteCombo.setSelectedItem(palette);
+		if (colorBarPanel != null) {
+			colorBarPanel.setPalette(palette);
 		}
 		refreshMapColors();
 	}
@@ -1695,16 +1896,20 @@ public class MapView {
 	}
 	
 	/**
+	 * Color bar panel inspired by GeoTools ColorRamp design.
+	 * Supports flexible label placement and automatic graduation.
 	 */
-	private static class ColorBarPanel extends JPanel {
+	public static class ColorBarPanel extends JPanel {
 		private double minValue = 0.0;
 		private double maxValue = 100.0;
 		private String label = "Depth (km)";
 		private ColorPalette palette = ColorPalette.BLUE_TO_RED;
 		private JPanel colorBarDrawingPanel;
-		private JTextField minValueField;
-		private JTextField maxValueField;
 		private RangeChangeListener rangeChangeListener;
+		private boolean labelsVisible = true;
+		private int numLabels = 5;
+		private Color[] colorArray;
+		private static final int COLOR_ARRAY_SIZE = 256;
 		
 		public interface RangeChangeListener {
 			void onRangeChanged(double min, double max);
@@ -1714,13 +1919,109 @@ public class MapView {
 			this.rangeChangeListener = listener;
 		}
 		
+		private void generateColorArray() {
+			colorArray = new Color[COLOR_ARRAY_SIZE];
+			for (int i = 0; i < COLOR_ARRAY_SIZE; i++) {
+				float ratio = (float) i / (COLOR_ARRAY_SIZE - 1);
+				colorArray[i] = getColorFromPalette(ratio);
+			}
+		}
+		
+		private Color getColorFromPalette(float ratio) {
+			switch (this.palette) {
+				case VIRIDIS:
+					return viridisColor(ratio);
+				case PLASMA:
+					return plasmaColor(ratio);
+				case COOL_TO_WARM:
+					return interpolateColor(new Color(59, 76, 192), new Color(180, 4, 38), ratio);
+				case RAINBOW:
+					return rainbowColor(ratio);
+				case GRAYSCALE:
+					int gray = (int) (255 * ratio);
+					return new Color(gray, gray, gray);
+				case BLUE_TO_RED:
+				default:
+					return interpolateColor(Color.BLUE, Color.RED, ratio);
+			}
+		}
+		
+		private Color interpolateColor(Color c1, Color c2, float ratio) {
+			int r = (int) (c1.getRed() * (1 - ratio) + c2.getRed() * ratio);
+			int g = (int) (c1.getGreen() * (1 - ratio) + c2.getGreen() * ratio);
+			int b = (int) (c1.getBlue() * (1 - ratio) + c2.getBlue() * ratio);
+			return new Color(r, g, b);
+		}
+		
+		private Color viridisColor(float ratio) {
+			if (ratio < 0.25f) {
+				return interpolateColor(new Color(68, 1, 84), new Color(59, 82, 139), ratio * 4);
+			} else if (ratio < 0.5f) {
+				return interpolateColor(new Color(59, 82, 139), new Color(33, 144, 140), (ratio - 0.25f) * 4);
+			} else if (ratio < 0.75f) {
+				return interpolateColor(new Color(33, 144, 140), new Color(92, 200, 99), (ratio - 0.5f) * 4);
+			} else {
+				return interpolateColor(new Color(92, 200, 99), new Color(253, 231, 37), (ratio - 0.75f) * 4);
+			}
+		}
+		
+		private Color plasmaColor(float ratio) {
+			if (ratio < 0.25f) {
+				return interpolateColor(new Color(13, 8, 135), new Color(75, 3, 161), ratio * 4);
+			} else if (ratio < 0.5f) {
+				return interpolateColor(new Color(75, 3, 161), new Color(125, 3, 168), (ratio - 0.25f) * 4);
+			} else if (ratio < 0.75f) {
+				return interpolateColor(new Color(125, 3, 168), new Color(185, 54, 96), (ratio - 0.5f) * 4);
+			} else {
+				return interpolateColor(new Color(185, 54, 96), new Color(253, 231, 37), (ratio - 0.75f) * 4);
+			}
+		}
+		
+		private Color rainbowColor(float ratio) {
+			float hue = ratio * 0.7f;
+			return Color.getHSBColor(hue, 1.0f, 1.0f);
+		}
+		
+		private java.util.List<Double> generateGraduation() {
+			java.util.List<Double> graduation = new java.util.ArrayList<>();
+			double range = maxValue - minValue;
+			if (range <= 0) {
+				graduation.add(minValue);
+				return graduation;
+			}
+			
+			double step = range / (numLabels - 1);
+			for (int i = 0; i < numLabels; i++) {
+				graduation.add(minValue + step * i);
+			}
+			return graduation;
+		}
+		
+		private java.awt.Window dialogParent;
+		
+		public void setDialogParent(java.awt.Window parent) {
+			this.dialogParent = parent;
+		}
+		
 		public ColorBarPanel(ColorPalette palette) {
 			this.palette = palette;
-			setPreferredSize(new java.awt.Dimension(450, 120));
-			setMinimumSize(new java.awt.Dimension(350, 120));
-			setMaximumSize(new java.awt.Dimension(Integer.MAX_VALUE, 150));
+			generateColorArray();
+			setPreferredSize(new java.awt.Dimension(450, 70));
+			setMinimumSize(new java.awt.Dimension(350, 60));
+			setMaximumSize(new java.awt.Dimension(Integer.MAX_VALUE, 80));
 			setLayout(new BoxLayout(this, BoxLayout.Y_AXIS));
-			setBorder(BorderFactory.createTitledBorder(label));
+			setBorder(BorderFactory.createEmptyBorder(5, 5, 5, 5));
+			setCursor(new java.awt.Cursor(java.awt.Cursor.HAND_CURSOR));
+			
+			ColorBarPanel self = this;
+			addMouseListener(new java.awt.event.MouseAdapter() {
+				@Override
+				public void mouseClicked(java.awt.event.MouseEvent e) {
+					if (e.getClickCount() == 1) {
+						self.openSettingsDialog();
+					}
+				}
+			});
 			
 			colorBarDrawingPanel = new JPanel() {
 				@Override
@@ -1729,215 +2030,99 @@ public class MapView {
 					Graphics2D g2d = (Graphics2D) g;
 					g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
 					
-					int width = getWidth() - 20;
-					int height = getHeight() - 35;
-					int x = 10;
-					int y = 20;
+					FontMetrics fm = g2d.getFontMetrics();
+					java.util.List<Double> graduation = generateGraduation();
+					
+					int maxLabelWidth = 0;
+					java.util.List<String> labelStrings = new java.util.ArrayList<>();
+					for (Double value : graduation) {
+						String labelStr = formatLabel(value);
+						labelStrings.add(labelStr);
+						int labelWidth = fm.stringWidth(labelStr);
+						if (labelWidth > maxLabelWidth) {
+							maxLabelWidth = labelWidth;
+						}
+					}
+					
+					int labelPadding = 5;
+					int sideMargin = Math.max(maxLabelWidth / 2 + labelPadding, 10);
+					
+					int width = getWidth() - sideMargin * 2;
+					int height = getHeight() - (labelsVisible ? 40 : 10);
+					int x = sideMargin;
+					int y = 10;
+					
+					if (colorArray == null || colorArray.length == 0) {
+						generateColorArray();
+					}
 					
 					for (int i = 0; i < width; i++) {
-						float ratio = (float) i / width;
-						Color color = getColorFromPalette(ratio);
-						g2d.setColor(color);
+						int colorIndex = (int) ((float) i / width * (COLOR_ARRAY_SIZE - 1));
+						if (colorIndex >= COLOR_ARRAY_SIZE) {
+							colorIndex = COLOR_ARRAY_SIZE - 1;
+						}
+						g2d.setColor(colorArray[colorIndex]);
 						g2d.drawLine(x + i, y, x + i, y + height);
 					}
 					
-					FontMetrics fm = g2d.getFontMetrics();
-					String minLabel = String.format("%.1f", minValue);
-					String maxLabel = String.format("%.1f", maxValue);
-					
-					int labelY = y + height + 15;
-					int labelPadding = 3;
-					
-					int minLabelWidth = fm.stringWidth(minLabel) + labelPadding * 2;
-					int minLabelHeight = fm.getHeight() + labelPadding * 2;
-					g2d.setColor(Color.WHITE);
-					g2d.fillRect(x - labelPadding, labelY - fm.getAscent() - labelPadding, 
-						minLabelWidth, minLabelHeight);
-					g2d.setColor(Color.BLACK);
-					g2d.drawRect(x - labelPadding, labelY - fm.getAscent() - labelPadding, 
-						minLabelWidth, minLabelHeight);
-					g2d.drawString(minLabel, x, labelY);
-					
-					int maxLabelWidth = fm.stringWidth(maxLabel) + labelPadding * 2;
-					int maxLabelHeight = fm.getHeight() + labelPadding * 2;
-					g2d.setColor(Color.WHITE);
-					g2d.fillRect(x + width - maxLabelWidth + labelPadding, labelY - fm.getAscent() - labelPadding,
-						maxLabelWidth, maxLabelHeight);
-					g2d.setColor(Color.BLACK);
-					g2d.drawRect(x + width - maxLabelWidth + labelPadding, labelY - fm.getAscent() - labelPadding,
-						maxLabelWidth, maxLabelHeight);
-					g2d.drawString(maxLabel, x + width - fm.stringWidth(maxLabel), labelY);
-				}
-				
-				private Color getColorFromPalette(float ratio) {
-					switch (ColorBarPanel.this.palette) {
-						case VIRIDIS:
-							return viridisColor(ratio);
-						case PLASMA:
-							return plasmaColor(ratio);
-						case COOL_TO_WARM:
-							return interpolateColor(new Color(59, 76, 192), new Color(180, 4, 38), ratio);
-						case RAINBOW:
-							return rainbowColor(ratio);
-						case GRAYSCALE:
-							int gray = (int) (255 * ratio);
-							return new Color(gray, gray, gray);
-						case BLUE_TO_RED:
-						default:
-							return interpolateColor(Color.BLUE, Color.RED, ratio);
+					if (labelsVisible && graduation.size() > 0) {
+						int labelY = y + height + 20;
+						int labelBoxPadding = 3;
+						
+						for (int i = 0; i < graduation.size(); i++) {
+							double value = graduation.get(i);
+							String labelStr = labelStrings.get(i);
+							double ratio = (value - minValue) / (maxValue - minValue);
+							if (Double.isNaN(ratio) || Double.isInfinite(ratio)) {
+								ratio = 0.0;
+							}
+							int labelX = (int) (x + ratio * width - fm.stringWidth(labelStr) / 2);
+							
+							int labelBoxWidth = fm.stringWidth(labelStr) + labelBoxPadding * 2;
+							int labelBoxHeight = fm.getHeight() + labelBoxPadding * 2;
+							
+							g2d.setColor(Color.WHITE);
+							g2d.fillRect(labelX - labelBoxPadding, labelY - fm.getAscent() - labelBoxPadding,
+								labelBoxWidth, labelBoxHeight);
+							g2d.setColor(Color.BLACK);
+							g2d.drawRect(labelX - labelBoxPadding, labelY - fm.getAscent() - labelBoxPadding,
+								labelBoxWidth, labelBoxHeight);
+							g2d.drawString(labelStr, labelX, labelY);
+						}
 					}
 				}
 				
-				private Color interpolateColor(Color c1, Color c2, float ratio) {
-					int r = (int) (c1.getRed() * (1 - ratio) + c2.getRed() * ratio);
-					int g = (int) (c1.getGreen() * (1 - ratio) + c2.getGreen() * ratio);
-					int b = (int) (c1.getBlue() * (1 - ratio) + c2.getBlue() * ratio);
-					return new Color(r, g, b);
-				}
-				
-				private Color viridisColor(float ratio) {
-					if (ratio < 0.25f) {
-						return interpolateColor(new Color(68, 1, 84), new Color(59, 82, 139), ratio * 4);
-					} else if (ratio < 0.5f) {
-						return interpolateColor(new Color(59, 82, 139), new Color(33, 144, 140), (ratio - 0.25f) * 4);
-					} else if (ratio < 0.75f) {
-						return interpolateColor(new Color(33, 144, 140), new Color(92, 200, 99), (ratio - 0.5f) * 4);
+				private String formatLabel(double value) {
+					double range = maxValue - minValue;
+					if (range == 0) {
+						return String.format("%.1f", value);
+					}
+					
+					double absMax = Math.max(Math.abs(minValue), Math.abs(maxValue));
+					if (absMax >= 1000) {
+						return String.format("%.0f", value);
+					} else if (absMax >= 100) {
+						return String.format("%.1f", value);
+					} else if (absMax >= 10) {
+						return String.format("%.2f", value);
 					} else {
-						return interpolateColor(new Color(92, 200, 99), new Color(253, 231, 37), (ratio - 0.75f) * 4);
+						return String.format("%.3f", value);
 					}
-				}
-				
-				private Color plasmaColor(float ratio) {
-					if (ratio < 0.25f) {
-						return interpolateColor(new Color(13, 8, 135), new Color(75, 3, 161), ratio * 4);
-					} else if (ratio < 0.5f) {
-						return interpolateColor(new Color(75, 3, 161), new Color(125, 3, 168), (ratio - 0.25f) * 4);
-					} else if (ratio < 0.75f) {
-						return interpolateColor(new Color(125, 3, 168), new Color(185, 54, 96), (ratio - 0.5f) * 4);
-					} else {
-						return interpolateColor(new Color(185, 54, 96), new Color(253, 231, 37), (ratio - 0.75f) * 4);
-					}
-				}
-				
-				private Color rainbowColor(float ratio) {
-					float hue = ratio * 0.7f;
-					return Color.getHSBColor(hue, 1.0f, 1.0f);
 				}
 			};
 			colorBarDrawingPanel.setOpaque(false);
-			colorBarDrawingPanel.setPreferredSize(new java.awt.Dimension(400, 30));
-			colorBarDrawingPanel.setMaximumSize(new java.awt.Dimension(Integer.MAX_VALUE, 30));
-			
-			minValueField = new JTextField(String.format("%.2f", minValue), 8);
-			maxValueField = new JTextField(String.format("%.2f", maxValue), 8);
-			
-			minValueField.addActionListener(e -> updateRangeFromFields());
-			maxValueField.addActionListener(e -> updateRangeFromFields());
-			
-			minValueField.addFocusListener(new java.awt.event.FocusAdapter() {
-				@Override
-				public void focusLost(java.awt.event.FocusEvent e) {
-					updateRangeFromFields();
-				}
-			});
-			maxValueField.addFocusListener(new java.awt.event.FocusAdapter() {
-				@Override
-				public void focusLost(java.awt.event.FocusEvent e) {
-					updateRangeFromFields();
-				}
-			});
-			
-			JPanel valueInputPanel = new JPanel();
-			valueInputPanel.setLayout(new BoxLayout(valueInputPanel, BoxLayout.Y_AXIS));
-			valueInputPanel.setOpaque(false);
-			
-			JPanel minPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 0));
-			minPanel.setOpaque(false);
-			minPanel.add(new JLabel("Min:"));
-			minPanel.add(minValueField);
-			
-			JPanel maxPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 0));
-			maxPanel.setOpaque(false);
-			maxPanel.add(new JLabel("Max:"));
-			maxPanel.add(maxValueField);
-			
-			valueInputPanel.add(minPanel);
-			valueInputPanel.add(Box.createVerticalStrut(3));
-			valueInputPanel.add(maxPanel);
+			colorBarDrawingPanel.setPreferredSize(new java.awt.Dimension(400, 40));
+			colorBarDrawingPanel.setMaximumSize(new java.awt.Dimension(Integer.MAX_VALUE, 50));
 			
 			add(Box.createVerticalStrut(5));
 			add(colorBarDrawingPanel);
 			add(Box.createVerticalStrut(5));
-			add(valueInputPanel);
-		}
-		
-		private void updateRangeFromFields() {
-			try {
-				double newMin = Double.parseDouble(minValueField.getText().trim());
-				double newMax = Double.parseDouble(maxValueField.getText().trim());
-				
-				if (newMin < newMax) {
-					this.minValue = newMin;
-					this.maxValue = newMax;
-					if (colorBarDrawingPanel != null) {
-						colorBarDrawingPanel.repaint();
-					}
-					if (rangeChangeListener != null) {
-						rangeChangeListener.onRangeChanged(newMin, newMax);
-					}
-				} else {
-					minValueField.setText(String.format("%.2f", minValue));
-					maxValueField.setText(String.format("%.2f", maxValue));
-				}
-			} catch (NumberFormatException e) {
-				minValueField.setText(String.format("%.2f", minValue));
-				maxValueField.setText(String.format("%.2f", maxValue));
-			}
-		}
-		
-		public void addPaletteSelector(JComboBox<ColorPalette> combo) {
-			JPanel topPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 10, 0));
-			topPanel.setOpaque(false);
-			topPanel.setPreferredSize(new java.awt.Dimension(Integer.MAX_VALUE, 30));
-			topPanel.setMaximumSize(new java.awt.Dimension(Integer.MAX_VALUE, 30));
-			
-			JPanel palettePanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 0));
-			palettePanel.setOpaque(false);
-			palettePanel.add(new JLabel("Palette:"));
-			palettePanel.add(combo);
-			
-			JPanel minPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 0));
-			minPanel.setOpaque(false);
-			minPanel.add(new JLabel("Min:"));
-			minPanel.add(minValueField);
-			
-			JPanel maxPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 0));
-			maxPanel.setOpaque(false);
-			maxPanel.add(new JLabel("Max:"));
-			maxPanel.add(maxValueField);
-			
-			topPanel.add(palettePanel);
-			topPanel.add(minPanel);
-			topPanel.add(maxPanel);
-			topPanel.add(Box.createHorizontalGlue());
-			
-			removeAll();
-			add(topPanel);
-			add(Box.createVerticalStrut(5));
-			add(colorBarDrawingPanel);
 		}
 		
 		public void setRange(double min, double max, String label) {
 			this.minValue = min;
 			this.maxValue = max;
 			this.label = label;
-			setBorder(BorderFactory.createTitledBorder(label));
-			if (minValueField != null) {
-				minValueField.setText(String.format("%.2f", min));
-			}
-			if (maxValueField != null) {
-				maxValueField.setText(String.format("%.2f", max));
-			}
 			if (colorBarDrawingPanel != null) {
 				colorBarDrawingPanel.repaint();
 			}
@@ -1945,13 +2130,134 @@ public class MapView {
 		
 		public void setPalette(ColorPalette palette) {
 			this.palette = palette;
+			generateColorArray();
 			if (colorBarDrawingPanel != null) {
 				colorBarDrawingPanel.repaint();
 			}
 		}
 		
+		public void setLabelsVisible(boolean visible) {
+			this.labelsVisible = visible;
+			if (colorBarDrawingPanel != null) {
+				colorBarDrawingPanel.repaint();
+			}
+		}
+		
+		public boolean isLabelsVisible() {
+			return labelsVisible;
+		}
+		
+		public void setNumLabels(int numLabels) {
+			this.numLabels = Math.max(2, Math.min(20, numLabels));
+			if (colorBarDrawingPanel != null) {
+				colorBarDrawingPanel.repaint();
+			}
+		}
+		
+		public int getNumLabels() {
+			return numLabels;
+		}
+		
 		public String getLabel() {
 			return label;
+		}
+		
+		public double getMinValue() {
+			return minValue;
+		}
+		
+		public double getMaxValue() {
+			return maxValue;
+		}
+		
+		public ColorPalette getPalette() {
+			return palette;
+		}
+		
+		public Color[] getColorArray() {
+			return colorArray != null ? colorArray.clone() : null;
+		}
+		
+		private void openSettingsDialog() {
+			java.awt.Window parent = dialogParent;
+			if (parent == null) {
+				parent = SwingUtilities.getWindowAncestor(this);
+			}
+			ColorMapSettingsDialog dialog = new ColorMapSettingsDialog(parent, this);
+			dialog.setVisible(true);
+		}
+	}
+	
+	private static class ScaleBarPanel extends JPanel {
+		private double scaleBarWidth = 100.0;
+		private double displayValue = 1.0;
+		private String unit = "km";
+		
+		public ScaleBarPanel() {
+			setOpaque(false);
+			setPreferredSize(new java.awt.Dimension(200, 50));
+			setMinimumSize(new java.awt.Dimension(150, 40));
+			setMaximumSize(new java.awt.Dimension(300, 60));
+		}
+		
+		public void updateScale(double widthPixels, double value, String unit) {
+			this.scaleBarWidth = Math.max(50, Math.min(250, widthPixels));
+			this.displayValue = value;
+			this.unit = unit;
+			repaint();
+		}
+		
+		@Override
+		protected void paintComponent(Graphics g) {
+			super.paintComponent(g);
+			Graphics2D g2d = (Graphics2D) g.create();
+			g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+			
+			int panelWidth = getWidth();
+			int panelHeight = getHeight();
+			int margin = 15;
+			
+			FontMetrics fm = g2d.getFontMetrics();
+			
+			int barX = margin;
+			int barY = panelHeight - margin - 20;
+			int barHeight = 4;
+			int tickHeight = 8;
+			
+			int actualBarWidth = (int) Math.min(scaleBarWidth, panelWidth - 2 * margin);
+			
+			g2d.setColor(new Color(0, 0, 0, 200));
+			g2d.fillRect(barX, barY, actualBarWidth, barHeight);
+			
+			g2d.setColor(new Color(255, 255, 255, 200));
+			g2d.fillRect(barX, barY, actualBarWidth / 2, barHeight);
+			
+			g2d.setColor(new Color(0, 0, 0, 200));
+			g2d.setStroke(new BasicStroke(1.5f));
+			g2d.drawRect(barX, barY, actualBarWidth, barHeight);
+			
+			g2d.drawLine(barX, barY, barX, barY + tickHeight);
+			g2d.drawLine(barX + actualBarWidth, barY, barX + actualBarWidth, barY + tickHeight);
+			g2d.drawLine(barX + actualBarWidth / 2, barY, barX + actualBarWidth / 2, barY + tickHeight / 2);
+			
+			String label;
+			if (displayValue >= 1.0) {
+				label = String.format("%.0f %s", displayValue, unit);
+			} else {
+				label = String.format("%.2f %s", displayValue, unit);
+			}
+			
+			int labelWidth = fm.stringWidth(label);
+			int labelX = barX + (actualBarWidth - labelWidth) / 2;
+			int labelY = barY - 8;
+			
+			g2d.setColor(Color.WHITE);
+			g2d.fillRect(labelX - 4, labelY - fm.getAscent() - 3, labelWidth + 8, fm.getHeight() + 6);
+			
+			g2d.setColor(Color.BLACK);
+			g2d.drawString(label, labelX, labelY);
+			
+			g2d.dispose();
 		}
 	}
 	
