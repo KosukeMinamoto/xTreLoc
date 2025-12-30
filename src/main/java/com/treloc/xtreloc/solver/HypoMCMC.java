@@ -23,6 +23,16 @@ public class HypoMCMC extends SolverBase {
     private double stepSize;
     private double stepSizeDepth; // Depth step size in km (separate from lat/lon step size)
     private double temperature;
+    private ConvergenceCallback convergenceCallback;
+
+    /**
+     * Sets the convergence callback for reporting convergence information.
+     * 
+     * @param callback the convergence callback
+     */
+    public void setConvergenceCallback(ConvergenceCallback callback) {
+        this.convergenceCallback = callback;
+    }
 
     /**
      * Constructs a HypoMCMC object with the specified configuration.
@@ -137,6 +147,14 @@ public class HypoMCMC extends SolverBase {
                 dep = newDep;
                 currentLikelihood = newLikelihood;
                 accepted++;
+            }
+            
+            // Report convergence information
+            if (convergenceCallback != null) {
+                // Calculate residual from likelihood (simplified)
+                double residual = Math.sqrt(-currentLikelihood);
+                convergenceCallback.onResidualUpdate(i, residual);
+                convergenceCallback.onLikelihoodUpdate(i, currentLikelihood);
             }
             
             // Store sample (after burn-in)

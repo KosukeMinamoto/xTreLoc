@@ -55,7 +55,21 @@ public class HypoTripleDiff extends SolverBase {
     private int[] iterNumArray;
     private int[] distKmArray;
     private int[] dampFactArray;
+    private double lsqrAtol = 1e-6;
+    private double lsqrBtol = 1e-6;
+    private double lsqrConlim = 1e8;
+    private int lsqrIterLim = 1000;
     private java.util.function.Consumer<String> logConsumer;
+    private ConvergenceCallback convergenceCallback;
+
+    /**
+     * Sets the convergence callback for reporting convergence information.
+     * 
+     * @param callback the convergence callback
+     */
+    public void setConvergenceCallback(ConvergenceCallback callback) {
+        this.convergenceCallback = callback;
+    }
 
     /**
      * Constructs a new HypoTripleDiff solver with the specified configuration.
@@ -115,10 +129,25 @@ public class HypoTripleDiff extends SolverBase {
             this.iterNumArray = parseIntArray(trdSolver, "iterNum", new int[]{10, 10});
             this.distKmArray = parseIntArray(trdSolver, "distKm", new int[]{50, 20});
             this.dampFactArray = parseIntArray(trdSolver, "dampFact", new int[]{0, 1});
+            
+            // LSQR parameters
+            if (trdSolver.has("lsqrAtol")) {
+                this.lsqrAtol = trdSolver.get("lsqrAtol").asDouble();
+            }
+            if (trdSolver.has("lsqrBtol")) {
+                this.lsqrBtol = trdSolver.get("lsqrBtol").asDouble();
+            }
+            if (trdSolver.has("lsqrConlim")) {
+                this.lsqrConlim = trdSolver.get("lsqrConlim").asDouble();
+            }
+            if (trdSolver.has("lsqrIterLim")) {
+                this.lsqrIterLim = trdSolver.get("lsqrIterLim").asInt();
+            }
         } else {
             this.iterNumArray = new int[]{10, 10};
             this.distKmArray = new int[]{50, 20};
             this.dampFactArray = new int[]{0, 1};
+            // Use default LSQR parameters
         }
         
         if (iterNumArray.length != distKmArray.length || iterNumArray.length != dampFactArray.length) {
@@ -142,9 +171,23 @@ public class HypoTripleDiff extends SolverBase {
             throw new RuntimeException("Failed to initialize SpatialClustering", e);
         }
         
-        String logLevel = appConfig.logLevel != null ? appConfig.logLevel : "INFO";
-        this.showLSQR = java.util.logging.Level.INFO.intValue() <= 
-                       java.util.logging.Level.parse(logLevel.toUpperCase()).intValue();
+        // LSQR show log setting: check config first, then fall back to log level
+        if (appConfig.solver != null && appConfig.solver.containsKey("TRD")) {
+            var trdSolver = appConfig.solver.get("TRD");
+            if (trdSolver.has("lsqrShowLog")) {
+                this.showLSQR = trdSolver.get("lsqrShowLog").asBoolean();
+            } else {
+                // Fall back to log level if not explicitly set
+                String logLevel = appConfig.logLevel != null ? appConfig.logLevel : "INFO";
+                this.showLSQR = java.util.logging.Level.INFO.intValue() <= 
+                               java.util.logging.Level.parse(logLevel.toUpperCase()).intValue();
+            }
+        } else {
+            // Fall back to log level if no solver config
+            String logLevel = appConfig.logLevel != null ? appConfig.logLevel : "INFO";
+            this.showLSQR = java.util.logging.Level.INFO.intValue() <= 
+                           java.util.logging.Level.parse(logLevel.toUpperCase()).intValue();
+        }
     }
     
     public void setLogConsumer(java.util.function.Consumer<String> logConsumer) {
@@ -493,10 +536,10 @@ public class HypoTripleDiff extends SolverBase {
                                     (OpenMapRealMatrix) GObj,
                                     d,
                                     dampFact,
-                                    1e-6,
-                                    1e-6,
-                                    1e8,
-                                    1000,
+                                    lsqrAtol,
+                                    lsqrBtol,
+                                    lsqrConlim,
+                                    lsqrIterLim,
                                     showLSQR,
                                     false,
                                     null,
@@ -506,14 +549,20 @@ public class HypoTripleDiff extends SolverBase {
                                     (COOSparseMatrix) GObj,
                                     d,
                                     dampFact,
-                                    1e-6,
-                                    1e-6,
-                                    1e8,
-                                    1000,
+                                    lsqrAtol,
+                                    lsqrBtol,
+                                    lsqrConlim,
+                                    lsqrIterLim,
                                     showLSQR,
                                     false,
                                     null,
                                     logConsumer);
+                            }
+                            
+                            // Report convergence information
+                            if (convergenceCallback != null && result != null) {
+                                double residualRMS = result.r2norm; // Use r2norm as residual
+                                convergenceCallback.onClusterResidualUpdate(clusterId, j, residualRMS);
                             }
                             
                             double[] dm = result.x;

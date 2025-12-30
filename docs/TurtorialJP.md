@@ -414,7 +414,12 @@ java -jar xTreLoc-CLI-1.0-SNAPSHOT.jar
           "TRD": {
               "iterNum": [10, 10],
               "distKm": [50, 20],
-              "dampFact": [0, 1]
+              "dampFact": [0, 1],
+              "lsqrAtol": 1e-6,
+              "lsqrBtol": 1e-6,
+              "lsqrConlim": 1e8,
+              "lsqrIterLim": 1000,
+              "lsqrShowLog": true
           }
       }
   }
@@ -569,6 +574,7 @@ CLSモードによるクラスタリングと, 震源ペア間における走時
      - Data Inclusion Rate (オプショナル): イプシロンの値が負の場合にはK-distance graphを用いた自動推定が行われる. その際に, 全体のイベント数に対して何割のイベントを含むようにイプシロンを設定するかを入力する. 未設定の場合にはエルボー法により自動推定される. 
      - RMS Threshold (オプショナル):  datファイルにおける走時差に対する閾値 (秒). これ以上の走時残差を持つイベントはクラスタリングに用いられない. 
      - Location Error Threshold (オプショナル): datファイルにおける水平方向の震源決定精度に対する閾値 (km). これ以上のエラーを持つイベントは, クラスタリングに用いられない.
+     - 
 
 3. "▶ Execute"をクリック
 
@@ -598,6 +604,13 @@ CLSモードはhypoDDにおける`dt.ct`に対応するファイルである`tri
      - Damping Factor (dampFact): 各ステップにおけるダンピング係数 (e.g., 0,1)
      Iteration Count, Distance Threshold, Damp. Factorの与え方はリストで与える必要がある. 上記の例では, 最初のステップでは50 km以内にあるイベントでネットワークを構成して, Damp. Factorを0として10回イタレーションする. さらに次のステップでは同様に, 20 kmのイベントに対してDamp. Factor=1で10回イタレーションする. そのため, これらのリストの個数は同数である必要がある. 
      カタログファイルにおいて, ラベルがREFであるイベントの震源は更新されず, 固定される.
+     - **LSQRパラメータ** (Triple Difference法の内部で使用されるLSQRソルバーのパラメータ):
+       - LSQR ATOL (atol): 停止許容誤差. Ax - bのノルム基準 (Default: 1e-6)
+       - LSQR BTOL (btol): 停止許容誤差. bのノルム基準 (Default: 1e-6)
+       - LSQR CONLIM (conlim): 条件数の上限. これ以上になると停止 (Default: 1e8)
+       - LSQR Iteration Limit (iter_lim): 最大反復回数 (Default: 1000)
+       - LSQR Show Log (showLSQR): LSQRの反復ログを表示するかどうか (Default: true)
+     これらのパラメータは, LSQRアルゴリズムの収束判定と反復制御に使用される. 通常はデフォルト値で十分であるが, 収束が遅い場合や精度を調整したい場合に変更することができる.
 
 3. "▶ Execute"をクリック
 
@@ -710,63 +723,8 @@ demo
 
 ---
 
-<!-- 
-### 共通パラメータ
 
-- **logLevel**: ログレベル ("INFO", "DEBUG", "WARNING", "SEVERE")
-- **numJobs**: 並列ジョブ数 (1以上)
-- **stationFile**: 観測点ファイルのパス
-- **taupFile**: TauP速度モデル ("prem", "iasp91", "ak135", "ak135f", またはファイルパス)
-- **hypBottom**: 最大震源深さ (km)
-- **threshold**: データ品質フィルタリング用の閾値 -->
-
-<!-- ### モード固有パラメータ
-
-#### GRDモード
-- **datDirectory**: 入力`.dat`ファイルを含むディレクトリ
-- **outDirectory**: 結果の出力ディレクトリ (事前に存在している必要がある)
-- **totalGrids**: 総グリッドポイント数
-- **numFocus**: 精緻化するフォーカスポイント数
-
-#### STDモード
-- **datDirectory**: 入力`.dat`ファイルを含むディレクトリ
-- **outDirectory**: 結果の出力ディレクトリ (事前に存在している必要がある)
-
-#### MCMCモード
-- **datDirectory**: 入力`.dat`ファイルを含むディレクトリ
-- **outDirectory**: 結果の出力ディレクトリ (事前に存在している必要がある)
-- **nSamples**: MCMCサンプル数
-- **burnIn**: バーンインサンプル数
-- **stepSize**: MCMCウォークのステップサイズ
-- **temperature**: 温度パラメータ
-
-#### TRDモード
-- **catalogFile**: 入力カタログCSVファイル
-- **outDirectory**: 結果の出力ディレクトリ (事前に存在している必要がある)
-- **iterNum**: 各段階の反復回数の配列
-- **distKm**: 各段階の距離閾値 (km)の配列
-- **dampFact**: 各段階のダンピング係数の配列
-
-#### CLSモード
-- **catalogFile**: 入力カタログCSVファイル
-- **outDirectory**: 結果の出力ディレクトリ (事前に存在している必要がある)
-- **minPts**: クラスタの最小ポイント数
-- **eps**: クラスタリング用のイプシロン距離 (km, 自動推定の場合は負の値)
-- **epsPercentile**: 自動イプシロンのパーセンタイル (0-1, オプション)
-- **rmsThreshold**: フィルタリング用のRMS閾値 (オプション)
-- **locErrThreshold**: フィルタリング用の位置誤差閾値 (オプション)
-
-#### SYNモード
-- **catalogFile**: 正解値カタログCSVファイル
-- **outDirectory**: 生成された`.dat`ファイルの出力ディレクトリ (事前に存在している必要がある)
-- **randomSeed**: 再現性のためのランダムシード
-- **phsErr**: 位相誤差標準偏差 (秒)
-- **locErr**: 位置誤差標準偏差 (水平方向は度, 深さはkm)
-- **minSelectRate**: 最小観測点選択率 (0-1)
-- **maxSelectRate**: 最大観測点選択率 (0-1)
- -->
-
-## 引用・データ元
+## Shapeファイル引用元
 
 1. Natural Earth: https://www.naturalearthdata.com/downloads/10m-physical-vectors/10m-coastline/
 1. The Geospatial Information Authority of Japan (GSI): https://www.gsi.go.jp/kankyochiri/gm_japan_e.html

@@ -408,7 +408,12 @@ This tutorial explains how to use xTreLoc using sample data in the `demo/` direc
           "TRD": {
               "iterNum": [10, 10],
               "distKm": [50, 20],
-              "dampFact": [0, 1]
+              "dampFact": [0, 1],
+              "lsqrAtol": 1e-6,
+              "lsqrBtol": 1e-6,
+              "lsqrConlim": 1e8,
+              "lsqrIterLim": 1000,
+              "lsqrShowLog": true
           }
       }
   }
@@ -594,6 +599,13 @@ CLS mode outputs files corresponding to `dt.ct` in `hypoDD`, which are `triple_d
      - Damping Factor (dampFact): Damping coefficient in each step (e.g., 0,1)
      Iteration Count, Distance Threshold, and Damping Factor must be given as lists. In the above example, in the first step, a network is constructed with events within 50 km, and 10 iterations are performed with Damping Factor of 0. In the next step, similarly, 10 iterations are performed with Damping Factor=1 for events within 20 km. Therefore, the number of elements in these lists must be the same.
      In the catalog file, hypocenters of events labeled REF are not updated and are fixed.
+     - **LSQR Parameters** (Parameters for the LSQR solver used internally in the Triple Difference method):
+       - LSQR ATOL (atol): Stopping tolerance. Based on the norm of Ax - b (Default: 1e-6)
+       - LSQR BTOL (btol): Stopping tolerance. Based on the norm of b (Default: 1e-6)
+       - LSQR CONLIM (conlim): Condition number limit. Stops if exceeded (Default: 1e8)
+       - LSQR Iteration Limit (iter_lim): Maximum number of iterations (Default: 1000)
+       - LSQR Show Log (showLSQR): Whether to display LSQR iteration log (Default: true)
+     These parameters are used for convergence criteria and iteration control of the LSQR algorithm. The default values are usually sufficient, but can be adjusted when convergence is slow or when fine-tuning accuracy is needed.
 
 3. Click "▶ Execute"
 
@@ -704,7 +716,7 @@ demo
 └── station.tbl
 ```
 
-## Citation
+## Citation of .shp file
 
 1. Natural Earth: https://www.naturalearthdata.com/downloads/10m-physical-vectors/10m-coastline/
 1. The Geospatial Information Authority of Japan (GSI): https://www.gsi.go.jp/kankyochiri/gm_japan_e.html

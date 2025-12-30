@@ -74,6 +74,16 @@ public class HypoStationPairDiff extends SolverBase {
     }
     
     private PartialDerivativeCache partialDerivativeCache = null;
+    private ConvergenceCallback convergenceCallback;
+
+    /**
+     * Sets the convergence callback for reporting convergence information.
+     * 
+     * @param callback the convergence callback
+     */
+    public void setConvergenceCallback(ConvergenceCallback callback) {
+        this.convergenceCallback = callback;
+    }
 
     /**
      * Constructs a HypoStationPairDiff object with the specified configuration.
@@ -231,6 +241,12 @@ public class HypoStationPairDiff extends SolverBase {
             double deltaDep = Math.abs(newDep - dep);
             logger.info(String.format("Iteration %d: delta=(%.6f deg, %.6f deg, %.3f km), new=(%.6f, %.6f, %.3f)", 
                 n, deltaLon, deltaLat, deltaDep, newLon, newLat, newDep));
+            
+            // Report convergence information
+            if (convergenceCallback != null) {
+                double[] paramChanges = new double[]{deltaLon, deltaLat, deltaDep};
+                convergenceCallback.onIterationUpdate(n, nEval, res, paramChanges);
+            }
             
             lon = newLon;
             lat = newLat;

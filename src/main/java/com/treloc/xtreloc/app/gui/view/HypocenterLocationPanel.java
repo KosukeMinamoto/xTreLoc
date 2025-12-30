@@ -4,6 +4,7 @@ import com.treloc.xtreloc.io.AppConfig;
 import com.treloc.xtreloc.solver.HypoGridSearch;
 import com.treloc.xtreloc.solver.HypoStationPairDiff;
 import com.treloc.xtreloc.solver.SyntheticTest;
+import com.treloc.xtreloc.solver.ConvergenceCallback;
 
 import javax.swing.*;
 import javax.swing.border.TitledBorder;
@@ -49,6 +50,8 @@ public class HypocenterLocationPanel extends JPanel {
     private JButton cancelButton;
     private JTextArea logArea;
     private JPanel logPanel;
+    private ResidualPlotPanel residualPlotPanel;
+    private ConvergenceCallback convergenceCallback;
     private JFileChooser fileChooser;
     private File selectedTargetDir;
     private File selectedStationFile;
@@ -80,6 +83,13 @@ public class HypocenterLocationPanel extends JPanel {
     private JTextField trdIterNumField;
     private JTextField trdDistKmField;
     private JTextField trdDampFactField;
+    
+    // LSQR parameters for TRD mode
+    private JTextField lsqrAtolField;
+    private JTextField lsqrBtolField;
+    private JTextField lsqrConlimField;
+    private JTextField lsqrIterLimField;
+    private JCheckBox lsqrShowLogCheckBox;
     
     // LM optimization parameters for STD mode
     private JTextField lmInitialStepBoundField;
@@ -174,10 +184,43 @@ public class HypocenterLocationPanel extends JPanel {
         
         logPanel = createLogPanel();
         
+        // Create residual plot panel
+        residualPlotPanel = new ResidualPlotPanel();
+        residualPlotPanel.setMinimumSize(new Dimension(300, 250));
+        residualPlotPanel.setPreferredSize(new Dimension(500, 300));
+        setupConvergenceCallback();
+        
+        // Initialize with default mode (modeCombo is created in createModePanel() above)
+        if (modeCombo != null) {
+            String initialMode = (String) modeCombo.getSelectedItem();
+            if (initialMode != null) {
+                residualPlotPanel.setMode(initialMode);
+            }
+        }
+        
+        // Combine log panel and residual plot panel
+        JSplitPane rightSplitPane = new JSplitPane(JSplitPane.VERTICAL_SPLIT, logPanel, residualPlotPanel);
+        rightSplitPane.setResizeWeight(0.6); // 60% for log, 40% for plot
+        rightSplitPane.setOneTouchExpandable(true);
+        rightSplitPane.setContinuousLayout(true);
+        
+        // Set divider location after components are laid out
+        SwingUtilities.invokeLater(() -> {
+            int totalHeight = rightSplitPane.getHeight();
+            if (totalHeight > 0) {
+                rightSplitPane.setDividerLocation((int)(totalHeight * 0.6));
+            } else {
+                rightSplitPane.setDividerLocation(300);
+            }
+        });
+        
+        JPanel rightPanel = new JPanel(new BorderLayout());
+        rightPanel.add(rightSplitPane, BorderLayout.CENTER);
+        
         // Load and display log history on startup
         loadLogHistory();
         
-        JSplitPane splitPane = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, scrollPane, logPanel);
+        JSplitPane splitPane = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, scrollPane, rightPanel);
         splitPane.setResizeWeight(0.5);
         splitPane.setDividerLocation(400);
         
@@ -185,6 +228,14 @@ public class HypocenterLocationPanel extends JPanel {
         
         updateParameterFields();
         updateExecuteButtonState();
+        
+        // Ensure residual plot panel is initialized with mode
+        if (modeCombo != null && residualPlotPanel != null) {
+            String initialMode = (String) modeCombo.getSelectedItem();
+            if (initialMode != null) {
+                residualPlotPanel.setMode(initialMode);
+            }
+        }
     }
     
     public JComponent getLeftPanel() {
@@ -598,6 +649,10 @@ public class HypocenterLocationPanel extends JPanel {
             String mode = (String) modeCombo.getSelectedItem();
             updateParameterFields();
             updateLayoutForMode(mode);
+            // Update residual plot panel mode
+            if (residualPlotPanel != null) {
+                residualPlotPanel.setMode(mode);
+            }
         });
         panel.add(modeCombo, gbc);
         
@@ -675,6 +730,13 @@ public class HypocenterLocationPanel extends JPanel {
         trdDistKmField = new JTextField("50,20", 10);
         trdDampFactField = new JTextField("0,1", 10);
         
+        // LSQR parameters for TRD mode
+        lsqrAtolField = new JTextField("1e-6", 10);
+        lsqrBtolField = new JTextField("1e-6", 10);
+        lsqrConlimField = new JTextField("1e8", 10);
+        lsqrIterLimField = new JTextField("1000", 10);
+        lsqrShowLogCheckBox = new JCheckBox("Show LSQR Convergence Log", true);
+        
         // LM optimization parameters for STD mode
         lmInitialStepBoundField = new JTextField("100", 10);
         lmCostRelativeToleranceField = new JTextField("1e-6", 10);
@@ -746,6 +808,56 @@ public class HypocenterLocationPanel extends JPanel {
         
         return panel;
     }
+    
+    /**
+     * Sets up the convergence callback for real-time residual plotting.
+     */
+    private void setupConvergenceCallback() {
+        convergenceCallback = new ConvergenceCallback() {
+            @Override
+            public void onResidualUpdate(int iteration, double residual) {
+                if (residualPlotPanel != null) {
+                    String eventName = getCurrentEventName();
+                    if (eventName != null) {
+                        residualPlotPanel.addResidualPoint(eventName, iteration, residual);
+                    } else {
+                        residualPlotPanel.addResidualPoint(iteration, residual);
+                    }
+                }
+            }
+            
+            @Override
+            public void onLikelihoodUpdate(int sample, double logLikelihood) {
+                if (residualPlotPanel != null) {
+                    residualPlotPanel.addLikelihoodPoint(sample, logLikelihood);
+                }
+            }
+            
+            @Override
+            public void onClusterResidualUpdate(int clusterId, int iteration, double residual) {
+                if (residualPlotPanel != null) {
+                    String eventName = "Cluster " + clusterId;
+                    residualPlotPanel.addResidualPoint(eventName, iteration, residual);
+                }
+            }
+            
+            @Override
+            public void onIterationUpdate(int iteration, int evaluations, double residual, 
+                                         double[] parameterChanges) {
+                onResidualUpdate(iteration, residual);
+            }
+        };
+    }
+    
+    /**
+     * Gets the current event name being processed (for parallel processing).
+     */
+    private String getCurrentEventName() {
+        // This will be set when processing starts
+        return currentEventName;
+    }
+    
+    private String currentEventName;
     
     private void selectTargetDirectory() {
         File selectedDir = com.treloc.xtreloc.app.gui.util.DirectoryChooserHelper.selectDirectory(
@@ -900,6 +1012,11 @@ public class HypocenterLocationPanel extends JPanel {
             parameterTableModel.addRow(new Object[]{"Iteration Count (iterNum)", trdIterNumField.getText(), "Comma-separated (e.g., 10,10)"});
             parameterTableModel.addRow(new Object[]{"Distance Threshold (distKm)", trdDistKmField.getText(), "km, comma-separated (e.g., 50,20)"});
             parameterTableModel.addRow(new Object[]{"Damping Factor (dampFact)", trdDampFactField.getText(), "Comma-separated (e.g., 0,1)"});
+            parameterTableModel.addRow(new Object[]{"LSQR ATOL (atol)", lsqrAtolField.getText(), "Stopping tolerance (default: 1e-6)"});
+            parameterTableModel.addRow(new Object[]{"LSQR BTOL (btol)", lsqrBtolField.getText(), "Stopping tolerance (default: 1e-6)"});
+            parameterTableModel.addRow(new Object[]{"LSQR CONLIM (conlim)", lsqrConlimField.getText(), "Condition number limit (default: 1e8)"});
+            parameterTableModel.addRow(new Object[]{"LSQR Iteration Limit (iter_lim)", lsqrIterLimField.getText(), "Maximum iterations (default: 1000)"});
+            parameterTableModel.addRow(new Object[]{"LSQR Show Log (showLSQR)", lsqrShowLogCheckBox.isSelected() ? "true" : "false", "Display LSQR iteration log"});
         } else if ("MCMC".equals(selectedMode)) {
             parameterTableModel.addRow(new Object[]{"Sample Count (nSamples)", nSamplesField.getText(), ""});
             parameterTableModel.addRow(new Object[]{"Burn-in Period (burnIn)", burnInField.getText(), ""});
@@ -1114,6 +1231,12 @@ public class HypocenterLocationPanel extends JPanel {
         
         String selectedMode = (String) modeCombo.getSelectedItem();
         
+        // Initialize residual plot panel for the selected mode
+        if (residualPlotPanel != null) {
+            residualPlotPanel.setMode(selectedMode);
+            residualPlotPanel.clearData();
+        }
+        
         if ("SYN".equals(selectedMode)) {
             executeSyntheticTest();
             return;
@@ -1264,6 +1387,44 @@ public class HypocenterLocationPanel extends JPanel {
                     for (String val : dampFactArray) {
                         dampFactNode.add(Integer.parseInt(val.trim()));
                     }
+                }
+                
+                // LSQR parameters
+                if (lsqrAtolField != null && !lsqrAtolField.getText().trim().isEmpty()) {
+                    try {
+                        double atol = Double.parseDouble(lsqrAtolField.getText().trim());
+                        ((com.fasterxml.jackson.databind.node.ObjectNode) trdSolver).put("lsqrAtol", atol);
+                    } catch (NumberFormatException e) {
+                        logger.warning("Invalid LSQR ATOL value: " + lsqrAtolField.getText());
+                    }
+                }
+                if (lsqrBtolField != null && !lsqrBtolField.getText().trim().isEmpty()) {
+                    try {
+                        double btol = Double.parseDouble(lsqrBtolField.getText().trim());
+                        ((com.fasterxml.jackson.databind.node.ObjectNode) trdSolver).put("lsqrBtol", btol);
+                    } catch (NumberFormatException e) {
+                        logger.warning("Invalid LSQR BTOL value: " + lsqrBtolField.getText());
+                    }
+                }
+                if (lsqrConlimField != null && !lsqrConlimField.getText().trim().isEmpty()) {
+                    try {
+                        double conlim = Double.parseDouble(lsqrConlimField.getText().trim());
+                        ((com.fasterxml.jackson.databind.node.ObjectNode) trdSolver).put("lsqrConlim", conlim);
+                    } catch (NumberFormatException e) {
+                        logger.warning("Invalid LSQR CONLIM value: " + lsqrConlimField.getText());
+                    }
+                }
+                if (lsqrIterLimField != null && !lsqrIterLimField.getText().trim().isEmpty()) {
+                    try {
+                        int iterLim = Integer.parseInt(lsqrIterLimField.getText().trim());
+                        ((com.fasterxml.jackson.databind.node.ObjectNode) trdSolver).put("lsqrIterLim", iterLim);
+                    } catch (NumberFormatException e) {
+                        logger.warning("Invalid LSQR Iteration Limit value: " + lsqrIterLimField.getText());
+                    }
+                }
+                // LSQR Show Log
+                if (lsqrShowLogCheckBox != null) {
+                    ((com.fasterxml.jackson.databind.node.ObjectNode) trdSolver).put("lsqrShowLog", lsqrShowLogCheckBox.isSelected());
                 }
             }
         } else if ("MCMC".equals(selectedMode)) {
@@ -1564,21 +1725,47 @@ public class HypocenterLocationPanel extends JPanel {
                                     publish("Processing: " + finalDatFile.getName() + " (" + current + "/" + datFiles.size() + ")");
                                     
                                     String mode = (String) modeCombo.getSelectedItem();
+                                    String eventName = finalDatFile.getName();
+                                    currentEventName = eventName;
+                                    
+                                    // Set active event for residual plot
+                                    if (residualPlotPanel != null) {
+                                        SwingUtilities.invokeLater(() -> {
+                                            residualPlotPanel.setActiveEvent(eventName);
+                                        });
+                                    }
+                                    
                                     if ("GRD".equals(mode)) {
                                         HypoGridSearch solver = new HypoGridSearch(config);
                                         solver.start(inputPath, outputPath);
                                     } else if ("STD".equals(mode)) {
                                         HypoStationPairDiff solver = new HypoStationPairDiff(config);
+                                        if (convergenceCallback != null) {
+                                            solver.setConvergenceCallback(convergenceCallback);
+                                        }
                                         solver.start(inputPath, outputPath);
                                     } else if ("MCMC".equals(mode)) {
                                         com.treloc.xtreloc.solver.HypoMCMC solver = new com.treloc.xtreloc.solver.HypoMCMC(config);
+                                        if (convergenceCallback != null) {
+                                            solver.setConvergenceCallback(convergenceCallback);
+                                        }
                                         solver.start(inputPath, outputPath);
                                     } else if ("TRD".equals(mode)) {
                                         com.treloc.xtreloc.solver.HypoTripleDiff solver = 
                                             new com.treloc.xtreloc.solver.HypoTripleDiff(config);
+                                        if (convergenceCallback != null) {
+                                            solver.setConvergenceCallback(convergenceCallback);
+                                        }
                                         solver.start(inputPath, outputPath);
                                     } else {
                                         throw new IllegalArgumentException("Unknown mode: " + mode);
+                                    }
+                                    
+                                    // Mark event as completed
+                                    if (residualPlotPanel != null) {
+                                        SwingUtilities.invokeLater(() -> {
+                                            residualPlotPanel.markEventCompleted(eventName);
+                                        });
                                     }
                                     processedCount.incrementAndGet();
                                     
@@ -1630,18 +1817,47 @@ public class HypocenterLocationPanel extends JPanel {
                                 publish("Processing: " + datFile.getName() + " (" + current + "/" + datFiles.size() + ")");
                                 
                                 String mode = (String) modeCombo.getSelectedItem();
+                                String eventName = datFile.getName();
+                                currentEventName = eventName;
+                                
+                                // Set active event for residual plot
+                                if (residualPlotPanel != null) {
+                                    SwingUtilities.invokeLater(() -> {
+                                        residualPlotPanel.setActiveEvent(eventName);
+                                    });
+                                }
+                                
                                 if ("GRD".equals(mode)) {
                                     HypoGridSearch solver = new HypoGridSearch(config);
                                     solver.start(inputPath, outputPath);
                                 } else if ("STD".equals(mode)) {
                                     HypoStationPairDiff solver = new HypoStationPairDiff(config);
+                                    if (convergenceCallback != null) {
+                                        solver.setConvergenceCallback(convergenceCallback);
+                                    }
+                                    solver.start(inputPath, outputPath);
+                                } else if ("MCMC".equals(mode)) {
+                                    com.treloc.xtreloc.solver.HypoMCMC solver = new com.treloc.xtreloc.solver.HypoMCMC(config);
+                                    if (convergenceCallback != null) {
+                                        solver.setConvergenceCallback(convergenceCallback);
+                                    }
                                     solver.start(inputPath, outputPath);
                                 } else if ("TRD".equals(mode)) {
                                     com.treloc.xtreloc.solver.HypoTripleDiff solver = 
                                         new com.treloc.xtreloc.solver.HypoTripleDiff(config);
+                                    if (convergenceCallback != null) {
+                                        solver.setConvergenceCallback(convergenceCallback);
+                                    }
                                     solver.start(inputPath, outputPath);
                                 } else {
                                     throw new IllegalArgumentException("Unknown mode: " + mode);
+                                }
+                                
+                                // Mark event as completed
+                                if (residualPlotPanel != null) {
+                                    SwingUtilities.invokeLater(() -> {
+                                        residualPlotPanel.markEventCompleted(eventName);
+                                    });
                                 }
                                 processedCount.incrementAndGet();
                                 try {
@@ -2312,6 +2528,65 @@ public class HypocenterLocationPanel extends JPanel {
                     }
                     if (stdSolver.has("maxIterations") && lmMaxIterationsField != null) {
                         lmMaxIterationsField.setText(String.valueOf(stdSolver.get("maxIterations").asInt()));
+                    }
+                }
+                if (config.solver.containsKey("TRD")) {
+                    var trdSolver = config.solver.get("TRD");
+                    if (trdSolver.has("iterNum") && trdIterNumField != null) {
+                        var iterNumArray = trdSolver.get("iterNum");
+                        if (iterNumArray.isArray()) {
+                            StringBuilder sb = new StringBuilder();
+                            for (int i = 0; i < iterNumArray.size(); i++) {
+                                if (i > 0) sb.append(",");
+                                sb.append(iterNumArray.get(i).asInt());
+                            }
+                            trdIterNumField.setText(sb.toString());
+                        }
+                    }
+                    if (trdSolver.has("distKm") && trdDistKmField != null) {
+                        var distKmArray = trdSolver.get("distKm");
+                        if (distKmArray.isArray()) {
+                            StringBuilder sb = new StringBuilder();
+                            for (int i = 0; i < distKmArray.size(); i++) {
+                                if (i > 0) sb.append(",");
+                                sb.append(distKmArray.get(i).asInt());
+                            }
+                            trdDistKmField.setText(sb.toString());
+                        }
+                    }
+                    if (trdSolver.has("dampFact") && trdDampFactField != null) {
+                        var dampFactArray = trdSolver.get("dampFact");
+                        if (dampFactArray.isArray()) {
+                            StringBuilder sb = new StringBuilder();
+                            for (int i = 0; i < dampFactArray.size(); i++) {
+                                if (i > 0) sb.append(",");
+                                sb.append(dampFactArray.get(i).asInt());
+                            }
+                            trdDampFactField.setText(sb.toString());
+                        }
+                    }
+                    // LSQR parameters
+                    if (trdSolver.has("lsqrAtol") && lsqrAtolField != null) {
+                        lsqrAtolField.setText(String.valueOf(trdSolver.get("lsqrAtol").asDouble()));
+                    }
+                    if (trdSolver.has("lsqrBtol") && lsqrBtolField != null) {
+                        lsqrBtolField.setText(String.valueOf(trdSolver.get("lsqrBtol").asDouble()));
+                    }
+                    if (trdSolver.has("lsqrConlim") && lsqrConlimField != null) {
+                        lsqrConlimField.setText(String.valueOf(trdSolver.get("lsqrConlim").asDouble()));
+                    }
+                    if (trdSolver.has("lsqrIterLim") && lsqrIterLimField != null) {
+                        lsqrIterLimField.setText(String.valueOf(trdSolver.get("lsqrIterLim").asInt()));
+                    }
+                    // LSQR Show Log
+                    if (trdSolver.has("lsqrShowLog") && lsqrShowLogCheckBox != null) {
+                        lsqrShowLogCheckBox.setSelected(trdSolver.get("lsqrShowLog").asBoolean());
+                    } else if (lsqrShowLogCheckBox != null) {
+                        // Default: show log if log level is INFO or lower
+                        String logLevel = config.logLevel != null ? config.logLevel : "INFO";
+                        boolean defaultShow = java.util.logging.Level.INFO.intValue() <= 
+                                            java.util.logging.Level.parse(logLevel.toUpperCase()).intValue();
+                        lsqrShowLogCheckBox.setSelected(defaultShow);
                     }
                 }
             }
