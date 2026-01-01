@@ -101,6 +101,25 @@ tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8'
 }
 
+javadoc {
+    options.encoding = 'UTF-8'
+    options.charSet = 'UTF-8'
+    options.docEncoding = 'UTF-8'
+    options.addStringOption('Xdoclint:none', '-quiet')
+    if (JavaVersion.current().isJava9Compatible()) {
+        options.addBooleanOption('html5', true)
+    }
+    destinationDir = file("${project.buildDir}/docs/javadoc")
+    title = "${project.name} ${project.version} API Documentation"
+}
+
+task javadocJar(type: Jar, dependsOn: javadoc) {
+    group = 'documentation'
+    description = 'Creates a JAR file containing the Javadoc'
+    archiveClassifier = 'javadoc'
+    from javadoc.destinationDir
+}
+
 application {
     mainClass = 'com.treloc.xtreloc.app.gui.XTreLocGUI'
 }

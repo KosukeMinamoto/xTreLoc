@@ -86,7 +86,7 @@ public class HypocenterLocationPanel extends JPanel {
     private JTextField trdDistKmField;
     private JTextField trdDampFactField;
     
-    // LSQR parameters for TRD mode
+    /** LSQR solver parameters for triple difference relocation (TRD mode). */
     private JTextField lsqrAtolField;
     private JTextField lsqrBtolField;
     private JTextField lsqrConlimField;
@@ -95,7 +95,7 @@ public class HypocenterLocationPanel extends JPanel {
     private JCheckBox lsqrCalcVarCheckBox;
     private JCheckBox showConvergenceLogCheckBox;
     
-    // LM optimization parameters for STD mode
+    /** Levenberg-Marquardt optimization parameters for station pair difference (STD mode). */
     private JTextField lmInitialStepBoundField;
     private JTextField lmCostRelativeToleranceField;
     private JTextField lmParRelativeToleranceField;
@@ -168,8 +168,8 @@ public class HypocenterLocationPanel extends JPanel {
         leftPanel.add(Box.createVerticalStrut(5));
         
         JPanel paramPanel = createParameterPanel();
-        paramPanel.setPreferredSize(new Dimension(PANEL_WIDTH, 200));
-        paramPanel.setMaximumSize(new Dimension(PANEL_WIDTH, 200));
+        paramPanel.setPreferredSize(new Dimension(PANEL_WIDTH, 240));
+        paramPanel.setMaximumSize(new Dimension(PANEL_WIDTH, 240));
         leftPanel.add(paramPanel);
         leftPanel.add(Box.createVerticalStrut(5));
         
@@ -670,7 +670,6 @@ public class HypocenterLocationPanel extends JPanel {
             String mode = (String) modeCombo.getSelectedItem();
             updateParameterFields();
             updateLayoutForMode(mode);
-            // Update residual plot panel mode
             if (residualPlotPanel != null) {
                 residualPlotPanel.setMode(mode);
             }
@@ -720,7 +719,7 @@ public class HypocenterLocationPanel extends JPanel {
         });
         
         JScrollPane scrollPane = new JScrollPane(parameterTable);
-        scrollPane.setPreferredSize(new Dimension(450, 240));
+        scrollPane.setPreferredSize(new Dimension(450, 300));
         parameterPanel.add(scrollPane, BorderLayout.CENTER);
         
         totalGridsField = new JTextField("300", 10);
@@ -751,7 +750,6 @@ public class HypocenterLocationPanel extends JPanel {
         trdDistKmField = new JTextField("50,20", 10);
         trdDampFactField = new JTextField("0,1", 10);
         
-        // LSQR parameters for TRD mode
         lsqrAtolField = new JTextField("1e-6", 10);
         lsqrBtolField = new JTextField("1e-6", 10);
         lsqrConlimField = new JTextField("1e8", 10);
@@ -759,10 +757,8 @@ public class HypocenterLocationPanel extends JPanel {
         lsqrShowLogCheckBox = new JCheckBox("Show LSQR Convergence Log", true);
         lsqrCalcVarCheckBox = new JCheckBox("Calculate Variance (Error Estimation)", true);
         
-        // Convergence log display option (for all modes)
         showConvergenceLogCheckBox = new JCheckBox("Show Convergence Log", false);
         
-        // LM optimization parameters for STD mode
         lmInitialStepBoundField = new JTextField("100", 10);
         lmCostRelativeToleranceField = new JTextField("1e-6", 10);
         lmParRelativeToleranceField = new JTextField("1e-6", 10);
@@ -933,8 +929,6 @@ public class HypocenterLocationPanel extends JPanel {
                     logMessage = String.format("[%s] %s", eventName, logMessage);
                 }
                 appendConvergenceLog(logMessage);
-                
-                // コンソールに収束状況を出力
                 System.out.println(logMessage);
             }
             
@@ -975,9 +969,10 @@ public class HypocenterLocationPanel extends JPanel {
     
     /**
      * Gets the current event name being processed (for parallel processing).
+     * 
+     * @return the current event name, or null if not set
      */
     private String getCurrentEventName() {
-        // This will be set when processing starts
         return currentEventName;
     }
     
@@ -1001,10 +996,8 @@ public class HypocenterLocationPanel extends JPanel {
         fileChooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter(
             "Station files (*.tbl)", "tbl"));
         
-        // Set default directory from settings (like io directory)
         com.treloc.xtreloc.app.gui.util.FileChooserHelper.setDefaultDirectory(fileChooser);
         
-        // Set the current text field path as the initial directory if it exists
         String currentPath = stationFileField.getText().trim();
         if (!currentPath.isEmpty()) {
             File currentFile = new File(currentPath);
@@ -1189,7 +1182,6 @@ public class HypocenterLocationPanel extends JPanel {
             return;
         }
         
-        // If a process is running, disable Execute and enable Cancel
         if (currentWorker != null && !currentWorker.isDone()) {
             executeButton.setEnabled(false);
             if (cancelButton != null) {
@@ -1246,7 +1238,6 @@ public class HypocenterLocationPanel extends JPanel {
                 String distKmStr = getParameterValue("distKm");
                 String dampFactStr = getParameterValue("dampFact");
                 
-                // If not available from parameter table, get directly from field
                 if (iterNumStr.isEmpty() && trdIterNumField != null) {
                     iterNumStr = trdIterNumField.getText();
                 }
@@ -1381,7 +1372,6 @@ public class HypocenterLocationPanel extends JPanel {
         
         String selectedMode = (String) modeCombo.getSelectedItem();
         
-        // Initialize residual plot panel for the selected mode
         if (residualPlotPanel != null) {
             residualPlotPanel.setMode(selectedMode);
             residualPlotPanel.clearData();
@@ -1426,7 +1416,6 @@ public class HypocenterLocationPanel extends JPanel {
                 new com.fasterxml.jackson.databind.node.ObjectNode(
                     com.fasterxml.jackson.databind.node.JsonNodeFactory.instance));
             if (stdSolver instanceof com.fasterxml.jackson.databind.node.ObjectNode) {
-                // Show convergence log option
                 if (showConvergenceLogCheckBox != null) {
                     ((com.fasterxml.jackson.databind.node.ObjectNode) stdSolver).put("showConvergenceLog", showConvergenceLogCheckBox.isSelected());
                 }
@@ -1438,7 +1427,6 @@ public class HypocenterLocationPanel extends JPanel {
                 String maxEvalStr = getParameterValue("maxEvaluations");
                 String maxIterStr = getParameterValue("maxIterations");
                 
-                // If not available from parameter table, get directly from field
                 if (initialStepBoundStr.isEmpty() && lmInitialStepBoundField != null) {
                     initialStepBoundStr = lmInitialStepBoundField.getText();
                 }
@@ -1508,7 +1496,6 @@ public class HypocenterLocationPanel extends JPanel {
                 String distKmStr = getParameterValue("distKm");
                 String dampFactStr = getParameterValue("dampFact");
                 
-                // If not available from parameter table, get directly from field
                 if (iterNumStr.isEmpty() && trdIterNumField != null) {
                     iterNumStr = trdIterNumField.getText();
                 }
@@ -1544,12 +1531,10 @@ public class HypocenterLocationPanel extends JPanel {
                     }
                 }
                 
-                // Show convergence log option
                 if (showConvergenceLogCheckBox != null) {
                     ((com.fasterxml.jackson.databind.node.ObjectNode) trdSolver).put("showConvergenceLog", showConvergenceLogCheckBox.isSelected());
                 }
                 
-                // LSQR parameters
                 if (lsqrAtolField != null && !lsqrAtolField.getText().trim().isEmpty()) {
                     try {
                         double atol = Double.parseDouble(lsqrAtolField.getText().trim());
@@ -1582,11 +1567,9 @@ public class HypocenterLocationPanel extends JPanel {
                         logger.warning("Invalid LSQR Iteration Limit value: " + lsqrIterLimField.getText());
                     }
                 }
-                // LSQR Show Log
                 if (lsqrShowLogCheckBox != null) {
                     ((com.fasterxml.jackson.databind.node.ObjectNode) trdSolver).put("lsqrShowLog", lsqrShowLogCheckBox.isSelected());
                 }
-                // LSQR Calculate Variance
                 if (lsqrCalcVarCheckBox != null) {
                     ((com.fasterxml.jackson.databind.node.ObjectNode) trdSolver).put("lsqrCalcVar", lsqrCalcVarCheckBox.isSelected());
                 }
@@ -1765,7 +1748,6 @@ public class HypocenterLocationPanel extends JPanel {
                             }
                         }
                         
-                        // 中断チェック
                         if (isCancelled()) {
                             publish("Cancelled");
                             return null;
@@ -1777,7 +1759,6 @@ public class HypocenterLocationPanel extends JPanel {
                         try {
                             solver.start("", "");
                         } catch (RuntimeException e) {
-                            // Check if this is an interruption
                             if (isCancelled() || e.getMessage() != null && e.getMessage().contains("interrupted")) {
                                 publish("Cancelled");
                                 return null;
@@ -1796,7 +1777,6 @@ public class HypocenterLocationPanel extends JPanel {
                             publish("Cancelled");
                             return null;
                         }
-                        // Detailed error reporting for GUI
                         StringBuilder errorMsg = new StringBuilder("TRD mode execution error:\n");
                         errorMsg.append("  Error type: ").append(e.getClass().getName()).append("\n");
                         errorMsg.append("  Error message: ").append(e.getMessage()).append("\n");
@@ -1807,7 +1787,6 @@ public class HypocenterLocationPanel extends JPanel {
                         String errorStr = errorMsg.toString();
                         publish(errorStr);
                         logger.severe(errorStr);
-                        // Print stack trace to logger
                         java.io.StringWriter sw = new java.io.StringWriter();
                         java.io.PrintWriter pw = new java.io.PrintWriter(sw);
                         e.printStackTrace(pw);
@@ -1891,7 +1870,6 @@ public class HypocenterLocationPanel extends JPanel {
                                         throw new IllegalArgumentException("Unknown mode: " + mode);
                                     }
                                     
-                                    // Mark event as completed
                                     if (residualPlotPanel != null) {
                                         SwingUtilities.invokeLater(() -> {
                                             residualPlotPanel.markEventCompleted(eventName);
@@ -1950,7 +1928,6 @@ public class HypocenterLocationPanel extends JPanel {
                                 String eventName = datFile.getName();
                                 currentEventName = eventName;
                                 
-                                // Set active event for residual plot
                                 if (residualPlotPanel != null) {
                                     SwingUtilities.invokeLater(() -> {
                                         residualPlotPanel.setActiveEvent(eventName);
@@ -2042,7 +2019,6 @@ public class HypocenterLocationPanel extends JPanel {
                     }
                     
                 } catch (Exception e) {
-                    // Detailed error reporting for GUI
                     StringBuilder errorMsg = new StringBuilder("Execution error in " + currentMode + " mode:\n");
                     errorMsg.append("  Error type: ").append(e.getClass().getName()).append("\n");
                     errorMsg.append("  Error message: ").append(e.getMessage()).append("\n");
@@ -2398,21 +2374,21 @@ public class HypocenterLocationPanel extends JPanel {
                     clsConfig.epsPercentile = percentile;
                 }
             } catch (NumberFormatException e) {
-                // Invalid value, ignore
+                // Ignore invalid values
             }
         }
         if (!rmsThresholdStr.isEmpty()) {
             try {
                 clsConfig.rmsThreshold = Double.parseDouble(rmsThresholdStr);
             } catch (NumberFormatException e) {
-                // Invalid value, ignore
+                // Ignore invalid values
             }
         }
         if (!locErrThresholdStr.isEmpty()) {
             try {
                 clsConfig.locErrThreshold = Double.parseDouble(locErrThresholdStr);
             } catch (NumberFormatException e) {
-                // Invalid value, ignore
+                // Ignore invalid values
             }
         }
         clsConfig.useBinaryFormat = true;
@@ -2452,7 +2428,6 @@ public class HypocenterLocationPanel extends JPanel {
                     }
                     
                 } catch (Exception e) {
-                    // Detailed error reporting for GUI
                     StringBuilder errorMsg = new StringBuilder("Clustering process error:\n");
                     errorMsg.append("  Error type: ").append(e.getClass().getName()).append("\n");
                     errorMsg.append("  Error message: ").append(e.getMessage()).append("\n");
@@ -2540,12 +2515,20 @@ public class HypocenterLocationPanel extends JPanel {
     }
     
     /**
-     * datファイルから震源データを読み込む
+     * Loads hypocenter data from a dat file.
+     * 
+     * <p>The dat file format consists of two lines:
+     * <ul>
+     *   <li>Line 1: latitude longitude depth [type]</li>
+     *   <li>Line 2: xerr (km) yerr (km) zerr (km) rms residual</li>
+     * </ul>
+     * 
+     * @param datFile the dat file to load
+     * @return list of hypocenters loaded from the file
      */
     private java.util.List<com.treloc.xtreloc.app.gui.model.Hypocenter> loadHypocentersFromDatFile(File datFile) {
         java.util.List<com.treloc.xtreloc.app.gui.model.Hypocenter> hypocenters = new java.util.ArrayList<>();
         try (java.io.BufferedReader br = new java.io.BufferedReader(new java.io.FileReader(datFile))) {
-            // 1行目: 緯度 経度 深度 タイプ
             String line1 = br.readLine();
             if (line1 != null) {
                 String[] parts1 = line1.trim().split("\\s+");
@@ -2556,7 +2539,6 @@ public class HypocenterLocationPanel extends JPanel {
                     String time = datFile.getName().replace(".dat", "");
                     String type = parts1.length > 3 ? parts1[3] : null;
                     
-                    // 2行目: xerr in km, yerr in km, zerr in km, rms residual
                     double xerr = 0.0;
                     double yerr = 0.0;
                     double zerr = 0.0;
@@ -2670,18 +2652,15 @@ public class HypocenterLocationPanel extends JPanel {
                     if (stdSolver.has("maxIterations") && lmMaxIterationsField != null) {
                         lmMaxIterationsField.setText(String.valueOf(stdSolver.get("maxIterations").asInt()));
                     }
-                    // Show convergence log option
                     if (stdSolver.has("showConvergenceLog") && showConvergenceLogCheckBox != null) {
                         showConvergenceLogCheckBox.setSelected(stdSolver.get("showConvergenceLog").asBoolean());
                     }
                 }
                 if (config.solver.containsKey("MCMC")) {
                     var mcmcSolver = config.solver.get("MCMC");
-                    // Show convergence log option
                     if (mcmcSolver.has("showConvergenceLog") && showConvergenceLogCheckBox != null) {
                         showConvergenceLogCheckBox.setSelected(mcmcSolver.get("showConvergenceLog").asBoolean());
                     }
-                    // MCMC parameters
                     if (mcmcSolver.has("nSamples") && nSamplesField != null) {
                         nSamplesField.setText(String.valueOf(mcmcSolver.get("nSamples").asInt()));
                     }
@@ -2697,7 +2676,6 @@ public class HypocenterLocationPanel extends JPanel {
                     if (mcmcSolver.has("temperature") && temperatureField != null) {
                         temperatureField.setText(String.valueOf(mcmcSolver.get("temperature").asDouble()));
                     }
-                    // Show convergence log option
                     if (mcmcSolver.has("showConvergenceLog") && showConvergenceLogCheckBox != null) {
                         showConvergenceLogCheckBox.setSelected(mcmcSolver.get("showConvergenceLog").asBoolean());
                     }
@@ -2737,7 +2715,6 @@ public class HypocenterLocationPanel extends JPanel {
                             trdDampFactField.setText(sb.toString());
                         }
                     }
-                    // LSQR parameters
                     if (trdSolver.has("lsqrAtol") && lsqrAtolField != null) {
                         lsqrAtolField.setText(String.valueOf(trdSolver.get("lsqrAtol").asDouble()));
                     }
@@ -2750,7 +2727,6 @@ public class HypocenterLocationPanel extends JPanel {
                     if (trdSolver.has("lsqrIterLim") && lsqrIterLimField != null) {
                         lsqrIterLimField.setText(String.valueOf(trdSolver.get("lsqrIterLim").asInt()));
                     }
-                    // LSQR Show Log
                     if (trdSolver.has("lsqrShowLog") && lsqrShowLogCheckBox != null) {
                         lsqrShowLogCheckBox.setSelected(trdSolver.get("lsqrShowLog").asBoolean());
                     } else if (lsqrShowLogCheckBox != null) {
@@ -2760,11 +2736,9 @@ public class HypocenterLocationPanel extends JPanel {
                                             java.util.logging.Level.parse(logLevel.toUpperCase()).intValue();
                         lsqrShowLogCheckBox.setSelected(defaultShow);
                     }
-                    // LSQR Calculate Variance
                     if (trdSolver.has("lsqrCalcVar") && lsqrCalcVarCheckBox != null) {
                         lsqrCalcVarCheckBox.setSelected(trdSolver.get("lsqrCalcVar").asBoolean());
                     }
-                    // Show convergence log option
                     if (trdSolver.has("showConvergenceLog") && showConvergenceLogCheckBox != null) {
                         showConvergenceLogCheckBox.setSelected(trdSolver.get("showConvergenceLog").asBoolean());
                     }

@@ -104,7 +104,6 @@ public class HypoTripleDiff extends SolverBase {
             }
             if (trdConfig.datDirectory != null) {
                 this.targetDir = trdConfig.datDirectory;
-                // Validate that target directory exists
                 if (!java.nio.file.Files.exists(this.targetDir)) {
                     throw new IllegalArgumentException(
                         String.format("Target directory does not exist: %s\n" +
@@ -134,7 +133,6 @@ public class HypoTripleDiff extends SolverBase {
             this.distKmArray = parseIntArray(trdSolver, "distKm", new int[]{50, 20});
             this.dampFactArray = parseIntArray(trdSolver, "dampFact", new int[]{0, 1});
             
-            // LSQR parameters
             if (trdSolver.has("lsqrAtol")) {
                 this.lsqrAtol = trdSolver.get("lsqrAtol").asDouble();
             }
@@ -154,7 +152,6 @@ public class HypoTripleDiff extends SolverBase {
             this.iterNumArray = new int[]{10, 10};
             this.distKmArray = new int[]{50, 20};
             this.dampFactArray = new int[]{0, 1};
-            // Use default LSQR parameters
         }
         
         if (iterNumArray.length != distKmArray.length || iterNumArray.length != dampFactArray.length) {
@@ -178,19 +175,16 @@ public class HypoTripleDiff extends SolverBase {
             throw new RuntimeException("Failed to initialize SpatialClustering", e);
         }
         
-        // LSQR show log setting: check config first, then fall back to log level
         if (appConfig.solver != null && appConfig.solver.containsKey("TRD")) {
             var trdSolver = appConfig.solver.get("TRD");
             if (trdSolver.has("lsqrShowLog")) {
                 this.showLSQR = trdSolver.get("lsqrShowLog").asBoolean();
             } else {
-                // Fall back to log level if not explicitly set
                 String logLevel = appConfig.logLevel != null ? appConfig.logLevel : "INFO";
                 this.showLSQR = java.util.logging.Level.INFO.intValue() <= 
                                java.util.logging.Level.parse(logLevel.toUpperCase()).intValue();
             }
         } else {
-            // Fall back to log level if no solver config
             String logLevel = appConfig.logLevel != null ? appConfig.logLevel : "INFO";
             this.showLSQR = java.util.logging.Level.INFO.intValue() <= 
                            java.util.logging.Level.parse(logLevel.toUpperCase()).intValue();
@@ -415,7 +409,6 @@ public class HypoTripleDiff extends SolverBase {
                             originalPoint.getType(),
                             originalPoint.getCid()
                         );
-                        // lagTableとusedIdxをコピー（走時データを保持）
                         point.setLagTable(originalPoint.getLagTable());
                         point.setUsedIdx(originalPoint.getUsedIdx());
                     clusterPoints.add(point);
@@ -486,6 +479,8 @@ public class HypoTripleDiff extends SolverBase {
                     logger.info("Cluster " + clusterId + ", stage " + (i + 1) + ": Using " + filteredTripDiff.size() + 
                                " triple differences (filtered from " + tripDiff.size() + " total)");
                     
+                    double[] dm = null;
+                    
                     for (int j = 0; j < iterNum; j++) {
                         // Check for interruption
                         if (Thread.currentThread().isInterrupted()) {
@@ -495,14 +490,10 @@ public class HypoTripleDiff extends SolverBase {
                         try {
                             logger.info("Cluster " + clusterId + ", stage " + (i + 1) + ", iteration " + (j + 1) + "/" + iterNum);
                             
-                            // 最後のイタレーションステップかどうかを判定
-                            // 最後のstageの最後のiterationの場合のみ誤差を計算
                             boolean isLastStage = (i == iterNumArray.length - 1);
                             boolean isLastIteration = (j == iterNum - 1);
                             boolean shouldCalcVar = calcVar && isLastStage && isLastIteration;
                             
-                            // Recalculate numTarget based on current targMap (may have changed in previous iterations)
-                            // targMapに-1でない要素の数をカウント（実際の有効なイベント数）
                             int currentNumTarget = 0;
                             int maxTargIdx = -1;
                             for (int idx : targMap) {
@@ -513,9 +504,6 @@ public class HypoTripleDiff extends SolverBase {
                                     }
                                 }
                             }
-                            // maxTargIdx + 1は、インデックスが0から始まる連続した値であることを前提としている
-                            // しかし、反復中にイベントがERRとしてマークされると、targMapにギャップが生じる可能性がある
-                            // そのため、実際の有効なイベント数（currentNumTarget）を使用する
                             numTarget = currentNumTarget;
                             
                             if (maxTargIdx >= 0 && maxTargIdx + 1 != currentNumTarget) {
@@ -562,11 +550,25 @@ public class HypoTripleDiff extends SolverBase {
                                     "Actual: " + gCols);
                             }
                             
+                            double[] weights;
+                            if (j == 0 || dm == null) {
+                                weights = new double[d.length];
+                                for (int k = 0; k < weights.length; k++) {
+                                    weights[k] = 1.0;
+                                }
+                            } else {
+                                double[] residuals = calculateResiduals(GObj, d, dm);
+                                weights = turkeyBiweight(residuals, 4.685);
+                            }
+                            
+                            Object GWeighted = applyWeightsToMatrix(GObj, weights);
+                            double[] dWeighted = applyWeightsToVector(d, weights);
+                            
                             ScipyLSQR.LSQRResult result;
-                            if (GObj instanceof OpenMapRealMatrix) {
+                            if (GWeighted instanceof OpenMapRealMatrix) {
                                 result = ScipyLSQR.lsqr(
-                                    (OpenMapRealMatrix) GObj,
-                                    d,
+                                    (OpenMapRealMatrix) GWeighted,
+                                    dWeighted,
                                     dampFact,
                                     lsqrAtol,
                                     lsqrBtol,
@@ -578,8 +580,8 @@ public class HypoTripleDiff extends SolverBase {
                                     logConsumer);
                             } else {
                                 result = ScipyLSQR.lsqr(
-                                    (COOSparseMatrix) GObj,
-                                    d,
+                                    (COOSparseMatrix) GWeighted,
+                                    dWeighted,
                                     dampFact,
                                     lsqrAtol,
                                     lsqrBtol,
@@ -591,9 +593,8 @@ public class HypoTripleDiff extends SolverBase {
                                     logConsumer);
                             }
                             
-                            // Report convergence information
                             if (convergenceCallback != null && result != null) {
-                                double residualRMS = result.r2norm; // Use r2norm as residual
+                                double residualRMS = result.r2norm;
                                 convergenceCallback.onClusterResidualUpdate(clusterId, j, residualRMS);
                             }
                             
@@ -601,7 +602,7 @@ public class HypoTripleDiff extends SolverBase {
                                 throw new IllegalArgumentException("LSQR solver returned null result.");
                             }
                             
-                            double[] dm = result.x;
+                            dm = result.x;
                             
                             if (dm == null || dm.length == 0) {
                                 throw new IllegalArgumentException("LSQR solver returned empty solution vector.");
@@ -615,35 +616,13 @@ public class HypoTripleDiff extends SolverBase {
                                     "numTarget=" + numTarget);
                             }
                         
-                            List<Double> dlonList = new ArrayList<>();
-                            List<Double> dlatList = new ArrayList<>();
-                            List<Double> ddepList = new ArrayList<>();
-                            for (int k = 0; k < numTarget; k++) {
-                                if (k * 3 + 2 >= dm.length) {
-                                    throw new IndexOutOfBoundsException(
-                                        "Index out of bounds when accessing dm array. " +
-                                        "k=" + k + ", numTarget=" + numTarget + ", dm.length=" + dm.length +
-                                        ". This may indicate a mismatch between the number of target events and the solution vector size.");
-                                }
-                                dlonList.add(dm[k * 3]);
-                                dlatList.add(dm[k * 3 + 1]);
-                                ddepList.add(dm[k * 3 + 2]);
-                            }
-                            double meanDlon = calculateMean(dlonList);
-                            double meanDlat = calculateMean(dlatList);
-                            double meanDdep = calculateMean(ddepList);
-                            
                             double[] var = null;
                             if (shouldCalcVar && result != null && result.var != null) {
                                 var = result.var;
                             }
                             
-                            // dmの単位は[km]。経度・緯度は[deg]なので、deg2kmで割って変換する必要がある
-                            double deg2km = HypoUtils.getDeg2Km();
-                            
                             for (int k = 0; k < clusterPoints.size(); k++) {
                                 if (targMap[k] == -1) {
-                                    // REFまたはERRイベントは更新しない（delta xの項を削除）
                                     continue;
                                 }
                                 Point point = clusterPoints.get(k);
@@ -654,10 +633,9 @@ public class HypoTripleDiff extends SolverBase {
                                         "targIdx=" + targIdx + ", dm.length=" + dm.length +
                                         ". This may indicate a mismatch in the target mapping.");
                                 }
-                                // dmの単位は[km]、位置の単位は[deg]なので、deg2kmで割って変換
-                                double newLon = point.getLon() + (dm[targIdx * 3] - meanDlon);
-                                double newLat = point.getLat() + (dm[targIdx * 3 + 1] - meanDlat);
-                                double newDep = point.getDep() + dm[targIdx * 3 + 2] - meanDdep;
+                                double newLon = point.getLon() + dm[targIdx * 3];
+                                double newLat = point.getLat() + dm[targIdx * 3 + 1];
+                                double newDep = point.getDep() + dm[targIdx * 3 + 2];
  
                                 if (newDep < stnBottom || newDep > hypBottom) {
                                     logger.warning("Point " + point.getTime() + " in cluster " + clusterId + 
@@ -814,17 +792,18 @@ public class HypoTripleDiff extends SolverBase {
         int M = trpDiff.size();
         int N = Arrays.stream(targMap).max().getAsInt() + 1;
         
-        double[] d = new double[M];
+        int M_constrained = M + 3;
+        double[] d = new double[M_constrained];
         
-        long matrixSize = (long) M * (long) (3 * N);
+        long matrixSize = (long) M_constrained * (long) (3 * N);
         boolean useCOO = matrixSize > 10_000_000L;
         
         if (useCOO) {
             logger.info(String.format(
                 "Using COOSparseMatrix for large matrix (M=%d, N=%d, size=%d). " +
                 "This avoids array size limitations.",
-                M, N, matrixSize));
-            COOSparseMatrix G = new COOSparseMatrix(M, 3 * N);
+                M_constrained, N, matrixSize));
+            COOSparseMatrix G = new COOSparseMatrix(M_constrained, 3 * N);
             
             for (int m = 0; m < M; m++) {
                 TripleDifference td = trpDiff.get(m);
@@ -835,12 +814,10 @@ public class HypoTripleDiff extends SolverBase {
                 
                 int nCol0 = targMap[eve0];
                 int nCol1 = targMap[eve1];
-                // REFまたはERRイベントを含むtriple differenceを除外（delta xの項を削除）
                 if (nCol0 == -1 || nCol1 == -1) {
                     continue;
                 }
                 
-                // nCol0とnCol1は既に-1でないことが確認されているので、直接設定
                 G.setEntry(m, 3 * nCol1, partialTbl[eve1][stnl][0] - partialTbl[eve1][stnk][0]);
                 G.setEntry(m, 3 * nCol1 + 1, partialTbl[eve1][stnl][1] - partialTbl[eve1][stnk][1]);
                 G.setEntry(m, 3 * nCol1 + 2, partialTbl[eve1][stnl][2] - partialTbl[eve1][stnk][2]);
@@ -855,10 +832,27 @@ public class HypoTripleDiff extends SolverBase {
                 double lagObs = td.tdTime;
                 d[m] = lagObs - lagCal;
             }
+            
+            double constraintWeight = 0;
+            
+            for (int k = 0; k < N; k++) {
+                G.setEntry(M, 3 * k, constraintWeight);
+            }
+            d[M] = 0.0;
+            
+            for (int k = 0; k < N; k++) {
+                G.setEntry(M + 1, 3 * k + 1, constraintWeight);
+            }
+            d[M + 1] = 0.0;
+            
+            for (int k = 0; k < N; k++) {
+                G.setEntry(M + 2, 3 * k + 2, constraintWeight);
+            }
+            d[M + 2] = 0.0;
             
             return new Object[] { d, G };
         } else {
-            OpenMapRealMatrix G = new OpenMapRealMatrix(M, 3 * N);
+            OpenMapRealMatrix G = new OpenMapRealMatrix(M_constrained, 3 * N);
             
             for (int m = 0; m < M; m++) {
                 TripleDifference td = trpDiff.get(m);
@@ -869,12 +863,10 @@ public class HypoTripleDiff extends SolverBase {
                 
                 int nCol0 = targMap[eve0];
                 int nCol1 = targMap[eve1];
-                // REFまたはERRイベントを含むtriple differenceを除外（delta xの項を削除）
                 if (nCol0 == -1 || nCol1 == -1) {
                     continue;
                 }
                 
-                // nCol0とnCol1は既に-1でないことが確認されているので、直接設定
                 G.setEntry(m, 3 * nCol1, partialTbl[eve1][stnl][0] - partialTbl[eve1][stnk][0]);
                 G.setEntry(m, 3 * nCol1 + 1, partialTbl[eve1][stnl][1] - partialTbl[eve1][stnk][1]);
                 G.setEntry(m, 3 * nCol1 + 2, partialTbl[eve1][stnl][2] - partialTbl[eve1][stnk][2]);
@@ -889,14 +881,40 @@ public class HypoTripleDiff extends SolverBase {
                 double lagObs = td.tdTime;
                 d[m] = lagObs - lagCal;
             }
+            
+            double constraintWeight = 0;
+            
+            for (int k = 0; k < N; k++) {
+                G.setEntry(M, 3 * k, constraintWeight);
+            }
+            d[M] = 0.0;
+            
+            for (int k = 0; k < N; k++) {
+                G.setEntry(M + 1, 3 * k + 1, constraintWeight);
+            }
+            d[M + 1] = 0.0;
+            
+            for (int k = 0; k < N; k++) {
+                G.setEntry(M + 2, 3 * k + 2, constraintWeight);
+            }
+            d[M + 2] = 0.0;
             
             return new Object[] { d, G };
         }
     }
     
     /**
-     * @return the partial table. The first dimension is the event, the second is the station,
-     * and the third is the partial derivatives of lon, lat, dep, and travel time.
+     * Creates a partial derivative table for a cluster of events.
+     * 
+     * <p>The table structure is:
+     * <ul>
+     *   <li>First dimension: event index</li>
+     *   <li>Second dimension: station index</li>
+     *   <li>Third dimension: partial derivatives [longitude, latitude, depth, travel time]</li>
+     * </ul>
+     * 
+     * @param cluster the cluster of events
+     * @return three-dimensional array of partial derivatives
      */
     private double[][][] createPartialTblArray(Cluster<Point> cluster) {
         List<Point> points = cluster.getPoints();
@@ -904,9 +922,7 @@ public class HypoTripleDiff extends SolverBase {
         int numStations = stationTable.length;
         double[][][] partialTbl = new double[numEvents][numStations][4];
         
-        // 並列化: イベント数が少ない場合は順次処理、多い場合は並列処理
         if (numEvents <= 1 || numJobs <= 1) {
-            // 順次処理
             int i = 0;
             for (Point point : points) {
                 int[] usedIdx = new int[numStations];
@@ -940,7 +956,6 @@ public class HypoTripleDiff extends SolverBase {
                 }
             }
         } else {
-            // 並列処理
             java.util.concurrent.ExecutorService executor = 
                 java.util.concurrent.Executors.newFixedThreadPool(numJobs);
             java.util.List<java.util.concurrent.Future<Void>> futures = new java.util.ArrayList<>();
@@ -983,12 +998,10 @@ public class HypoTripleDiff extends SolverBase {
                     futures.add(future);
                 }
                 
-                // すべてのタスクの完了を待つ
                 for (java.util.concurrent.Future<Void> future : futures) {
                     try {
                         future.get();
                     } catch (java.util.concurrent.ExecutionException e) {
-                        // エラーは各タスク内でログに記録されているので、ここでは無視
                         logger.warning("Error in parallel partial derivative calculation: " + e.getMessage());
                     } catch (InterruptedException e) {
                         Thread.currentThread().interrupt();
@@ -1013,7 +1026,10 @@ public class HypoTripleDiff extends SolverBase {
     }
     
     /**
-     * @return the mean (average) of the values
+     * Calculates the arithmetic mean of a list of values.
+     * 
+     * @param values the list of values
+     * @return the mean value, or 0.0 if the list is empty
      */
     private double calculateMean(List<Double> values) {
         if (values.isEmpty()) {
@@ -1027,7 +1043,10 @@ public class HypoTripleDiff extends SolverBase {
     }
     
     /**
-     * @return the median of the values
+     * Calculates the median of a list of values.
+     * 
+     * @param values the list of values (will be sorted in-place)
+     * @return the median value, or 0.0 if the list is empty
      */
     private double calculateMedian(List<Double> values) {
         if (values.isEmpty()) {
@@ -1040,6 +1059,131 @@ public class HypoTripleDiff extends SolverBase {
         } else {
             return values.get(size / 2);
         }
+    }
+    
+    /**
+     * Calculates Turkey biweight weights for robust estimation.
+     * This function downweights outliers based on their residuals.
+     * 
+     * @param residuals array of residuals
+     * @param c tuning constant (default: 4.685)
+     * @return array of weights (0 to 1)
+     */
+    private double[] turkeyBiweight(double[] residuals, double c) {
+        if (residuals.length == 0) {
+            return new double[0];
+        }
+        
+        List<Double> residualList = new ArrayList<>();
+        for (double r : residuals) {
+            residualList.add(r);
+        }
+        double median = calculateMedian(residualList);
+        
+        List<Double> absDeviations = new ArrayList<>();
+        for (double r : residuals) {
+            absDeviations.add(Math.abs(r - median));
+        }
+        double mad = calculateMedian(absDeviations);
+        
+        double scale = c * mad + Double.MIN_VALUE;
+        
+        double[] weights = new double[residuals.length];
+        for (int i = 0; i < residuals.length; i++) {
+            double u = residuals[i] / scale;
+            if (Math.abs(u) > 1.0) {
+                weights[i] = 0.0;
+            } else {
+                weights[i] = Math.pow(1.0 - u * u, 2);
+            }
+        }
+        
+        return weights;
+    }
+    
+    /**
+     * Applies weights to a sparse matrix by multiplying each row by its weight.
+     * 
+     * @param G the matrix to weight
+     * @param weights array of weights (one per row)
+     * @return weighted matrix (same type as input)
+     */
+    private Object applyWeightsToMatrix(Object G, double[] weights) {
+        if (G instanceof OpenMapRealMatrix) {
+            OpenMapRealMatrix GMat = (OpenMapRealMatrix) G;
+            OpenMapRealMatrix GWeighted = new OpenMapRealMatrix(GMat.getRowDimension(), GMat.getColumnDimension());
+            for (int i = 0; i < GMat.getRowDimension(); i++) {
+                for (int j = 0; j < GMat.getColumnDimension(); j++) {
+                    double value = GMat.getEntry(i, j);
+                    if (value != 0.0) {
+                        GWeighted.setEntry(i, j, value * weights[i]);
+                    }
+                }
+            }
+            return GWeighted;
+        } else if (G instanceof COOSparseMatrix) {
+            COOSparseMatrix GMat = (COOSparseMatrix) G;
+            COOSparseMatrix GWeighted = new COOSparseMatrix(GMat.getRowDimension(), GMat.getColumnDimension());
+            for (int i = 0; i < GMat.getRowDimension(); i++) {
+                for (int j = 0; j < GMat.getColumnDimension(); j++) {
+                    double value = GMat.getEntry(i, j);
+                    if (value != 0.0) {
+                        GWeighted.setEntry(i, j, value * weights[i]);
+                    }
+                }
+            }
+            return GWeighted;
+        } else {
+            throw new IllegalArgumentException("Unknown matrix type: " + G.getClass().getName());
+        }
+    }
+    
+    /**
+     * Applies weights to a vector by multiplying each element by its weight.
+     * 
+     * @param d the vector to weight
+     * @param weights array of weights (one per element)
+     * @return weighted vector
+     */
+    private double[] applyWeightsToVector(double[] d, double[] weights) {
+        if (d.length != weights.length) {
+            throw new IllegalArgumentException("Vector and weights must have the same length");
+        }
+        double[] dWeighted = new double[d.length];
+        for (int i = 0; i < d.length; i++) {
+            dWeighted[i] = d[i] * weights[i];
+        }
+        return dWeighted;
+    }
+    
+    /**
+     * Calculates residuals: residuals = d - G * dm
+     * 
+     * @param G the design matrix
+     * @param d the residual vector
+     * @param dm the solution vector
+     * @return array of residuals
+     */
+    private double[] calculateResiduals(Object G, double[] d, double[] dm) {
+        double[] residuals = new double[d.length];
+        
+        if (G instanceof OpenMapRealMatrix) {
+            OpenMapRealMatrix GMat = (OpenMapRealMatrix) G;
+            double[] Gdm = GMat.operate(dm);
+            for (int i = 0; i < d.length; i++) {
+                residuals[i] = d[i] - Gdm[i];
+            }
+        } else if (G instanceof COOSparseMatrix) {
+            COOSparseMatrix GMat = (COOSparseMatrix) G;
+            double[] Gdm = GMat.operate(dm);
+            for (int i = 0; i < d.length; i++) {
+                residuals[i] = d[i] - Gdm[i];
+            }
+        } else {
+            throw new IllegalArgumentException("Unknown matrix type: " + G.getClass().getName());
+        }
+        
+        return residuals;
     }
     
     /**

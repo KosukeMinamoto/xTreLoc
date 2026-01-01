@@ -230,6 +230,35 @@
                     <failIfNoTests>false</failIfNoTests>
                 </configuration>
             </plugin>
+
+            <!-- Javadoc Plugin -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-javadoc-plugin</artifactId>
+                <version>3.6.0</version>
+                <configuration>
+                    <encoding>UTF-8</encoding>
+                    <charset>UTF-8</charset>
+                    <docencoding>UTF-8</docencoding>
+                    <source>20</source>
+                    <target>20</target>
+                    <failOnError>false</failOnError>
+                    <quiet>true</quiet>
+                    <additionalOptions>
+                        <additionalOption>-Xdoclint:none</additionalOption>
+                    </additionalOptions>
+                    <windowtitle>${project.name} ${project.version} API Documentation</windowtitle>
+                    <doctitle>${project.name} ${project.version} API Documentation</doctitle>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>attach-javadocs</id>
+                        <goals>
+                            <goal>jar</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
         </plugins>
     </build>
 
