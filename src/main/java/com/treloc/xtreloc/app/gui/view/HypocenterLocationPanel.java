@@ -92,6 +92,7 @@ public class HypocenterLocationPanel extends JPanel {
     private JTextField lsqrConlimField;
     private JTextField lsqrIterLimField;
     private JCheckBox lsqrShowLogCheckBox;
+    private JCheckBox lsqrCalcVarCheckBox;
     private JCheckBox showConvergenceLogCheckBox;
     
     // LM optimization parameters for STD mode
@@ -719,7 +720,7 @@ public class HypocenterLocationPanel extends JPanel {
         });
         
         JScrollPane scrollPane = new JScrollPane(parameterTable);
-        scrollPane.setPreferredSize(new Dimension(450, 200));
+        scrollPane.setPreferredSize(new Dimension(450, 240));
         parameterPanel.add(scrollPane, BorderLayout.CENTER);
         
         totalGridsField = new JTextField("300", 10);
@@ -756,6 +757,7 @@ public class HypocenterLocationPanel extends JPanel {
         lsqrConlimField = new JTextField("1e8", 10);
         lsqrIterLimField = new JTextField("1000", 10);
         lsqrShowLogCheckBox = new JCheckBox("Show LSQR Convergence Log", true);
+        lsqrCalcVarCheckBox = new JCheckBox("Calculate Variance (Error Estimation)", true);
         
         // Convergence log display option (for all modes)
         showConvergenceLogCheckBox = new JCheckBox("Show Convergence Log", false);
@@ -932,9 +934,8 @@ public class HypocenterLocationPanel extends JPanel {
                 }
                 appendConvergenceLog(logMessage);
                 
-                if (shouldShowLog()) {
-                    appendLog(logMessage);
-                }
+                // コンソールに収束状況を出力
+                System.out.println(logMessage);
             }
             
             @Override
@@ -1122,12 +1123,6 @@ public class HypocenterLocationPanel extends JPanel {
             parameterTableModel.addRow(new Object[]{"Parallelization (numJobs)", numJobsField.getText(), ""});
             parameterTableModel.addRow(new Object[]{"Weight Threshold (threshold)", thresholdField.getText(), "weight (empty or 0.0 for no filtering)"});
             parameterTableModel.addRow(new Object[]{"Maximum Depth (hypBottom)", hypBottomField.getText(), "km"});
-            // Show convergence log option (for STD, MCMC, TRD modes)
-            if ("STD".equals(selectedMode) || "MCMC".equals(selectedMode) || "TRD".equals(selectedMode)) {
-                parameterTableModel.addRow(new Object[]{"Show Convergence Log (showConvergenceLog)", 
-                    showConvergenceLogCheckBox.isSelected() ? "true" : "false", 
-                    "Display convergence log in log panel (graph is always shown)"});
-            }
         }
         
         if ("GRD".equals(selectedMode)) {
@@ -1149,6 +1144,7 @@ public class HypocenterLocationPanel extends JPanel {
             parameterTableModel.addRow(new Object[]{"LSQR CONLIM (conlim)", lsqrConlimField.getText(), "Condition number limit (default: 1e8)"});
             parameterTableModel.addRow(new Object[]{"LSQR Iteration Limit (iter_lim)", lsqrIterLimField.getText(), "Maximum iterations (default: 1000)"});
             parameterTableModel.addRow(new Object[]{"LSQR Show Log (showLSQR)", lsqrShowLogCheckBox.isSelected() ? "true" : "false", "Display LSQR iteration log"});
+            parameterTableModel.addRow(new Object[]{"LSQR Calculate Variance (calcVar)", lsqrCalcVarCheckBox.isSelected() ? "true" : "false", "Estimate error covariance diagonal elements"});
         } else if ("MCMC".equals(selectedMode)) {
             parameterTableModel.addRow(new Object[]{"Sample Count (nSamples)", nSamplesField.getText(), ""});
             parameterTableModel.addRow(new Object[]{"Burn-in Period (burnIn)", burnInField.getText(), ""});
@@ -1589,6 +1585,10 @@ public class HypocenterLocationPanel extends JPanel {
                 // LSQR Show Log
                 if (lsqrShowLogCheckBox != null) {
                     ((com.fasterxml.jackson.databind.node.ObjectNode) trdSolver).put("lsqrShowLog", lsqrShowLogCheckBox.isSelected());
+                }
+                // LSQR Calculate Variance
+                if (lsqrCalcVarCheckBox != null) {
+                    ((com.fasterxml.jackson.databind.node.ObjectNode) trdSolver).put("lsqrCalcVar", lsqrCalcVarCheckBox.isSelected());
                 }
             }
         } else if ("MCMC".equals(selectedMode)) {
@@ -2087,12 +2087,10 @@ public class HypocenterLocationPanel extends JPanel {
             @Override
             protected void done() {
                 SwingUtilities.invokeLater(() -> {
-                    executeButton.setEnabled(true);
-                    cancelButton.setEnabled(false);
                     try {
                         get();
                     } catch (java.util.concurrent.CancellationException e) {
-                        appendLog("Processing was cancelled");
+                        appendLog("Cancelled successfully");
                     } catch (Exception e) {
                         // Detailed error message for GUI log panel
                         StringBuilder errorMsg = new StringBuilder("Execution error:\n");
@@ -2108,6 +2106,9 @@ public class HypocenterLocationPanel extends JPanel {
                             "Error: " + e.getMessage() + 
                             (e.getCause() != null ? "\nCaused by: " + e.getCause().getMessage() : ""),
                             "Error", JOptionPane.ERROR_MESSAGE);
+                    } finally {
+                        executeButton.setEnabled(true);
+                        cancelButton.setEnabled(false);
                     }
                 });
             }
@@ -2297,22 +2298,27 @@ public class HypocenterLocationPanel extends JPanel {
             
             @Override
             protected void done() {
-                executeButton.setEnabled(true);
-                cancelButton.setEnabled(false);
-                try {
-                    get();
-                } catch (Exception e) {
-                    // Error should already be logged via publish() in doInBackground
-                    // Show dialog with detailed message
-                    StringBuilder errorMsg = new StringBuilder("Error: " + e.getMessage());
-                    if (e.getCause() != null) {
-                        errorMsg.append("\nCaused by: ").append(e.getCause().getClass().getSimpleName())
-                               .append(": ").append(e.getCause().getMessage());
+                SwingUtilities.invokeLater(() -> {
+                    try {
+                        get();
+                    } catch (java.util.concurrent.CancellationException e) {
+                        appendLog("Cancelled successfully");
+                    } catch (Exception e) {
+                        // Error should already be logged via publish() in doInBackground
+                        // Show dialog with detailed message
+                        StringBuilder errorMsg = new StringBuilder("Error: " + e.getMessage());
+                        if (e.getCause() != null) {
+                            errorMsg.append("\nCaused by: ").append(e.getCause().getClass().getSimpleName())
+                                   .append(": ").append(e.getCause().getMessage());
+                        }
+                        JOptionPane.showMessageDialog(HypocenterLocationPanel.this,
+                            errorMsg.toString(),
+                            "Error", JOptionPane.ERROR_MESSAGE);
+                    } finally {
+                        executeButton.setEnabled(true);
+                        cancelButton.setEnabled(false);
                     }
-                    JOptionPane.showMessageDialog(HypocenterLocationPanel.this,
-                        errorMsg.toString(),
-                        "Error", JOptionPane.ERROR_MESSAGE);
-                }
+                });
             }
         };
         
@@ -2476,22 +2482,27 @@ public class HypocenterLocationPanel extends JPanel {
             
             @Override
             protected void done() {
-                executeButton.setEnabled(true);
-                cancelButton.setEnabled(false);
-                try {
-                    get();
-                } catch (Exception e) {
-                    // Error should already be logged via publish() in doInBackground
-                    // Show dialog with detailed message
-                    StringBuilder errorMsg = new StringBuilder("Error: " + e.getMessage());
-                    if (e.getCause() != null) {
-                        errorMsg.append("\nCaused by: ").append(e.getCause().getClass().getSimpleName())
-                               .append(": ").append(e.getCause().getMessage());
+                SwingUtilities.invokeLater(() -> {
+                    try {
+                        get();
+                    } catch (java.util.concurrent.CancellationException e) {
+                        appendLog("Cancelled successfully");
+                    } catch (Exception e) {
+                        // Error should already be logged via publish() in doInBackground
+                        // Show dialog with detailed message
+                        StringBuilder errorMsg = new StringBuilder("Error: " + e.getMessage());
+                        if (e.getCause() != null) {
+                            errorMsg.append("\nCaused by: ").append(e.getCause().getClass().getSimpleName())
+                                   .append(": ").append(e.getCause().getMessage());
+                        }
+                        JOptionPane.showMessageDialog(HypocenterLocationPanel.this,
+                            errorMsg.toString(),
+                            "Error", JOptionPane.ERROR_MESSAGE);
+                    } finally {
+                        executeButton.setEnabled(true);
+                        cancelButton.setEnabled(false);
                     }
-                    JOptionPane.showMessageDialog(HypocenterLocationPanel.this,
-                        errorMsg.toString(),
-                        "Error", JOptionPane.ERROR_MESSAGE);
-                }
+                });
             }
         };
         
@@ -2523,7 +2534,7 @@ public class HypocenterLocationPanel extends JPanel {
                 JOptionPane.QUESTION_MESSAGE);
             if (result == JOptionPane.YES_OPTION) {
                 currentWorker.cancel(true);
-                appendLog("中断要求が送信されました...");
+                appendLog("Interrupt request sent...");
             }
         }
     }
@@ -2748,6 +2759,10 @@ public class HypocenterLocationPanel extends JPanel {
                         boolean defaultShow = java.util.logging.Level.INFO.intValue() <= 
                                             java.util.logging.Level.parse(logLevel.toUpperCase()).intValue();
                         lsqrShowLogCheckBox.setSelected(defaultShow);
+                    }
+                    // LSQR Calculate Variance
+                    if (trdSolver.has("lsqrCalcVar") && lsqrCalcVarCheckBox != null) {
+                        lsqrCalcVarCheckBox.setSelected(trdSolver.get("lsqrCalcVar").asBoolean());
                     }
                     // Show convergence log option
                     if (trdSolver.has("showConvergenceLog") && showConvergenceLogCheckBox != null) {

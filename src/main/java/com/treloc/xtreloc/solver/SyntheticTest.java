@@ -183,6 +183,7 @@ public class SyntheticTest extends SolverBase {
             }
             String fullPath = new File(outputDirectory, fileName).getPath();
             
+            String pointType = (h.type != null && !h.type.isEmpty()) ? h.type : "SYN";
             Point point = new Point(
                 h.time,
                 h.lat,
@@ -193,8 +194,8 @@ public class SyntheticTest extends SolverBase {
                 0.0,
                 0.0,
                 fullPath,
-                "SYN",
-                -1
+                pointType,
+                h.clusterId != null ? h.clusterId : -1
             );
             points.add(point);
         }
@@ -213,13 +214,16 @@ public class SyntheticTest extends SolverBase {
     public void generateData(Point pointTrue, double minSelectRate, double maxSelectRate) throws TauModelException {
         PointsHandler pointsHandler = new PointsHandler();
         
-        double[][] lagTable = randomLagTime(pointTrue, minSelectRate, maxSelectRate, true);
+        boolean isRef = "REF".equals(pointTrue.getType());
+        boolean addPerturbation = !isRef;
+        
+        double[][] lagTable = randomLagTime(pointTrue, minSelectRate, maxSelectRate, addPerturbation);
 
         double lat = pointTrue.getLat();
         double lon = pointTrue.getLon();
         double dep = pointTrue.getDep();
         
-        if (addLocationPerturbation) {
+        if (addLocationPerturbation && !isRef) {
             lat = pointTrue.getLat() + rand.nextGaussian() * locErr;
             double latRad = Math.toRadians(pointTrue.getLat());
             lon = pointTrue.getLon() + rand.nextGaussian() * locErr / Math.cos(latRad);
@@ -270,6 +274,7 @@ public class SyntheticTest extends SolverBase {
             logger.fine("Residual is too small (" + res + "), setting to 999.0 for GRD mode");
         }
         
+        String outputType = isRef ? "REF" : "SYN";
         Point point_output = new Point(
             pointTrue.getTime(),
             lat,
@@ -280,8 +285,8 @@ public class SyntheticTest extends SolverBase {
             0.0,
             res,
             pointTrue.getFilePath(),
-            "SYN",
-            -1
+            outputType,
+            pointTrue.getCid()
         );
         point_output.setLagTable(lagTable);
         pointsHandler.setMainPoint(point_output);

@@ -202,12 +202,26 @@ public class DirectoryChooserHelper {
             currentDir = new File(System.getProperty("user.dir"));
         }
         
-        String dirName = JOptionPane.showInputDialog(
-            parent,
-            "Enter new directory name:",
-            "New Folder",
-            JOptionPane.PLAIN_MESSAGE
+        JTextField textField = new JTextField();
+        Object[] message = {"Enter new directory name:", textField};
+        JOptionPane inputPane = new JOptionPane(
+            message,
+            JOptionPane.PLAIN_MESSAGE,
+            JOptionPane.OK_CANCEL_OPTION
         );
+        JDialog inputDialog = inputPane.createDialog(parent, "New Folder");
+        inputDialog.setAlwaysOnTop(true);
+        inputDialog.setVisible(true);
+        inputDialog.dispose();
+        
+        String dirName = null;
+        Object value = inputPane.getValue();
+        if (value != null && value instanceof Integer) {
+            int result = (Integer) value;
+            if (result == JOptionPane.OK_OPTION) {
+                dirName = textField.getText();
+            }
+        }
         
         if (dirName == null || dirName.trim().isEmpty()) {
             return;
@@ -232,12 +246,15 @@ public class DirectoryChooserHelper {
                 fileChooser.rescanCurrentDirectory();
                 fileChooser.setSelectedFile(newDir);
                 
-                JOptionPane.showMessageDialog(
-                    parent,
-                    "Directory created:\n" + newDir.getAbsolutePath(),
-                    "Success",
-                    JOptionPane.INFORMATION_MESSAGE
+                JOptionPane optionPane = new JOptionPane(
+                    "Created successfully\n" + newDir.getAbsolutePath(),
+                    JOptionPane.INFORMATION_MESSAGE,
+                    JOptionPane.DEFAULT_OPTION
                 );
+                JDialog dialog = optionPane.createDialog(parent, "Success");
+                dialog.setAlwaysOnTop(true);
+                dialog.setVisible(true);
+                dialog.dispose();
             } else {
                 JOptionPane.showMessageDialog(
                     parent,

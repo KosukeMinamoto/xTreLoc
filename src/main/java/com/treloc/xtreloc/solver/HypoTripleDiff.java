@@ -59,8 +59,10 @@ public class HypoTripleDiff extends SolverBase {
     private double lsqrBtol = 1e-6;
     private double lsqrConlim = 1e8;
     private int lsqrIterLim = 1000;
+    private boolean calcVar = true;
     private java.util.function.Consumer<String> logConsumer;
     private ConvergenceCallback convergenceCallback;
+    private int numJobs;
 
     /**
      * Sets the convergence callback for reporting convergence information.
@@ -89,6 +91,8 @@ public class HypoTripleDiff extends SolverBase {
         super(appConfig);
         
         this.hypBottom = appConfig.hypBottom;
+        this.numJobs = appConfig.numJobs > 0 ? appConfig.numJobs : 
+            Math.max(1, Runtime.getRuntime().availableProcessors() - 1);
         
         if (appConfig.modes != null && appConfig.modes.containsKey("TRD")) {
             var trdConfig = appConfig.modes.get("TRD");
@@ -142,6 +146,9 @@ public class HypoTripleDiff extends SolverBase {
             }
             if (trdSolver.has("lsqrIterLim")) {
                 this.lsqrIterLim = trdSolver.get("lsqrIterLim").asInt();
+            }
+            if (trdSolver.has("lsqrCalcVar")) {
+                this.calcVar = trdSolver.get("lsqrCalcVar").asBoolean();
             }
         } else {
             this.iterNumArray = new int[]{10, 10};
@@ -408,18 +415,34 @@ public class HypoTripleDiff extends SolverBase {
                             originalPoint.getType(),
                             originalPoint.getCid()
                         );
+                        // lagTableとusedIdxをコピー（走時データを保持）
+                        point.setLagTable(originalPoint.getLagTable());
+                        point.setUsedIdx(originalPoint.getUsedIdx());
                     clusterPoints.add(point);
                 }
                 
                 int[] targMap = new int[clusterPoints.size()];
                 int numTarget = 0;
+                int refCount = 0;
+                int errCount = 0;
                 for (int i = 0; i < clusterPoints.size(); i++) {
                     if (clusterPoints.get(i).getType().equals("ERR") || clusterPoints.get(i).getType().equals("REF")) {
                         targMap[i] = -1;
+                        if (clusterPoints.get(i).getType().equals("REF")) {
+                            refCount++;
+                        } else {
+                            errCount++;
+                        }
                     } else {
                         targMap[i] = numTarget;
                         numTarget++;
                     }
+                }
+                if (refCount > 0) {
+                    logger.info("Cluster " + clusterId + ": " + refCount + " REF events will not be updated (excluded from relocation)");
+                }
+                if (errCount > 0) {
+                    logger.info("Cluster " + clusterId + ": " + errCount + " ERR events excluded from relocation");
                 }
                 
                 if (numTarget == 0) {
@@ -472,7 +495,14 @@ public class HypoTripleDiff extends SolverBase {
                         try {
                             logger.info("Cluster " + clusterId + ", stage " + (i + 1) + ", iteration " + (j + 1) + "/" + iterNum);
                             
+                            // 最後のイタレーションステップかどうかを判定
+                            // 最後のstageの最後のiterationの場合のみ誤差を計算
+                            boolean isLastStage = (i == iterNumArray.length - 1);
+                            boolean isLastIteration = (j == iterNum - 1);
+                            boolean shouldCalcVar = calcVar && isLastStage && isLastIteration;
+                            
                             // Recalculate numTarget based on current targMap (may have changed in previous iterations)
+                            // targMapに-1でない要素の数をカウント（実際の有効なイベント数）
                             int currentNumTarget = 0;
                             int maxTargIdx = -1;
                             for (int idx : targMap) {
@@ -483,13 +513,15 @@ public class HypoTripleDiff extends SolverBase {
                                     }
                                 }
                             }
-                            int expectedNumTarget = maxTargIdx + 1;
+                            // maxTargIdx + 1は、インデックスが0から始まる連続した値であることを前提としている
+                            // しかし、反復中にイベントがERRとしてマークされると、targMapにギャップが生じる可能性がある
+                            // そのため、実際の有効なイベント数（currentNumTarget）を使用する
+                            numTarget = currentNumTarget;
                             
-                            if (currentNumTarget != expectedNumTarget) {
-                                logger.warning("Cluster " + clusterId + ": numTarget mismatch. currentNumTarget=" + currentNumTarget + 
-                                             ", expectedNumTarget=" + expectedNumTarget + ". Using expectedNumTarget.");
+                            if (maxTargIdx >= 0 && maxTargIdx + 1 != currentNumTarget) {
+                                logger.warning("Cluster " + clusterId + ": targMap has gaps. maxTargIdx=" + maxTargIdx + 
+                                             ", currentNumTarget=" + currentNumTarget + ". Using currentNumTarget.");
                             }
-                            numTarget = expectedNumTarget;
                             
                             if (numTarget == 0) {
                                 logger.warning("Cluster " + clusterId + " has no valid target events after filtering, skipping remaining iterations");
@@ -541,7 +573,7 @@ public class HypoTripleDiff extends SolverBase {
                                     lsqrConlim,
                                     lsqrIterLim,
                                     showLSQR,
-                                    false,
+                                    shouldCalcVar,
                                     null,
                                     logConsumer);
                             } else {
@@ -554,7 +586,7 @@ public class HypoTripleDiff extends SolverBase {
                                     lsqrConlim,
                                     lsqrIterLim,
                                     showLSQR,
-                                    false,
+                                    shouldCalcVar,
                                     null,
                                     logConsumer);
                             }
@@ -563,6 +595,10 @@ public class HypoTripleDiff extends SolverBase {
                             if (convergenceCallback != null && result != null) {
                                 double residualRMS = result.r2norm; // Use r2norm as residual
                                 convergenceCallback.onClusterResidualUpdate(clusterId, j, residualRMS);
+                            }
+                            
+                            if (result == null) {
+                                throw new IllegalArgumentException("LSQR solver returned null result.");
                             }
                             
                             double[] dm = result.x;
@@ -593,12 +629,21 @@ public class HypoTripleDiff extends SolverBase {
                                 dlatList.add(dm[k * 3 + 1]);
                                 ddepList.add(dm[k * 3 + 2]);
                             }
-                            double medianDlon = calculateMedian(dlonList);
-                            double medianDlat = calculateMedian(dlatList);
-                            double medianDdep = calculateMedian(ddepList);
+                            double meanDlon = calculateMean(dlonList);
+                            double meanDlat = calculateMean(dlatList);
+                            double meanDdep = calculateMean(ddepList);
+                            
+                            double[] var = null;
+                            if (shouldCalcVar && result != null && result.var != null) {
+                                var = result.var;
+                            }
+                            
+                            // dmの単位は[km]。経度・緯度は[deg]なので、deg2kmで割って変換する必要がある
+                            double deg2km = HypoUtils.getDeg2Km();
                             
                             for (int k = 0; k < clusterPoints.size(); k++) {
                                 if (targMap[k] == -1) {
+                                    // REFまたはERRイベントは更新しない（delta xの項を削除）
                                     continue;
                                 }
                                 Point point = clusterPoints.get(k);
@@ -609,10 +654,11 @@ public class HypoTripleDiff extends SolverBase {
                                         "targIdx=" + targIdx + ", dm.length=" + dm.length +
                                         ". This may indicate a mismatch in the target mapping.");
                                 }
-                                double newLon = point.getLon() + dm[targIdx * 3] - medianDlon;
-                                double newLat = point.getLat() + dm[targIdx * 3 + 1] - medianDlat;
-                                double newDep = point.getDep() + dm[targIdx * 3 + 2] - medianDdep;
-                                
+                                // dmの単位は[km]、位置の単位は[deg]なので、deg2kmで割って変換
+                                double newLon = point.getLon() + (dm[targIdx * 3] - meanDlon);
+                                double newLat = point.getLat() + (dm[targIdx * 3 + 1] - meanDlat);
+                                double newDep = point.getDep() + dm[targIdx * 3 + 2] - meanDdep;
+ 
                                 if (newDep < stnBottom || newDep > hypBottom) {
                                     logger.warning("Point " + point.getTime() + " in cluster " + clusterId + 
                                                  " has depth " + newDep + " outside valid range [" + stnBottom + ", " + hypBottom + "]. Marking as ERR.");
@@ -622,6 +668,25 @@ public class HypoTripleDiff extends SolverBase {
                                     point.setLon(newLon);
                                     point.setLat(newLat);
                                     point.setDep(newDep);
+                                    
+                                    if (shouldCalcVar && var != null && targIdx * 3 + 2 < var.length) {
+                                        double lonVar = var[targIdx * 3];
+                                        double latVar = var[targIdx * 3 + 1];
+                                        double depVar = var[targIdx * 3 + 2];
+
+                                        double lonStd = Math.sqrt(Math.max(0.0, lonVar));
+                                        double latStd = Math.sqrt(Math.max(0.0, latVar));
+                                        double depStd = Math.sqrt(Math.max(0.0, depVar));
+                                        
+                                        double newLatRad = Math.toRadians(newLat);
+                                        double elon = lonStd * HypoUtils.getDeg2Km() * Math.cos(newLatRad);
+                                        double elat = latStd * HypoUtils.getDeg2Km();
+                                        double edep = depStd;
+                                        
+                                        point.setElon(elon);
+                                        point.setElat(elat);
+                                        point.setEdep(edep);
+                                    }
                                 }
                             }
                             
@@ -770,21 +835,19 @@ public class HypoTripleDiff extends SolverBase {
                 
                 int nCol0 = targMap[eve0];
                 int nCol1 = targMap[eve1];
-                if (nCol0 == -1 && nCol1 == -1) {
+                // REFまたはERRイベントを含むtriple differenceを除外（delta xの項を削除）
+                if (nCol0 == -1 || nCol1 == -1) {
                     continue;
                 }
                 
-                if (nCol1 != -1) {
-                    G.setEntry(m, 3 * nCol1, partialTbl[eve1][stnl][0] - partialTbl[eve1][stnk][0]);
-                    G.setEntry(m, 3 * nCol1 + 1, partialTbl[eve1][stnl][1] - partialTbl[eve1][stnk][1]);
-                    G.setEntry(m, 3 * nCol1 + 2, partialTbl[eve1][stnl][2] - partialTbl[eve1][stnk][2]);
-                }
+                // nCol0とnCol1は既に-1でないことが確認されているので、直接設定
+                G.setEntry(m, 3 * nCol1, partialTbl[eve1][stnl][0] - partialTbl[eve1][stnk][0]);
+                G.setEntry(m, 3 * nCol1 + 1, partialTbl[eve1][stnl][1] - partialTbl[eve1][stnk][1]);
+                G.setEntry(m, 3 * nCol1 + 2, partialTbl[eve1][stnl][2] - partialTbl[eve1][stnk][2]);
                 
-                if (nCol0 != -1) {
-                    G.setEntry(m, 3 * nCol0, -(partialTbl[eve0][stnl][0] - partialTbl[eve0][stnk][0]));
-                    G.setEntry(m, 3 * nCol0 + 1, -(partialTbl[eve0][stnl][1] - partialTbl[eve0][stnk][1]));
-                    G.setEntry(m, 3 * nCol0 + 2, -(partialTbl[eve0][stnl][2] - partialTbl[eve0][stnk][2]));
-                }
+                G.setEntry(m, 3 * nCol0, -(partialTbl[eve0][stnl][0] - partialTbl[eve0][stnk][0]));
+                G.setEntry(m, 3 * nCol0 + 1, -(partialTbl[eve0][stnl][1] - partialTbl[eve0][stnk][1]));
+                G.setEntry(m, 3 * nCol0 + 2, -(partialTbl[eve0][stnl][2] - partialTbl[eve0][stnk][2]));
                 
                 double cal0 = partialTbl[eve0][stnl][3] - partialTbl[eve0][stnk][3];
                 double cal1 = partialTbl[eve1][stnl][3] - partialTbl[eve1][stnk][3];
@@ -806,21 +869,19 @@ public class HypoTripleDiff extends SolverBase {
                 
                 int nCol0 = targMap[eve0];
                 int nCol1 = targMap[eve1];
-                if (nCol0 == -1 && nCol1 == -1) {
+                // REFまたはERRイベントを含むtriple differenceを除外（delta xの項を削除）
+                if (nCol0 == -1 || nCol1 == -1) {
                     continue;
                 }
                 
-                if (nCol1 != -1) {
-                    G.setEntry(m, 3 * nCol1, partialTbl[eve1][stnl][0] - partialTbl[eve1][stnk][0]);
-                    G.setEntry(m, 3 * nCol1 + 1, partialTbl[eve1][stnl][1] - partialTbl[eve1][stnk][1]);
-                    G.setEntry(m, 3 * nCol1 + 2, partialTbl[eve1][stnl][2] - partialTbl[eve1][stnk][2]);
-                }
+                // nCol0とnCol1は既に-1でないことが確認されているので、直接設定
+                G.setEntry(m, 3 * nCol1, partialTbl[eve1][stnl][0] - partialTbl[eve1][stnk][0]);
+                G.setEntry(m, 3 * nCol1 + 1, partialTbl[eve1][stnl][1] - partialTbl[eve1][stnk][1]);
+                G.setEntry(m, 3 * nCol1 + 2, partialTbl[eve1][stnl][2] - partialTbl[eve1][stnk][2]);
                 
-                if (nCol0 != -1) {
-                    G.setEntry(m, 3 * nCol0, -(partialTbl[eve0][stnl][0] - partialTbl[eve0][stnk][0]));
-                    G.setEntry(m, 3 * nCol0 + 1, -(partialTbl[eve0][stnl][1] - partialTbl[eve0][stnk][1]));
-                    G.setEntry(m, 3 * nCol0 + 2, -(partialTbl[eve0][stnl][2] - partialTbl[eve0][stnk][2]));
-                }
+                G.setEntry(m, 3 * nCol0, -(partialTbl[eve0][stnl][0] - partialTbl[eve0][stnk][0]));
+                G.setEntry(m, 3 * nCol0 + 1, -(partialTbl[eve0][stnl][1] - partialTbl[eve0][stnk][1]));
+                G.setEntry(m, 3 * nCol0 + 2, -(partialTbl[eve0][stnl][2] - partialTbl[eve0][stnk][2]));
                 
                 double cal0 = partialTbl[eve0][stnl][3] - partialTbl[eve0][stnk][3];
                 double cal1 = partialTbl[eve1][stnl][3] - partialTbl[eve1][stnk][3];
@@ -843,39 +904,126 @@ public class HypoTripleDiff extends SolverBase {
         int numStations = stationTable.length;
         double[][][] partialTbl = new double[numEvents][numStations][4];
         
-        int i = 0;
-        for (Point point : points) {
-            int[] usedIdx = new int[numStations];
-            for (int j = 0; j < numStations; j++) {
-                usedIdx[j] = j;
-            }
-            try {
-                Object[] tmp = partialDerivativeMatrix(stationTable, usedIdx, point);
-                double[][] dtdr = (double[][]) tmp[0];
-                double[] trvTime = (double[]) tmp[1];
+        // 並列化: イベント数が少ない場合は順次処理、多い場合は並列処理
+        if (numEvents <= 1 || numJobs <= 1) {
+            // 順次処理
+            int i = 0;
+            for (Point point : points) {
+                int[] usedIdx = new int[numStations];
                 for (int j = 0; j < numStations; j++) {
-                    partialTbl[i][j][0] = dtdr[j][0];
-                    partialTbl[i][j][1] = dtdr[j][1];
-                    partialTbl[i][j][2] = dtdr[j][2];
-                    partialTbl[i][j][3] = trvTime[j];
+                    usedIdx[j] = j;
                 }
-            } catch (Exception e) {
-                String errorMsg = String.format(
-                    "Error creating partial derivative table for point %d (time: %s) in cluster:\n" +
-                    "  Error: %s\n" +
-                    "  Point coordinates: lat=%.6f, lon=%.6f, dep=%.3f\n" +
-                    "  Number of stations: %d",
-                    i, point.getTime(), e.getMessage(), point.getLat(), point.getLon(), point.getDep(), numStations);
-                logger.severe(errorMsg);
-                if (e.getCause() != null) {
-                    logger.severe("  Caused by: " + e.getCause().getMessage());
+                try {
+                    Object[] tmp = partialDerivativeMatrix(stationTable, usedIdx, point);
+                    double[][] dtdr = (double[][]) tmp[0];
+                    double[] trvTime = (double[]) tmp[1];
+                    for (int j = 0; j < numStations; j++) {
+                        partialTbl[i][j][0] = dtdr[j][0];
+                        partialTbl[i][j][1] = dtdr[j][1];
+                        partialTbl[i][j][2] = dtdr[j][2];
+                        partialTbl[i][j][3] = trvTime[j];
+                    }
+                } catch (Exception e) {
+                    String errorMsg = String.format(
+                        "Error creating partial derivative table for point %d (time: %s) in cluster:\n" +
+                        "  Error: %s\n" +
+                        "  Point coordinates: lat=%.6f, lon=%.6f, dep=%.3f\n" +
+                        "  Number of stations: %d",
+                        i, point.getTime(), e.getMessage(), point.getLat(), point.getLon(), point.getDep(), numStations);
+                    logger.severe(errorMsg);
+                    if (e.getCause() != null) {
+                        logger.severe("  Caused by: " + e.getCause().getMessage());
+                    }
+                    points.get(i).setType("ERR");
+                } finally {
+                    i++;
                 }
-                points.get(i).setType("ERR");
+            }
+        } else {
+            // 並列処理
+            java.util.concurrent.ExecutorService executor = 
+                java.util.concurrent.Executors.newFixedThreadPool(numJobs);
+            java.util.List<java.util.concurrent.Future<Void>> futures = new java.util.ArrayList<>();
+            
+            try {
+                for (int i = 0; i < numEvents; i++) {
+                    final int eventIndex = i;
+                    final Point point = points.get(i);
+                    
+                    java.util.concurrent.Future<Void> future = executor.submit(() -> {
+                        int[] usedIdx = new int[numStations];
+                        for (int j = 0; j < numStations; j++) {
+                            usedIdx[j] = j;
+                        }
+                        try {
+                            Object[] tmp = partialDerivativeMatrix(stationTable, usedIdx, point);
+                            double[][] dtdr = (double[][]) tmp[0];
+                            double[] trvTime = (double[]) tmp[1];
+                            for (int j = 0; j < numStations; j++) {
+                                partialTbl[eventIndex][j][0] = dtdr[j][0];
+                                partialTbl[eventIndex][j][1] = dtdr[j][1];
+                                partialTbl[eventIndex][j][2] = dtdr[j][2];
+                                partialTbl[eventIndex][j][3] = trvTime[j];
+                            }
+                        } catch (Exception e) {
+                            String errorMsg = String.format(
+                                "Error creating partial derivative table for point %d (time: %s) in cluster:\n" +
+                                "  Error: %s\n" +
+                                "  Point coordinates: lat=%.6f, lon=%.6f, dep=%.3f\n" +
+                                "  Number of stations: %d",
+                                eventIndex, point.getTime(), e.getMessage(), point.getLat(), point.getLon(), point.getDep(), numStations);
+                            logger.severe(errorMsg);
+                            if (e.getCause() != null) {
+                                logger.severe("  Caused by: " + e.getCause().getMessage());
+                            }
+                            points.get(eventIndex).setType("ERR");
+                        }
+                        return null;
+                    });
+                    futures.add(future);
+                }
+                
+                // すべてのタスクの完了を待つ
+                for (java.util.concurrent.Future<Void> future : futures) {
+                    try {
+                        future.get();
+                    } catch (java.util.concurrent.ExecutionException e) {
+                        // エラーは各タスク内でログに記録されているので、ここでは無視
+                        logger.warning("Error in parallel partial derivative calculation: " + e.getMessage());
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        logger.warning("Interrupted while waiting for parallel partial derivative calculation");
+                        throw new RuntimeException("Partial derivative calculation was interrupted", e);
+                    }
+                }
             } finally {
-                i++;
+                executor.shutdown();
+                try {
+                    if (!executor.awaitTermination(60, java.util.concurrent.TimeUnit.SECONDS)) {
+                        executor.shutdownNow();
+                    }
+                } catch (InterruptedException e) {
+                    executor.shutdownNow();
+                    Thread.currentThread().interrupt();
+                }
             }
         }
+        
         return partialTbl;
+    }
+    
+    /**
+     * @return the mean (average) of the values
+     */
+    private double calculateMean(List<Double> values) {
+        if (values.isEmpty()) {
+            return 0.0;
+        }
+        double sum = 0.0;
+        for (double value : values) {
+            sum += value;
+        }
+        return sum / values.size();
     }
     
     /**
