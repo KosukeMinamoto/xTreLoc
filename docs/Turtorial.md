@@ -32,9 +32,10 @@
   - [Step 1: Synthetic Data Generation](#step-1-synthetic-data-generation)
   - [Step 2: Hypocenter Location](#step-2-hypocenter-location)
   - [Step 3: Hypocenter Relocation](#step-3-hypocenter-relocation)
+  - [Reference Events (REF)](#reference-events-ref)
   - [Step 4: Result Visualization](#step-4-result-visualization)
   - [Output Results](#output-results)
-- [Citation](#citation)
+- [Citation of .shp file](#citation-of-shp-file)
 
 <!-- /code_chunk_output -->
 
@@ -200,7 +201,7 @@ Example:
 - **STD**: Events located by STD mode
 - **TRD**: Events relocated by TRD mode
 - **ERR**: Events that encountered errors during location (e.g., airquake)
-- **REF**: Events that are only referenced in CLS and TRD modes and fixed as references
+- **REF**: Reference events that are fixed during TRD relocation (see [Reference Events](#reference-events-ref) section)
 
 ### Travel Time Difference Data File Format
 
@@ -598,7 +599,11 @@ CLS mode outputs files corresponding to `dt.ct` in `hypoDD`, which are `triple_d
      - Distance Threshold (distKm): Distance limit between events in each step (e.g., 50,20)
      - Damping Factor (dampFact): Damping coefficient in each step (e.g., 0,1)
      Iteration Count, Distance Threshold, and Damping Factor must be given as lists. In the above example, in the first step, a network is constructed with events within 50 km, and 10 iterations are performed with Damping Factor of 0. In the next step, similarly, 10 iterations are performed with Damping Factor=1 for events within 20 km. Therefore, the number of elements in these lists must be the same.
-     In the catalog file, hypocenters of events labeled REF are not updated and are fixed.
+     - **Reference Events (REF)**: In the catalog file, events labeled as "REF" serve as fixed reference points during relocation. These events are not updated during TRD relocation and provide absolute positioning anchors. REF events are particularly useful when:
+       - Well-located events from independent methods (e.g., well-constrained earthquakes) are available
+       - Absolute positioning is needed while maintaining relative accuracy
+       - Testing relocation accuracy against known ground truth positions
+       To use REF events, simply set the `mode` column to "REF" in the input catalog CSV file before running TRD mode. REF events can be created manually in the catalog, or generated in SYN mode by setting the event type to "REF" in the ground truth catalog.
      - **LSQR Parameters** (Parameters for the LSQR solver used internally in the Triple Difference method):
        - LSQR ATOL (atol): Stopping tolerance. Based on the norm of Ax - b (Default: 1e-6)
        - LSQR BTOL (btol): Stopping tolerance. Based on the norm of b (Default: 1e-6)
@@ -614,6 +619,50 @@ CLS mode outputs files corresponding to `dt.ct` in `hypoDD`, which are `triple_d
 mkdir -p demo/dat-trd
 java -jar build/libs/xTreLoc-CLI-1.0-SNAPSHOT.jar TRD config.json
 ```
+
+### Reference Events (REF)
+
+Reference events (REF) are fixed anchor points used during TRD relocation. They provide absolute positioning while maintaining relative accuracy between target events.
+
+#### When to Use REF Events
+
+REF events are useful in the following scenarios:
+
+1. **Well-located events available**: When you have events with high-quality locations from independent methods (e.g., well-constrained earthquakes with good station coverage)
+2. **Absolute positioning needed**: When you need to maintain absolute geographic positions while improving relative locations
+3. **Accuracy validation**: When testing relocation accuracy against known ground truth positions
+
+#### How to Create REF Events
+
+**Method 1: Manual creation in catalog CSV**
+
+Edit your catalog CSV file and set the `mode` column to "REF" for events you want to use as references:
+
+```csv
+time,latitude,longitude,depth,xerr,yerr,zerr,rms,file,mode,cid
+2000-01-01T00:00:00,39.5000,142.4000,15.0000,0.0000,0.0000,0.0000,0.0000,dat/000101.000000.dat,REF,1
+```
+
+**Method 2: Using SYN mode**
+
+In your ground truth catalog for SYN mode, set the event type to "REF". These events will be generated without location perturbation:
+
+```csv
+time,latitude,longitude,depth,xerr,yerr,zerr,rms,file,mode,cid
+2000-01-01T00:00:00,39.5000,142.4000,15.0000,0.0000,0.0000,0.0000,0.0000,dat/ref_event.dat,REF,1
+```
+
+#### Behavior in TRD Mode
+
+- REF events are **excluded from relocation** - their positions remain fixed
+- REF events **participate in triple difference calculations** - they help constrain the relative positions of target events
+- The number of REF events in each cluster is reported in the log
+- Target events are relocated relative to REF events, maintaining absolute positioning
+
+**Example**: If you have 10 events in a cluster with 2 REF events:
+- 2 REF events: positions fixed
+- 8 target events: positions updated during relocation
+- All 10 events participate in triple difference calculations
 
 ### Step 4: Result Visualization
 

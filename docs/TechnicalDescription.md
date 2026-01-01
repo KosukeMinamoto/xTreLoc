@@ -302,14 +302,42 @@ $$
 
 where $\mu$ is the damping factor.
 
+### Reference Events (REF)
+
+Reference events provide fixed anchor points for relative relocation. Events labeled as "REF" in the catalog are excluded from relocation and serve as absolute reference points. This is particularly useful when:
+
+- Well-located events from independent methods (e.g., well-constrained earthquakes) are available
+- Absolute positioning is needed while maintaining relative accuracy
+- Testing relocation accuracy against known ground truth positions
+
+Mathematically, REF events are excluded from the parameter vector. If we partition events into reference events (index set $R$) and target events (index set $T$), the design matrix becomes:
+
+$$
+\mathbf{G} = \begin{pmatrix} \mathbf{G}_T & \mathbf{G}_R \end{pmatrix}
+$$
+
+where $\mathbf{G}_T$ corresponds to target events and $\mathbf{G}_R$ to reference events. Since reference event positions are fixed ($\delta \mathbf{x}_R = \mathbf{0}$), the system reduces to:
+
+$$
+\mathbf{d} = \mathbf{G}_T \delta \mathbf{x}_T
+$$
+
+where $\delta \mathbf{x}_T$ contains only the parameter updates for target events. The residual calculation for triple differences involving reference events becomes:
+
+$$
+d_{ij,kl} = \Delta \Delta t_{ij,kl}^{\text{obs}} - \left( \Delta t_{i,kl}^{\text{calc}}(\mathbf{x}_i) - \Delta t_{j,kl}^{\text{calc}}(\mathbf{x}_j) \right)
+$$
+
+where if event $j$ is a reference event, $\mathbf{x}_j$ remains fixed throughout iterations.
+
 ### Iterative Relocation
 
 The algorithm performs multiple stages with different distance thresholds, following the approach of Guo & Zhang (2016):
 
 1. Filter triple differences by distance: $d_{ij} < d_{\text{threshold}}$
-2. Solve for parameter updates: $\delta \mathbf{x} = \mathbf{G}^+ \mathbf{d}$
-3. Update locations: $\mathbf{x}_i^{(k+1)} = \mathbf{x}_i^{(k)} + \delta \mathbf{x}_i - \delta \mathbf{x}_{\text{median}}$
-4. Remove median shift to maintain relative positions
+2. Solve for parameter updates: $\delta \mathbf{x}_T = \mathbf{G}_T^+ \mathbf{d}$ (only for target events)
+3. Update locations: $\mathbf{x}_i^{(k+1)} = \mathbf{x}_i^{(k)} + \delta \mathbf{x}_i - \delta \mathbf{x}_{\text{median}}$ for $i \in T$
+4. Remove median shift to maintain relative positions (applied only to target events)
 
 The distance filtering helps to:
 - Focus on nearby event pairs where the triple difference is most sensitive to relative location
@@ -332,10 +360,38 @@ $$
 
 This additional level of differencing further reduces the influence of velocity model errors and common path effects, making it particularly effective for relative relocation of clustered events.
 
+### Robust Weighting with Beacon-Turkey Biweight
+
+The TRD mode implements robust weighting using the Beacon-Turkey biweight function to downweight outliers. For each iteration after the first, weights are calculated based on residuals:
+
+$$
+w_i = \begin{cases}
+\left(1 - u_i^2\right)^2 & \text{if } |u_i| \leq 1 \\
+0 & \text{if } |u_i| > 1
+\end{cases}
+$$
+
+where $u_i = r_i / (c \cdot \text{MAD})$ and:
+- $r_i$ is the residual for the $i$-th triple difference
+- MAD is the median absolute deviation of residuals
+- $c = 4.685$ is the tuning constant (default value)
+
+The weighted system becomes:
+
+$$
+\min \left\| \begin{pmatrix} \mathbf{W}^{1/2} \mathbf{G} \\ \mu \mathbf{I} \end{pmatrix} \delta \mathbf{x} - \begin{pmatrix} \mathbf{W}^{1/2} \mathbf{d} \\ \mathbf{0} \end{pmatrix} \right\|_2
+$$
+
+where $\mathbf{W}$ is a diagonal matrix with weights $w_i$ on the diagonal.
+
 ### Parameters
 - `iterNum`: Array of iteration numbers for each stage (default: [10, 10])
 - `distKm`: Array of distance thresholds in km for each stage (default: [50, 20])
 - `dampFact`: Array of damping factors for each stage (default: [0, 1])
+- `lsqrAtol`: LSQR absolute tolerance (default: 1e-6)
+- `lsqrBtol`: LSQR relative tolerance (default: 1e-6)
+- `lsqrConlim`: LSQR condition number limit (default: 1e8)
+- `lsqrIterLim`: LSQR maximum iterations (default: 1000)
 
 ---
 
@@ -410,6 +466,15 @@ The SYN mode generates synthetic travel time difference data from a ground truth
 
 5. **Data Selection**: Randomly select a fraction of station pairs:
    - Selection rate: $r \sim \mathcal{U}(r_{\min}, r_{\max})$
+
+### Reference Events in SYN Mode
+
+Events labeled as "REF" in the ground truth catalog are treated specially:
+- **No location perturbation**: $\mathbf{x}_{\text{perturbed}} = \mathbf{x}_{\text{true}}$ (no $\boldsymbol{\epsilon}_{\text{loc}}$ added)
+- **Phase error still applied**: $t_{i,k}^{\text{obs}} = t_{i,k} + \epsilon_{\text{phase}}$ (to simulate realistic observation errors)
+- **Output type**: Events are marked as "REF" in the output catalog
+
+This allows generation of reference events with known true positions (except for phase timing errors) for testing relocation accuracy.
 
 ### Parameters
 - `randomSeed`: Random seed for reproducibility
