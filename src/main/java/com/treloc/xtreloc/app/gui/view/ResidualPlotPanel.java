@@ -52,11 +52,13 @@ public class ResidualPlotPanel extends JPanel {
      */
     private static class EventSeriesInfo {
         XYSeries series;
+        XYSeries likelihoodSeries; // For MCMC mode
         boolean isActive;
         long lastUpdateTime;
         
         EventSeriesInfo(XYSeries series) {
             this.series = series;
+            this.likelihoodSeries = null;
             this.isActive = true;
             this.lastUpdateTime = System.currentTimeMillis();
         }
@@ -324,6 +326,13 @@ public class ResidualPlotPanel extends JPanel {
                 renderer.setSeriesStroke(seriesIndex, new BasicStroke(1.0f, BasicStroke.CAP_ROUND, 
                     BasicStroke.JOIN_ROUND, 1.0f, new float[]{3.0f, 3.0f}, 0.0f));
             }
+            
+            // For MCMC mode, ensure secondary axis is available
+            if ("MCMC".equals(mode) && plot.getRangeAxis(1) == null) {
+                NumberAxis likelihoodAxis = new NumberAxis("Log-Likelihood");
+                likelihoodAxis.setAutoRange(true);
+                plot.setRangeAxis(1, likelihoodAxis);
+            }
         }
     }
     
@@ -454,7 +463,14 @@ public class ResidualPlotPanel extends JPanel {
         // Remove events beyond the limit
         while (inactiveEvents.size() > maxHistoryEvents) {
             Map.Entry<String, EventSeriesInfo> oldest = inactiveEvents.remove(0);
-            dataset.removeSeries(oldest.getValue().series);
+            EventSeriesInfo info = oldest.getValue();
+            
+            // Remove both residual and likelihood series if they exist
+            dataset.removeSeries(info.series);
+            if (info.likelihoodSeries != null) {
+                dataset.removeSeries(info.likelihoodSeries);
+            }
+            
             eventSeriesMap.remove(oldest.getKey());
         }
     }
@@ -494,17 +510,77 @@ public class ResidualPlotPanel extends JPanel {
      * @param logLikelihood log-likelihood value
      */
     public void addLikelihoodPoint(int sample, double logLikelihood) {
-        if (mcmcLikelihoodSeries != null) {
-            SwingUtilities.invokeLater(() -> {
-                mcmcLikelihoodSeries.add(sample, logLikelihood);
+        if (activeEventName != null) {
+            addLikelihoodPoint(activeEventName, sample, logLikelihood);
+        } else {
+            // Fallback to single series mode
+            if (mcmcLikelihoodSeries != null) {
+                SwingUtilities.invokeLater(() -> {
+                    mcmcLikelihoodSeries.add(sample, logLikelihood);
+                    
+                    if (mcmcLikelihoodSeries.getItemCount() > maxDataPoints) {
+                        mcmcLikelihoodSeries.remove(0);
+                    }
+                    
+                    updateChart();
+                });
+            }
+        }
+    }
+    
+    /**
+     * Adds a log-likelihood point for a specific event (for parallel processing in MCMC mode).
+     * 
+     * @param eventName name of the event (e.g., filename)
+     * @param sample sample number
+     * @param logLikelihood log-likelihood value
+     */
+    public void addLikelihoodPoint(String eventName, int sample, double logLikelihood) {
+        SwingUtilities.invokeLater(() -> {
+            EventSeriesInfo info = eventSeriesMap.get(eventName);
+            if (info == null) {
+                // Register new event if not exists
+                registerEvent(eventName);
+                info = eventSeriesMap.get(eventName);
+            }
+            
+            // Create likelihood series if it doesn't exist (for MCMC mode)
+            if (info.likelihoodSeries == null && "MCMC".equals(mode)) {
+                info.likelihoodSeries = new XYSeries(eventName + " (Log-Likelihood)");
+                dataset.addSeries(info.likelihoodSeries);
                 
-                if (mcmcLikelihoodSeries.getItemCount() > maxDataPoints) {
-                    mcmcLikelihoodSeries.remove(0);
+                // Configure secondary axis for likelihood
+                XYPlot plot = chart.getXYPlot();
+                if (plot.getRangeAxis(1) == null) {
+                    NumberAxis likelihoodAxis = new NumberAxis("Log-Likelihood");
+                    likelihoodAxis.setAutoRange(true);
+                    plot.setRangeAxis(1, likelihoodAxis);
                 }
                 
-                updateChart();
-            });
-        }
+                // Map likelihood series to secondary axis
+                int seriesIndex = dataset.getSeriesCount() - 1;
+                plot.mapDatasetToRangeAxis(seriesIndex, 1);
+                
+                // Set style for likelihood series
+                XYLineAndShapeRenderer renderer = (XYLineAndShapeRenderer) plot.getRenderer();
+                Color eventColor = info.isActive ? new Color(50, 150, 200) : new Color(200, 200, 200);
+                renderer.setSeriesPaint(seriesIndex, new Color(eventColor.getRed(), eventColor.getGreen(), 
+                    eventColor.getBlue(), 150)); // Lighter shade
+                renderer.setSeriesStroke(seriesIndex, new BasicStroke(1.0f, BasicStroke.CAP_ROUND, 
+                    BasicStroke.JOIN_ROUND, 1.0f, new float[]{5.0f, 5.0f}, 0.0f));
+            }
+            
+            if (info.likelihoodSeries != null) {
+                info.likelihoodSeries.add(sample, logLikelihood);
+                
+                // Limit data points
+                if (info.likelihoodSeries.getItemCount() > maxDataPoints) {
+                    info.likelihoodSeries.remove(0);
+                }
+            }
+            
+            updateChart();
+        });
     }
     
     /**
