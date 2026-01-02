@@ -5,7 +5,6 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
@@ -517,7 +516,7 @@ public class HypoTripleDiff extends SolverBase {
                             }
                             
                             double[][][] partialTbl = createPartialTblArray(cluster);
-                            Object[] dG = matrixDG(filteredTripDiff, cluster, partialTbl, distKm, targMap);
+                            Object[] dG = matrixDG(filteredTripDiff, cluster, partialTbl, distKm, targMap, numTarget);
                             double[] d = (double[]) dG[0];
                             Object GObj = dG[1];
                             
@@ -548,6 +547,17 @@ public class HypoTripleDiff extends SolverBase {
                                     "Design matrix G column dimension mismatch. " +
                                     "Expected: " + expectedDmLength + " (3 * numTarget), " +
                                     "Actual: " + gCols);
+                            }
+                            
+                            // Check if dm length matches current expectedDmLength
+                            // This can happen if numTarget changed between iterations (e.g., due to ERR marking)
+                            if (dm != null && dm.length != expectedDmLength) {
+                                logger.warning(String.format(
+                                    "Cluster %d, stage %d, iteration %d: dm length mismatch. " +
+                                    "Expected: %d (3 * numTarget), Actual: %d. " +
+                                    "Resetting dm to null (numTarget may have changed due to ERR marking).",
+                                    clusterId, i + 1, j + 1, expectedDmLength, dm.length));
+                                dm = null;
                             }
                             
                             double[] weights;
@@ -788,11 +798,24 @@ public class HypoTripleDiff extends SolverBase {
      * otherwise, OpenMapRealMatrix is used.
      */
     private Object[] matrixDG(List<TripleDifference> trpDiff, Cluster<Point> cluster, 
-                              double[][][] partialTbl, double distanceThreshold, int[] targMap) {
+                              double[][][] partialTbl, double distanceThreshold, int[] targMap, int numTarget) {
         int M = trpDiff.size();
-        int N = Arrays.stream(targMap).max().getAsInt() + 1;
+        int N = numTarget;
         
-        int M_constrained = M + 3;
+        // Count valid rows (excluding REF-REF pairs)
+        int validRowCount = 0;
+        for (int m = 0; m < M; m++) {
+            TripleDifference td = trpDiff.get(m);
+            int nCol0 = targMap[td.eve0];
+            int nCol1 = targMap[td.eve1];
+            // Skip REF-REF pairs (both are -1)
+            if (nCol0 == -1 && nCol1 == -1) {
+                continue;
+            }
+            validRowCount++;
+        }
+        
+        int M_constrained = validRowCount + 3;
         double[] d = new double[M_constrained];
         
         long matrixSize = (long) M_constrained * (long) (3 * N);
@@ -805,6 +828,7 @@ public class HypoTripleDiff extends SolverBase {
                 M_constrained, N, matrixSize));
             COOSparseMatrix G = new COOSparseMatrix(M_constrained, 3 * N);
             
+            int rowIdx = 0;
             for (int m = 0; m < M; m++) {
                 TripleDifference td = trpDiff.get(m);
                 int eve0 = td.eve0;
@@ -814,46 +838,68 @@ public class HypoTripleDiff extends SolverBase {
                 
                 int nCol0 = targMap[eve0];
                 int nCol1 = targMap[eve1];
-                if (nCol0 == -1 || nCol1 == -1) {
+                
+                // Skip REF-REF pairs (both are -1)
+                if (nCol0 == -1 && nCol1 == -1) {
                     continue;
                 }
                 
-                G.setEntry(m, 3 * nCol1, partialTbl[eve1][stnl][0] - partialTbl[eve1][stnk][0]);
-                G.setEntry(m, 3 * nCol1 + 1, partialTbl[eve1][stnl][1] - partialTbl[eve1][stnk][1]);
-                G.setEntry(m, 3 * nCol1 + 2, partialTbl[eve1][stnl][2] - partialTbl[eve1][stnk][2]);
+                // Skip if both are out of range
+                if ((nCol0 >= 0 && nCol0 >= N) || (nCol1 >= 0 && nCol1 >= N)) {
+                    logger.warning(String.format(
+                        "Skipping triple difference: targMap index out of range. eve0=%d, nCol0=%d, eve1=%d, nCol1=%d, numTarget=%d",
+                        eve0, nCol0, eve1, nCol1, N));
+                    continue;
+                }
                 
-                G.setEntry(m, 3 * nCol0, -(partialTbl[eve0][stnl][0] - partialTbl[eve0][stnk][0]));
-                G.setEntry(m, 3 * nCol0 + 1, -(partialTbl[eve0][stnl][1] - partialTbl[eve0][stnk][1]));
-                G.setEntry(m, 3 * nCol0 + 2, -(partialTbl[eve0][stnl][2] - partialTbl[eve0][stnk][2]));
+                // Set entries for event1 (if it's a target event)
+                if (nCol1 >= 0) {
+                    G.setEntry(rowIdx, 3 * nCol1, partialTbl[eve1][stnl][0] - partialTbl[eve1][stnk][0]);
+                    G.setEntry(rowIdx, 3 * nCol1 + 1, partialTbl[eve1][stnl][1] - partialTbl[eve1][stnk][1]);
+                    G.setEntry(rowIdx, 3 * nCol1 + 2, partialTbl[eve1][stnl][2] - partialTbl[eve1][stnk][2]);
+                }
+                // Note: If nCol1 == -1 (REF event), no column entry is set (REF position is fixed, δx = 0)
                 
+                // Set entries for event0 (if it's a target event)
+                if (nCol0 >= 0) {
+                    G.setEntry(rowIdx, 3 * nCol0, -(partialTbl[eve0][stnl][0] - partialTbl[eve0][stnk][0]));
+                    G.setEntry(rowIdx, 3 * nCol0 + 1, -(partialTbl[eve0][stnl][1] - partialTbl[eve0][stnk][1]));
+                    G.setEntry(rowIdx, 3 * nCol0 + 2, -(partialTbl[eve0][stnl][2] - partialTbl[eve0][stnk][2]));
+                }
+                // Note: If nCol0 == -1 (REF event), no column entry is set (REF position is fixed, δx = 0)
+                
+                // Calculate residual (using partialTbl for both events, including REF)
                 double cal0 = partialTbl[eve0][stnl][3] - partialTbl[eve0][stnk][3];
                 double cal1 = partialTbl[eve1][stnl][3] - partialTbl[eve1][stnk][3];
                 double lagCal = cal1 - cal0;
                 double lagObs = td.tdTime;
-                d[m] = lagObs - lagCal;
+                d[rowIdx] = lagObs - lagCal;
+                
+                rowIdx++;
             }
             
             double constraintWeight = 0;
             
             for (int k = 0; k < N; k++) {
-                G.setEntry(M, 3 * k, constraintWeight);
+                G.setEntry(validRowCount, 3 * k, constraintWeight);
             }
-            d[M] = 0.0;
+            d[validRowCount] = 0.0;
             
             for (int k = 0; k < N; k++) {
-                G.setEntry(M + 1, 3 * k + 1, constraintWeight);
+                G.setEntry(validRowCount + 1, 3 * k + 1, constraintWeight);
             }
-            d[M + 1] = 0.0;
+            d[validRowCount + 1] = 0.0;
             
             for (int k = 0; k < N; k++) {
-                G.setEntry(M + 2, 3 * k + 2, constraintWeight);
+                G.setEntry(validRowCount + 2, 3 * k + 2, constraintWeight);
             }
-            d[M + 2] = 0.0;
+            d[validRowCount + 2] = 0.0;
             
             return new Object[] { d, G };
         } else {
             OpenMapRealMatrix G = new OpenMapRealMatrix(M_constrained, 3 * N);
             
+            int rowIdx = 0;
             for (int m = 0; m < M; m++) {
                 TripleDifference td = trpDiff.get(m);
                 int eve0 = td.eve0;
@@ -863,41 +909,62 @@ public class HypoTripleDiff extends SolverBase {
                 
                 int nCol0 = targMap[eve0];
                 int nCol1 = targMap[eve1];
-                if (nCol0 == -1 || nCol1 == -1) {
+                
+                // Skip REF-REF pairs (both are -1)
+                if (nCol0 == -1 && nCol1 == -1) {
                     continue;
                 }
                 
-                G.setEntry(m, 3 * nCol1, partialTbl[eve1][stnl][0] - partialTbl[eve1][stnk][0]);
-                G.setEntry(m, 3 * nCol1 + 1, partialTbl[eve1][stnl][1] - partialTbl[eve1][stnk][1]);
-                G.setEntry(m, 3 * nCol1 + 2, partialTbl[eve1][stnl][2] - partialTbl[eve1][stnk][2]);
+                // Skip if both are out of range
+                if ((nCol0 >= 0 && nCol0 >= N) || (nCol1 >= 0 && nCol1 >= N)) {
+                    logger.warning(String.format(
+                        "Skipping triple difference: targMap index out of range. eve0=%d, nCol0=%d, eve1=%d, nCol1=%d, numTarget=%d",
+                        eve0, nCol0, eve1, nCol1, N));
+                    continue;
+                }
                 
-                G.setEntry(m, 3 * nCol0, -(partialTbl[eve0][stnl][0] - partialTbl[eve0][stnk][0]));
-                G.setEntry(m, 3 * nCol0 + 1, -(partialTbl[eve0][stnl][1] - partialTbl[eve0][stnk][1]));
-                G.setEntry(m, 3 * nCol0 + 2, -(partialTbl[eve0][stnl][2] - partialTbl[eve0][stnk][2]));
+                // Set entries for event1 (if it's a target event)
+                if (nCol1 >= 0) {
+                    G.setEntry(rowIdx, 3 * nCol1, partialTbl[eve1][stnl][0] - partialTbl[eve1][stnk][0]);
+                    G.setEntry(rowIdx, 3 * nCol1 + 1, partialTbl[eve1][stnl][1] - partialTbl[eve1][stnk][1]);
+                    G.setEntry(rowIdx, 3 * nCol1 + 2, partialTbl[eve1][stnl][2] - partialTbl[eve1][stnk][2]);
+                }
+                // Note: If nCol1 == -1 (REF event), no column entry is set (REF position is fixed, δx = 0)
                 
+                // Set entries for event0 (if it's a target event)
+                if (nCol0 >= 0) {
+                    G.setEntry(rowIdx, 3 * nCol0, -(partialTbl[eve0][stnl][0] - partialTbl[eve0][stnk][0]));
+                    G.setEntry(rowIdx, 3 * nCol0 + 1, -(partialTbl[eve0][stnl][1] - partialTbl[eve0][stnk][1]));
+                    G.setEntry(rowIdx, 3 * nCol0 + 2, -(partialTbl[eve0][stnl][2] - partialTbl[eve0][stnk][2]));
+                }
+                // Note: If nCol0 == -1 (REF event), no column entry is set (REF position is fixed, δx = 0)
+                
+                // Calculate residual (using partialTbl for both events, including REF)
                 double cal0 = partialTbl[eve0][stnl][3] - partialTbl[eve0][stnk][3];
                 double cal1 = partialTbl[eve1][stnl][3] - partialTbl[eve1][stnk][3];
                 double lagCal = cal1 - cal0;
                 double lagObs = td.tdTime;
-                d[m] = lagObs - lagCal;
+                d[rowIdx] = lagObs - lagCal;
+                
+                rowIdx++;
             }
             
             double constraintWeight = 0;
             
             for (int k = 0; k < N; k++) {
-                G.setEntry(M, 3 * k, constraintWeight);
+                G.setEntry(validRowCount, 3 * k, constraintWeight);
             }
-            d[M] = 0.0;
+            d[validRowCount] = 0.0;
             
             for (int k = 0; k < N; k++) {
-                G.setEntry(M + 1, 3 * k + 1, constraintWeight);
+                G.setEntry(validRowCount + 1, 3 * k + 1, constraintWeight);
             }
-            d[M + 1] = 0.0;
+            d[validRowCount + 1] = 0.0;
             
             for (int k = 0; k < N; k++) {
-                G.setEntry(M + 2, 3 * k + 2, constraintWeight);
+                G.setEntry(validRowCount + 2, 3 * k + 2, constraintWeight);
             }
-            d[M + 2] = 0.0;
+            d[validRowCount + 2] = 0.0;
             
             return new Object[] { d, G };
         }
@@ -1165,17 +1232,49 @@ public class HypoTripleDiff extends SolverBase {
      * @return array of residuals
      */
     private double[] calculateResiduals(Object G, double[] d, double[] dm) {
+        if (dm == null) {
+            throw new IllegalArgumentException("Solution vector dm cannot be null");
+        }
+        
+        int gCols;
+        if (G instanceof OpenMapRealMatrix) {
+            OpenMapRealMatrix GMat = (OpenMapRealMatrix) G;
+            gCols = GMat.getColumnDimension();
+        } else if (G instanceof COOSparseMatrix) {
+            COOSparseMatrix GMat = (COOSparseMatrix) G;
+            gCols = GMat.getColumnDimension();
+        } else {
+            throw new IllegalArgumentException("Unknown matrix type: " + G.getClass().getName());
+        }
+        
+        if (dm.length != gCols) {
+            throw new IllegalArgumentException(String.format(
+                "Dimension mismatch in calculateResiduals: G column dimension (%d) != dm length (%d). " +
+                "This may occur if numTarget changed between iterations due to ERR marking.",
+                gCols, dm.length));
+        }
+        
         double[] residuals = new double[d.length];
         
         if (G instanceof OpenMapRealMatrix) {
             OpenMapRealMatrix GMat = (OpenMapRealMatrix) G;
             double[] Gdm = GMat.operate(dm);
+            if (Gdm.length != d.length) {
+                throw new IllegalArgumentException(String.format(
+                    "Dimension mismatch: G * dm length (%d) != d length (%d)",
+                    Gdm.length, d.length));
+            }
             for (int i = 0; i < d.length; i++) {
                 residuals[i] = d[i] - Gdm[i];
             }
         } else if (G instanceof COOSparseMatrix) {
             COOSparseMatrix GMat = (COOSparseMatrix) G;
             double[] Gdm = GMat.operate(dm);
+            if (Gdm.length != d.length) {
+                throw new IllegalArgumentException(String.format(
+                    "Dimension mismatch: G * dm length (%d) != d length (%d)",
+                    Gdm.length, d.length));
+            }
             for (int i = 0; i < d.length; i++) {
                 residuals[i] = d[i] - Gdm[i];
             }

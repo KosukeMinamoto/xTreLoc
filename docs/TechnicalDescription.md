@@ -310,25 +310,88 @@ Reference events provide fixed anchor points for relative relocation. Events lab
 - Absolute positioning is needed while maintaining relative accuracy
 - Testing relocation accuracy against known ground truth positions
 
-Mathematically, REF events are excluded from the parameter vector. If we partition events into reference events (index set $R$) and target events (index set $T$), the design matrix becomes:
+#### Matrix Formulation with Reference Events
+
+The linearized system for triple difference relocation with reference events is:
 
 $$
-\mathbf{G} = \begin{pmatrix} \mathbf{G}_T & \mathbf{G}_R \end{pmatrix}
+\begin{pmatrix}
+d_{S_1S_2}^{E_1E_2} \\[0.5em]
+d_{S_1S_2}^{E_1E_3} \\[0.5em]
+\cancel{d_{S_1S_2}^{E_2E_3}} \\[0.5em]
+\vdots \\[0.5em]
+d_{S_{L-1}S_L}^{E_{N-1}E_N}
+\end{pmatrix} = \begin{array}{c}
+\begin{array}{cccccc}
+\scriptstyle E_1 & \scriptstyle \cancel{E_2} & \scriptstyle \cancel{E_3} & \scriptstyle \cdots & \scriptstyle E_{N-1} & \scriptstyle E_N
+\end{array} \\[0.5em]
+\left(\begin{array}{cccccc}
+\frac{\partial t_{S_2}^{E_1}}{\partial \mathbf{m}} - \frac{\partial t_{S_1}^{E_1}}{\partial \mathbf{m}} & \cancel{-\left(\frac{\partial t_{S_2}^{E_2}}{\partial \mathbf{m}} - \frac{\partial t_{S_1}^{E_2}}{\partial \mathbf{m}}\right)} & \cancel{0} & \cdots & 0 & 0 \\[0.5em]
+\frac{\partial t_{S_2}^{E_1}}{\partial \mathbf{m}} - \frac{\partial t_{S_1}^{E_1}}{\partial \mathbf{m}} & \cancel{0} & \cancel{-\left(\frac{\partial t_{S_2}^{E_3}}{\partial \mathbf{m}} - \frac{\partial t_{S_1}^{E_3}}{\partial \mathbf{m}}\right)} & \cdots & 0 & 0 \\[0.5em]
+\cancel{\frac{\partial t_{S_2}^{E_2}}{\partial \mathbf{m}} - \frac{\partial t_{S_1}^{E_2}}{\partial \mathbf{m}}} & \cancel{-\left(\frac{\partial t_{S_2}^{E_3}}{\partial \mathbf{m}} - \frac{\partial t_{S_1}^{E_3}}{\partial \mathbf{m}}\right)} & \cancel{0} & \cancel{\cdots} & \cancel{0} & \cancel{0} \\[0.5em]
+\vdots & \cancel{\vdots} & \cancel{\vdots} & \ddots & \vdots & \vdots \\[0.5em]
+0 & \cancel{0} & \cancel{0} & \cdots & \frac{\partial t_{S_L}^{E_{N-1}}}{\partial \mathbf{m}} - \frac{\partial t_{S_{L-1}}^{E_{N-1}}}{\partial \mathbf{m}} & -\left(\frac{\partial t_{S_L}^{E_N}}{\partial \mathbf{m}} - \frac{\partial t_{S_{L-1}}^{E_N}}{\partial \mathbf{m}}\right)
+\end{array}\right)
+\end{array}
+\begin{pmatrix}
+\Delta \mathbf{m}^{E_1} \\[0.5em]
+\cancel{\Delta \mathbf{m}^{E_2}} \\[0.5em]
+\cancel{\Delta \mathbf{m}^{E_3}} \\[0.5em]
+\vdots \\[0.5em]
+\Delta \mathbf{m}^{E_N}
+\end{pmatrix}
 $$
 
-where $\mathbf{G}_T$ corresponds to target events and $\mathbf{G}_R$ to reference events. Since reference event positions are fixed ($\delta \mathbf{x}_R = \mathbf{0}$), the system reduces to:
+where:
+- $d_{S_kS_l}^{E_iE_j}$ is the triple difference residual for event pair $(E_i, E_j)$ at station pair $(S_k, S_l)$:
+  $$
+  d_{S_kS_l}^{E_iE_j} = \Delta \Delta t_{S_kS_l}^{E_iE_j,\text{obs}} - \Delta \Delta t_{S_kS_l}^{E_iE_j,\text{calc}}
+  $$
+- The design matrix $\mathbf{G}$ has columns corresponding to each event, where **column number equals event number** (e.g., column 1 corresponds to $E_1$, column 2 to $E_2$, column 3 to $E_3$, etc.). For row $d_{S_kS_l}^{E_iE_j}$, the matrix elements are:
+  - Column $E_i$ (column number $i$): $\frac{\partial t_{S_l}^{E_i}}{\partial \mathbf{m}} - \frac{\partial t_{S_k}^{E_i}}{\partial \mathbf{m}} = \frac{\partial T(\mathbf{x}^{E_i}, \mathbf{s}_{S_l})}{\partial \mathbf{m}} - \frac{\partial T(\mathbf{x}^{E_i}, \mathbf{s}_{S_k})}{\partial \mathbf{m}}$
+  - Column $E_j$ (column number $j$): $-\left(\frac{\partial t_{S_l}^{E_j}}{\partial \mathbf{m}} - \frac{\partial t_{S_k}^{E_j}}{\partial \mathbf{m}}\right) = -\left(\frac{\partial T(\mathbf{x}^{E_j}, \mathbf{s}_{S_l})}{\partial \mathbf{m}} - \frac{\partial T(\mathbf{x}^{E_j}, \mathbf{s}_{S_k})}{\partial \mathbf{m}}\right)$
+  - All other columns: $0$
+  
+  where $t_{S_kS_l}^{E_i} = T(\mathbf{x}^{E_i}, \mathbf{s}_{S_l}) - T(\mathbf{x}^{E_i}, \mathbf{s}_{S_k})$ is the differential travel time for event $E_i$ at station pair $(S_k, S_l)$, and $\mathbf{m} = (x, y, z)$ are the model parameters.
+- $\Delta \mathbf{m}^{E_i}$ is the parameter update vector for event $E_i$
+
+**Reference event handling:**
+
+When reference events (e.g., $E_2$, $E_3$) are present, the system is modified as follows:
+
+1. **Data vector $\mathbf{d}$ (rows)**:
+   - Triple differences involving **only reference events** (REF-REF pairs, e.g., $d_{S_kS_l}^{E_2E_3}$) are **excluded** from the data vector. In the matrix above, these correspond to rows where both $E_i$ and $E_j$ are reference events (e.g., row $d_{S_1S_2}^{E_2E_3}$, row $d_{S_{L-1}S_L}^{E_2E_3}$), and these entire rows are **removed** (shown with $\cancel{}$).
+   - Triple differences involving **target events** (TARGET-TARGET pairs and TARGET-REF pairs) are **included** in the data vector.
+
+2. **Design matrix $\mathbf{G}$ (rows and columns)**:
+   - **Rows**: Rows corresponding to REF-REF pairs are **excluded** from the design matrix (shown with $\cancel{}$ across the entire row).
+   - **Columns**: Columns corresponding to reference event parameters are **removed** from the design matrix. Since column number equals event number, columns for reference events (e.g., column 2 for $E_2$, column 3 for $E_3$) are excluded (shown with $\cancel{}$ on the column elements and the column header in $\Delta \mathbf{m}$).
+   - Only rows and columns for target event parameters are retained.
+
+3. **Parameter vector $\delta \mathbf{x}$ (rows)**:
+   - Rows corresponding to reference event parameters (e.g., $\Delta \mathbf{m}^{E_2}$, $\Delta \mathbf{m}^{E_3}$) are **removed** from the parameter vector.
+   - Only parameter updates for target events are solved for.
+
+#### Reduced System
+
+After removing reference event parameters, the system reduces to:
 
 $$
 \mathbf{d} = \mathbf{G}_T \delta \mathbf{x}_T
 $$
 
-where $\delta \mathbf{x}_T$ contains only the parameter updates for target events. The residual calculation for triple differences involving reference events becomes:
+where:
+- $\mathbf{d}$ is the residual vector containing only triple differences involving at least one target event
+- $\mathbf{G}_T$ is the design matrix with only columns for target events ($M \times 3N_T$, where $N_T$ is the number of target events)
+- $\delta \mathbf{x}_T$ is the parameter update vector for target events only (length $3N_T$)
+
+The residual calculation for triple differences involving reference events uses the fixed positions of reference events:
 
 $$
-d_{ij,kl} = \Delta \Delta t_{ij,kl}^{\text{obs}} - \left( \Delta t_{i,kl}^{\text{calc}}(\mathbf{x}_i) - \Delta t_{j,kl}^{\text{calc}}(\mathbf{x}_j) \right)
+d_{ij,kl} = \Delta \Delta t_{ij,kl}^{\text{obs}} - \left( \Delta t_{i,kl}^{\text{calc}}(\mathbf{x}_i) - \Delta t_{j,kl}^{\text{calc}}(\mathbf{x}_j^{\text{ref}}) \right)
 $$
 
-where if event $j$ is a reference event, $\mathbf{x}_j$ remains fixed throughout iterations.
+where $\mathbf{x}_j^{\text{ref}}$ is the fixed position of reference event $j$, which remains unchanged throughout iterations.
 
 ### Iterative Relocation
 
