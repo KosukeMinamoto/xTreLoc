@@ -84,7 +84,8 @@ task cliJar(type: Jar) {
     archiveBaseName = 'xTreLoc-CLI'
     manifest {
         attributes(
-                'Main-Class': 'com.treloc.xtreloc.app.cli.XTreLocCLI'
+                'Main-Class': 'com.treloc.xtreloc.app.cli.XTreLocCLI',
+                'Implementation-Version': project.version
         )
     }
     from {

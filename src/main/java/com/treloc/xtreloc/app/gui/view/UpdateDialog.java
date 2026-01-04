@@ -90,13 +90,31 @@ public class UpdateDialog extends JDialog {
             
             new Thread(() -> {
                 try {
+                    String downloadUrl = updateInfo.getDownloadUrl();
+                    if (downloadUrl == null || downloadUrl.isEmpty()) {
+                        SwingUtilities.invokeLater(() -> {
+                            statusLabel.setText("Error: Download URL not available");
+                            downloadButton.setEnabled(true);
+                            laterButton.setEnabled(true);
+                            progressBar.setVisible(false);
+                            JOptionPane.showMessageDialog(
+                                UpdateDialog.this,
+                                "Download URL is not available for this release.\n" +
+                                "Please download manually from GitHub.",
+                                "Download Unavailable",
+                                JOptionPane.WARNING_MESSAGE
+                            );
+                        });
+                        return;
+                    }
+                    
                     File appDir = com.treloc.xtreloc.app.gui.util.AppDirectoryManager.getAppDirectory();
-                    File downloadFile = new File(appDir, "xTreLoc-update-" + updateInfo.getVersion() + 
-                        (updateInfo.getDownloadUrl().endsWith(".dmg") ? ".dmg" : 
-                         updateInfo.getDownloadUrl().endsWith(".app") ? ".app" : ".jar"));
+                    String fileExtension = downloadUrl.endsWith(".dmg") ? ".dmg" : 
+                                         downloadUrl.endsWith(".app") ? ".app" : ".jar";
+                    File downloadFile = new File(appDir, "xTreLoc-update-" + updateInfo.getVersion() + fileExtension);
                     
                     boolean success = UpdateChecker.downloadUpdate(
-                        updateInfo.getDownloadUrl(),
+                        downloadUrl,
                         downloadFile,
                         progress -> SwingUtilities.invokeLater(() -> {
                             progressBar.setValue(progress);

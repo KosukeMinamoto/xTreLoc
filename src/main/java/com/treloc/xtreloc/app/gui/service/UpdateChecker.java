@@ -6,6 +6,7 @@ import com.treloc.xtreloc.app.gui.util.UpdateInfo;
 
 import java.io.*;
 import java.net.HttpURLConnection;
+import java.net.URI;
 import java.net.URL;
 import java.util.logging.Logger;
 
@@ -33,7 +34,7 @@ public class UpdateChecker {
      */
     public static UpdateInfo checkForUpdates() {
         try {
-            URL url = new URL(UPDATE_CHECK_URL);
+            URL url = URI.create(UPDATE_CHECK_URL).toURL();
             HttpURLConnection connection = (HttpURLConnection) url.openConnection();
             connection.setRequestMethod("GET");
             connection.setRequestProperty("Accept", "application/vnd.github.v3+json");
@@ -53,27 +54,41 @@ public class UpdateChecker {
                     ObjectMapper mapper = new ObjectMapper();
                     JsonNode jsonNode = mapper.readTree(response.toString());
                     
+                    // Check if tag_name exists
+                    if (!jsonNode.has("tag_name") || jsonNode.get("tag_name").isNull()) {
+                        logger.warning("Release does not have tag_name");
+                        return null;
+                    }
+                    
                     String latestVersion = jsonNode.get("tag_name").asText().replace("v", "");
                     String releaseNotes = jsonNode.has("body") ? jsonNode.get("body").asText() : "";
                     
                     String downloadUrl = null;
-                    if (jsonNode.has("assets")) {
+                    if (jsonNode.has("assets") && jsonNode.get("assets").isArray()) {
                         for (JsonNode asset : jsonNode.get("assets")) {
-                            String assetName = asset.get("name").asText();
-                            if (assetName.endsWith(".app") || assetName.endsWith(".dmg") || 
-                                assetName.endsWith(".jar")) {
-                                downloadUrl = asset.get("browser_download_url").asText();
-                                break;
+                            if (asset.has("name") && asset.has("browser_download_url")) {
+                                String assetName = asset.get("name").asText();
+                                if (assetName.endsWith(".app") || assetName.endsWith(".dmg") || 
+                                    assetName.endsWith(".jar")) {
+                                    downloadUrl = asset.get("browser_download_url").asText();
+                                    break;
+                                }
                             }
                         }
                     }
                     
                     String currentVersion = getCurrentVersion();
-                    if (isNewerVersion(latestVersion, currentVersion)) {
-                        logger.info("New version found: " + latestVersion + " (current: " + currentVersion + ")");
-                        return new UpdateInfo(latestVersion, downloadUrl, releaseNotes);
-                    } else {
-                        logger.info("Latest version: " + currentVersion);
+                    try {
+                        if (isNewerVersion(latestVersion, currentVersion)) {
+                            logger.info("New version found: " + latestVersion + " (current: " + currentVersion + ")");
+                            return new UpdateInfo(latestVersion, downloadUrl, releaseNotes);
+                        } else {
+                            logger.info("Latest version: " + currentVersion);
+                            return null;
+                        }
+                    } catch (NumberFormatException e) {
+                        logger.warning("Failed to compare versions: " + latestVersion + " vs " + currentVersion + 
+                                      " - " + e.getMessage());
                         return null;
                     }
                 }
@@ -86,9 +101,17 @@ public class UpdateChecker {
         return null;
     }
     
-    private static boolean isNewerVersion(String newVersion, String currentVersion) {
+    private static boolean isNewerVersion(String newVersion, String currentVersion) throws NumberFormatException {
+        if (newVersion == null || currentVersion == null) {
+            return false;
+        }
+        
         newVersion = newVersion.replace("-SNAPSHOT", "");
         currentVersion = currentVersion.replace("-SNAPSHOT", "");
+        
+        // Remove any non-numeric suffixes (e.g., "-beta", "-alpha")
+        newVersion = newVersion.split("-")[0].split("_")[0];
+        currentVersion = currentVersion.split("-")[0].split("_")[0];
         
         String[] newParts = newVersion.split("\\.");
         String[] currentParts = currentVersion.split("\\.");
@@ -110,7 +133,7 @@ public class UpdateChecker {
     public static boolean downloadUpdate(String downloadUrl, File destinationFile, 
                                          ProgressCallback progressCallback) {
         try {
-            URL url = new URL(downloadUrl);
+            URL url = URI.create(downloadUrl).toURL();
             HttpURLConnection connection = (HttpURLConnection) url.openConnection();
             connection.setConnectTimeout(10000);
             connection.setReadTimeout(30000);

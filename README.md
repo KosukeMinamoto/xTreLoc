@@ -142,6 +142,7 @@ java -jar build/libs/xTreLoc-CLI-1.0-SNAPSHOT.jar TRD config.json
 
 - [User Manual (English)](docs/Turtorial.md)
 - [User Manual (Japanese)](docs/TurtorialJP.md)
+- [Release Scripts](scripts/README.md) - Scripts for automating release preparation
 
 ## Demo
 
