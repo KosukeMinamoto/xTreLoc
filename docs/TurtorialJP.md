@@ -20,6 +20,8 @@
   - [カタログCSV形式](#カタログcsv形式)
   - [走時差データファイル形式](#走時差データファイル形式)
 - [GUIモード](#guiモード)
+  - [自動更新機能](#自動更新機能)
+  - [ログファイルと設定ファイル](#ログファイルと設定ファイル)
 - [CLIモード](#cliモード)
   - [CLIモードの起動](#cliモードの起動)
   - [コマンド構文](#コマンド構文)
@@ -32,7 +34,6 @@
   - [ステップ1: シンセティックデータの生成](#ステップ1-シンセティックデータの生成)
   - [ステップ2: 震源決定](#ステップ2-震源決定)
   - [ステップ3: 震源再決定](#ステップ3-震源再決定)
-  - [参照イベント (REF)](#参照イベント-ref)
   - [ステップ4: 結果の可視化](#ステップ4-結果の可視化)
   - [出力結果](#出力結果)
 - [Shapeファイル引用元](#shapeファイル引用元)
@@ -167,8 +168,8 @@ ST02 39.50 142.20 -1670 0.88 1.50
 - **緯度**: 10進数表記の緯度 (北を正とする)
 - **経度**: 10進数表記の経度 (東を正とする)
 - **H**: メートル単位の標高 (下向きを正, 海面上は負)
-- **Sc**: 理論走時差に足されるP波の観測点補正値 (秒)
-- **Pc**: 理論走時差に足されるS波の観測点補正値 (秒)
+- **Pc**: 理論走時差に足されるP波の観測点補正値 (秒)
+- **Sc**: 理論走時差に足されるS波の観測点補正値 (秒)
 
 ### カタログCSV形式
 
@@ -246,6 +247,35 @@ java -jar build/libs/xTreLoc-GUI-1.0-SNAPSHOT.jar
 ```bash
 ./gradlew run
 ```
+
+### 自動更新機能
+
+GUIモードでは, アプリケーション起動時に自動的に最新バージョンのチェックが行われる. 新しいバージョンが利用可能な場合, 更新ダイアログが表示され, リリースノートの確認やダウンロードが可能である.
+
+**動作**: 
+- アプリケーション起動時に自動的にチェック (自動更新が有効な場合)
+- 前回のチェックから24時間経過している場合のみ実行
+- バックグラウンドで実行されるため, アプリケーションの起動を妨げない
+
+**設定**: 
+Settingsタブで自動更新の有効/無効を切り替えることができる. デフォルトでは有効である.
+
+**更新のダウンロード**: 
+更新ダイアログから直接ダウンロードでき, ダウンロード完了後は手動でインストールする必要がある. macOSでは`.dmg`や`.app`ファイルの自動インストールにも対応している.
+
+### ログファイルと設定ファイル
+
+GUIモードでは, 以下のファイルがユーザーのホームディレクトリ配下に作成される:
+
+**設定ファイル**: 
+- 場所: `~/.xtreloc/settings.json`
+- 内容: フォント設定, シンボルサイズ, カラーパレット, ログレベル, ログ履歴行数, 自動更新設定など
+
+**ログファイル**: 
+- 場所: `~/.xtreloc/xtreloc.log`
+- 内容: アプリケーションの実行ログ, エラーメッセージ, デバッグ情報など
+
+これらのファイルはSettingsタブから設定を変更すると自動的に更新される. ログファイルは問題の診断やデバッグに有用である.
 
 ---
 
@@ -440,6 +470,8 @@ mkdir -p ./demo/dat
     ├── station.tbl                # 観測点ファイル
     ├── map_njt.plt                # 描画用のGnuplot Script
     ├── map_njt.m                  # 描画用のMatlab Script
+    ├── map_njt.py                 # 描画用のPython Script
+    ├── map_njt.sh                 # 描画用のGMT Script
     └── dat/                       # 入力.datファイル
 ```
 
@@ -450,7 +482,7 @@ mkdir -p ./demo/dat
   ↓
 ステップ2: GRD+STD or MCMCによる震源決定手法の実行 → catalog.csvの出力
   ↓
-ステップ3: 可視化 → Gnuplot/Matlab/PythonまたはGUI
+ステップ3: 可視化 → Gnuplot/Matlab/Python/GMTまたはGUI
   ↓
 ステップ4: CLS → クラスタ化されたcatalog.csv, 走時差の差データ (triple_diff_*.bin)
   ↓
@@ -625,36 +657,10 @@ mkdir -p demo/dat-trd
 java -jar build/libs/xTreLoc-CLI-1.0-SNAPSHOT.jar TRD config.json
 ```
 
-### 参照イベント (REF)
+#### 参照イベント (REF)
 
 参照イベント (REF) は, TRD再決定中に固定される基準点として, 絶対位置を提供しながらターゲットイベント間の相対精度を維持する.
-
-#### REFイベントの作成方法
-
-**方法1: カタログCSVでの手動作成**
-
-カタログCSVファイルを編集し, 参照として使用したいイベントの`mode`列を"REF"に設定する:
-
-```csv
-time,latitude,longitude,depth,xerr,yerr,zerr,rms,file,mode,cid
-2000-01-01T00:00:00,39.5000,142.4000,15.0000,0.0000,0.0000,0.0000,0.0000,dat/000101.000000.dat,REF,1
-```
-
-**方法2: SYNモードの使用**
-
-SYNモードの正解値カタログで, イベント種別を"REF"に設定します. これらのイベントは位置パータベーションなしで生成される:
-
-```csv
-time,latitude,longitude,depth,xerr,yerr,zerr,rms,file,mode,cid
-2000-01-01T00:00:00,39.5000,142.4000,15.0000,0.0000,0.0000,0.0000,0.0000,dat/ref_event.dat,REF,1
-```
-
-#### TRDモードでの動作
-
-- REFイベントは**再決定から除外される** - その位置は固定されたまま
-- REFイベントは**三重差分計算に参加する** - ターゲットイベントの相対位置を制約するのに役立つ
-- 各クラスタ内のREFイベント数がログに報告される
-- ターゲットイベントはREFイベントに対して相対的に再決定され, 絶対位置を維持する
+カタログCSVファイルを編集し, 参照として使用したいイベントの`mode`列を"REF"に設定する必要がある. SYNモードの正解値カタログで, イベント種別を"REF"に設定した場合, datファイルは位置パータベーションなしで生成される. またREFイベントはCLSモードにおいてその他のイベントと共にクラスタリングされ, TRDモードにおいて**再決定から除外される** (その位置は固定し, リファレンスとして参照される)
 
 ### ステップ4: 結果の可視化
 
@@ -706,6 +712,108 @@ time,latitude,longitude,depth,xerr,yerr,zerr,rms,file,mode,cid
 
 **例の出力**: ![MATLAB Map](mat_njt.png)
 
+#### Python
+
+提供されたPythonスクリプト`map_njt.py`を使用してマップを作成できる. このスクリプトはCartopyとMatplotlibを使用しており, カスタマイズが容易である.
+
+**要件**: 
+- Python 3.6以上
+- 必要なパッケージ: `pandas`, `numpy`, `matplotlib`, `cartopy`
+
+**インストール**: 
+```bash
+pip install pandas numpy matplotlib cartopy
+```
+
+**使用方法**: 
+1. `demo/`ディレクトリに移動: 
+   ```bash
+   cd demo
+   ```
+2. コマンドライン引数でカタログファイル, 観測点ファイル, 出力ファイルを指定: 
+   ```bash
+   python3 map_njt.py --catalog ./dat-std/catalog.csv --station ./station.tbl --output catalog_std.pdf
+   ```
+3. またはデフォルト設定で実行: 
+   ```bash
+   python3 map_njt.py
+   ```
+
+**オプション**: 
+- `--catalog`: カタログCSVファイルのパス (デフォルト: `./catalog_ground_truth.csv`)
+- `--station`: 観測点ファイルのパス (デフォルト: `./station.tbl`)
+- `--output`: 出力PDFファイル名 (デフォルト: `catalog_map.pdf`)
+- `--lat-range`: 緯度範囲 (デフォルト: `38.0 40.5`)
+- `--lon-range`: 経度範囲 (デフォルト: `141.5 144.0`)
+- `--depth-range`: カラーバーの深さ範囲 (デフォルト: `10 20`)
+
+**特徴**: 
+- Cartopyによる地理投影
+- エラーバーの自動表示
+- カスタムカラーマップ (Gnuplotパレットと同等)
+- 海岸線, 陸地, 海洋の自動描画
+
+#### GMT (Generic Mapping Tools)
+
+提供されたGMTスクリプト`map_njt.sh`を使用してマップを作成できる. GMTは高品質な地図作成に適している.
+
+**要件**: 
+- GMT (Generic Mapping Tools) バージョン6以上
+- `awk`コマンド
+
+**インストール**: 
+```bash
+# macOS
+brew install gmt
+
+# Linux (Ubuntu/Debian)
+sudo apt-get install gmt
+
+# その他のシステム
+# https://www.generic-mapping-tools.org/download/ を参照
+```
+
+**使用方法**: 
+1. `demo/`ディレクトリに移動: 
+   ```bash
+   cd demo
+   ```
+2. スクリプトに実行権限を付与 (初回のみ): 
+   ```bash
+   chmod +x map_njt.sh
+   ```
+3. コマンドライン引数でカタログファイル, 観測点ファイル, 出力ファイルを指定: 
+   ```bash
+   ./map_njt.sh ./dat-std/catalog.csv ./station.tbl catalog_std.pdf
+   ```
+4. またはデフォルト設定で実行: 
+   ```bash
+   ./map_njt.sh
+   ```
+
+**引数**: 
+- 第1引数: カタログCSVファイルのパス (デフォルト: `./catalog_ground_truth.csv`)
+- 第2引数: 観測点ファイルのパス (デフォルト: `./station.tbl`)
+- 第3引数: 出力PDFファイル名 (デフォルト: `catalog_map.pdf`)
+
+**特徴**: 
+- 高品質な地図出力
+- エラーバーの自動表示
+- カスタムカラーマップ (Gnuplotパレットと同等)
+- 海岸線の自動描画
+- 一時ファイルの自動削除
+
+**カスタマイズ**: 
+スクリプト内の以下の変数を編集することで, 地図の範囲や深さ範囲を変更できる: 
+```bash
+LON_MIN=141.5
+LON_MAX=144.0
+LAT_MIN=38.0
+LAT_MAX=40.5
+DEPTH_MIN=10
+DEPTH_MAX=20
+```
+
 #### GUI上での描画
 
 "viewer"タブに移動し, "Catalogデータ"タブで, "ファイル選択"をクリックしてカタログファイルを読み込むことで描画可能. shpファイルなどを選択することで, 海岸線や海溝も描画可能. 
@@ -752,8 +860,10 @@ demo
 │   ├── 000101.010000.dat
 │   ├── ...
 │   └── catalog_trd.csv
-├── map_njt.m
-├── map_njt.plt
+├── map_njt.m                  # 描画用のMatlab Script
+├── map_njt.plt                # 描画用のGnuplot Script
+├── map_njt.py                 # 描画用のPython Script
+├── map_njt.sh                 # 描画用のGMT Script
 └── station.tbl
 ```
 
