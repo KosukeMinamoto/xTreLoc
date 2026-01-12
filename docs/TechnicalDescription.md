@@ -61,10 +61,10 @@ where:
 
 ---
 
-## 2. STD Mode: Station-pair Double Difference Method
+## 2. LMO Mode: Levenberg-Marquardt Optimization
 
 ### Overview
-The STD mode implements the Station-pair Double Difference method using the Levenberg-Marquardt (LM) optimization algorithm. This method minimizes the weighted sum of squared residuals for differential travel times between station pairs. The implementation is based on the method described by Ide (2010) and Ohta et al. (2019), which is a Java port of the Fortran `hypoEcc` program with improvements.
+The LMO mode implements Levenberg-Marquardt (LM) optimization for hypocenter location. This method minimizes the weighted sum of squared residuals for differential travel times between station pairs. The implementation is based on the method described by Ide (2010) and Ohta et al. (2019), which is a Java port of the Fortran `hypoEcc` program with improvements.
 
 ### Mathematical Formulation
 
@@ -144,13 +144,13 @@ $$
 
 ### Relationship to Envelope Correlation Method
 
-The STD mode is related to the envelope correlation method used by Ide (2010) for tremor location. In the envelope correlation method, the travel time difference between station pairs is determined from the cross-correlation of envelope functions:
+The LMO mode is related to the envelope correlation method used by Ide (2010) for tremor location. In the envelope correlation method, the travel time difference between station pairs is determined from the cross-correlation of envelope functions:
 
 $$
 \Delta t_{kl} = \arg\max_{\tau} \text{CC}(E_k(t), E_l(t + \tau))
 $$
 
-where $E_k(t)$ and $E_l(t)$ are envelope functions at stations $k$ and $l$, and CC denotes cross-correlation. The STD mode uses these travel time differences directly in the optimization, making it suitable for both traditional phase picking and envelope-based methods.
+where $E_k(t)$ and $E_l(t)$ are envelope functions at stations $k$ and $l$, and CC denotes cross-correlation. The LMO mode uses these travel time differences directly in the optimization, making it suitable for both traditional phase picking and envelope-based methods.
 
 ### Parameters
 - `initialStepBoundFactor`: Initial step bound factor (default: 100.0)
@@ -222,6 +222,20 @@ After burn-in, calculate:
   $$
   \sigma_{x_j} = \sqrt{\frac{1}{N_{\text{samples}}} \sum_{t=1}^{N_{\text{samples}}} (x_j^{(t)} - \bar{x}_j)^2}
   $$
+
+### Error Estimation
+
+The error estimates in MCMC mode are the standard deviations of the posterior distribution samples (after burn-in). These represent Bayesian uncertainty estimates, reflecting the spread of likely hypocenter locations in the sampled posterior distribution. The errors are converted from degrees to kilometers for latitude and longitude:
+
+$$
+\sigma_{\text{lat,km}} = \sigma_{\text{lat}} \times R
+$$
+
+$$
+\sigma_{\text{lon,km}} = \sigma_{\text{lon}} \times R \times \cos(\phi)
+$$
+
+where $R$ is the Earth's radius in km and $\phi$ is the latitude in radians.
 
 ### Parameters
 - `nSamples`: Total number of MCMC samples (default: 1000)
@@ -446,6 +460,34 @@ $$
 $$
 
 where $\mathbf{W}$ is a diagonal matrix with weights $w_i$ on the diagonal.
+
+### Error Estimation
+
+The error estimates in TRD mode are calculated from the variance matrix returned by the LSQR solver. The LSQR algorithm provides variance estimates for the solution vector $\delta \mathbf{x}$:
+
+$$
+\text{Var}(\delta x_j) = \text{diag}(\mathbf{V} \mathbf{\Sigma}^2 \mathbf{V}^T)_j
+$$
+
+where $\mathbf{V}$ and $\mathbf{\Sigma}$ are from the LSQR decomposition. The standard errors are:
+
+$$
+\sigma_{x_j} = \sqrt{\text{Var}(\delta x_j)}
+$$
+
+These errors are converted from degrees to kilometers for latitude and longitude:
+
+$$
+\sigma_{\text{lat,km}} = \sigma_{\text{lat}} \times R
+$$
+
+$$
+\sigma_{\text{lon,km}} = \sigma_{\text{lon}} \times R \times \cos(\phi)
+$$
+
+where $R$ is the Earth's radius in km and $\phi$ is the latitude in radians.
+
+These represent formal uncertainties in the linearized triple-difference relocation problem, based on the design matrix and residual statistics.
 
 ### Parameters
 - `iterNum`: Array of iteration numbers for each stage (default: [10, 10])

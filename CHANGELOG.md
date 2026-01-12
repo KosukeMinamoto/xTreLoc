@@ -7,11 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.0.0] - 2025-01-05
+## [1.0.0] - 2025-01-12
 
 ### Added
 - Initial release of xTreLoc
-- Multiple location methods: GRD, STD, MCMC, TRD, CLS, SYN
+- Multiple location methods: GRD, LMO, MCMC, TRD, CLS, SYN
 - GUI and CLI interfaces
 - Built-in visualization tools
 - Automatic update checking
@@ -19,7 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Features
 - Grid search using focused random search (GRD)
-- Station-pair Double Difference method (STD)
+- Levenberg-Marquardt optimization (LMO)
 - Markov Chain Monte Carlo method with uncertainty estimation (MCMC)
 - Triple Difference relative relocation (TRD)
 - Spatial clustering and triple difference calculation (CLS)

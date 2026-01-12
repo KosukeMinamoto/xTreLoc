@@ -17,8 +17,8 @@ public final class RunContextFactory {
             throw new ConfigException("Unknown mode: " + mode);
         }
 
-        // Validate required paths for batch processing modes (GRD, STD, MCMC)
-        if (mode.equals("GRD") || mode.equals("STD") || mode.equals("MCMC")) {
+        // Validate required paths for batch processing modes (GRD, LMO, MCMC)
+        if (mode.equals("GRD") || mode.equals("LMO") || mode.equals("MCMC")) {
             if (mc.datDirectory == null) {
                 throw new ConfigException(
                     String.format("Mode %s requires datDirectory to be specified in config", mode));

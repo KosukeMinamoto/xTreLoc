@@ -28,6 +28,14 @@ public class XTreLocGUI {
             System.err.println("Failed to initialize logging: " + e.getMessage());
         }
         
+        // Load settings and apply theme before creating any UI components
+        com.treloc.xtreloc.app.gui.util.AppSettings appSettings = 
+            com.treloc.xtreloc.app.gui.util.AppSettings.load();
+        String theme = appSettings.getTheme();
+        if (theme != null) {
+            applyTheme(theme);
+        }
+        
         SwingUtilities.invokeLater(() -> {
             try {
                 String version = com.treloc.xtreloc.app.gui.util.VersionInfo.getVersion();
@@ -48,8 +56,7 @@ public class XTreLocGUI {
                 MapView view = new MapView();
                 MapController ctrl = new MapController(view);
                 
-                com.treloc.xtreloc.app.gui.util.AppSettings appSettings = 
-                    com.treloc.xtreloc.app.gui.util.AppSettings.load();
+                // appSettings is already loaded above, just apply other settings
                 applyAppSettings(appSettings, mainFrame, view);
                 
                 checkForUpdatesAsync(appSettings, mainFrame);
@@ -98,6 +105,9 @@ public class XTreLocGUI {
                 com.treloc.xtreloc.app.gui.view.SettingsPanel settingsPanel = 
                     new com.treloc.xtreloc.app.gui.view.SettingsPanel(view, mainFrame);
                 
+                com.treloc.xtreloc.app.gui.view.WaveformPickingPanel pickingPanel = 
+                    new com.treloc.xtreloc.app.gui.view.WaveformPickingPanel();
+                
                 catalogPanel.addCatalogLoadListener(hypocenters -> {
                     reportPanel.setHypocenters(hypocenters);
                 });
@@ -124,6 +134,7 @@ public class XTreLocGUI {
                 
                 mainTabbedPane.addTab("solver", new JPanel());
                 mainTabbedPane.addTab("viewer", new JPanel());
+                mainTabbedPane.addTab("picking", new JPanel());
                 mainTabbedPane.addTab("settings", new JPanel());
                 
                 mainTabbedPane.addChangeListener(e -> {
@@ -135,6 +146,8 @@ public class XTreLocGUI {
                         leftPanelContainer.add(solverLeftPanel, BorderLayout.CENTER);
                     } else if ("viewer".equals(selectedTitle)) {
                         leftPanelContainer.add(excelPane, BorderLayout.CENTER);
+                    } else if ("picking".equals(selectedTitle)) {
+                        leftPanelContainer.add(pickingPanel.getLeftPanel(), BorderLayout.CENTER);
                     } else if ("settings".equals(selectedTitle)) {
                         JPanel settingsWrapper = new JPanel(new BorderLayout());
                         settingsWrapper.add(settingsPanel, BorderLayout.NORTH);
@@ -148,6 +161,8 @@ public class XTreLocGUI {
                         rightPanelContainer.add(solverLogPanel, BorderLayout.CENTER);
                     } else if ("viewer".equals(selectedTitle)) {
                         rightPanelContainer.add(viewerRightTabs, BorderLayout.CENTER);
+                    } else if ("picking".equals(selectedTitle)) {
+                        rightPanelContainer.add(pickingPanel.getRightPanel(), BorderLayout.CENTER);
                     } else if ("settings".equals(selectedTitle)) {
                         rightPanelContainer.add(new JPanel(), BorderLayout.CENTER);
                     }
@@ -698,6 +713,8 @@ public class XTreLocGUI {
      */
     private static void applyAppSettings(com.treloc.xtreloc.app.gui.util.AppSettings settings, 
                                         JFrame frame, MapView mapView) {
+        // Theme is already applied in main() before UI creation
+        
         String font = settings.getFont();
         if (font != null && !font.equals("default")) {
             applyFont(font);
@@ -767,6 +784,72 @@ public class XTreLocGUI {
         UIManager.put("Button.font", selectedFont);
         UIManager.put("TextField.font", selectedFont);
         UIManager.put("ComboBox.font", selectedFont);
+    }
+    
+    /**
+     * Applies the selected UI theme to the application.
+     * 
+     * @param themeName the theme name to apply
+     */
+    private static void applyTheme(String themeName) {
+        try {
+            // Standard Look and Feel themes
+            String lafClassName = getLookAndFeelClassName(themeName);
+            if (lafClassName != null) {
+                UIManager.setLookAndFeel(lafClassName);
+            }
+        } catch (Exception e) {
+            System.err.println("Failed to apply theme: " + themeName + " - " + e.getMessage());
+            try {
+                // Fallback to system default
+                UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
+            } catch (Exception ex) {
+                System.err.println("Failed to apply system theme: " + ex.getMessage());
+            }
+        }
+    }
+    
+    /**
+     * Gets the Look and Feel class name for the given theme name.
+     * 
+     * @param themeName the theme name
+     * @return the Look and Feel class name, or null if not found
+     */
+    private static String getLookAndFeelClassName(String themeName) {
+        if (themeName == null) {
+            return UIManager.getSystemLookAndFeelClassName();
+        }
+        
+        switch (themeName) {
+            case "System":
+                return UIManager.getSystemLookAndFeelClassName();
+            case "FlatLaf Light":
+                return "com.formdev.flatlaf.FlatLightLaf";
+            case "FlatLaf Dark":
+                return "com.formdev.flatlaf.FlatDarkLaf";
+            case "FlatLaf IntelliJ":
+                return "com.formdev.flatlaf.FlatIntelliJLaf";
+            case "FlatLaf Darcula":
+                return "com.formdev.flatlaf.FlatDarculaLaf";
+            case "FlatLaf macOS Light":
+                return "com.formdev.flatlaf.themes.FlatMacLightLaf";
+            case "FlatLaf macOS Dark":
+                return "com.formdev.flatlaf.themes.FlatMacDarkLaf";
+            case "Metal":
+                return UIManager.getCrossPlatformLookAndFeelClassName();
+            case "Nimbus":
+                return "javax.swing.plaf.nimbus.NimbusLookAndFeel";
+            case "Windows":
+                return "com.sun.java.swing.plaf.windows.WindowsLookAndFeel";
+            case "Windows Classic":
+                return "com.sun.java.swing.plaf.windows.WindowsClassicLookAndFeel";
+            case "Mac OS X":
+                return "com.apple.laf.AquaLookAndFeel";
+            case "GTK+":
+                return "com.sun.java.swing.plaf.gtk.GTKLookAndFeel";
+            default:
+                return UIManager.getSystemLookAndFeelClassName();
+        }
     }
 
     private static void checkForUpdatesAsync(

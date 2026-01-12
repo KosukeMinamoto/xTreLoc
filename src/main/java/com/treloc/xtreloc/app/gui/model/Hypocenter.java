@@ -11,7 +11,7 @@ public class Hypocenter {
     public final double rms;  // RMS residual
     public final Integer clusterId; // cluster number (optional)
     public final String datFilePath; // relative path of the dat file (optional)
-    public final String type; // type (SYN, STD, GRD, ERR etc.)
+    public final String type; // type (SYN, LMO, GRD, ERR etc.)
 
     public Hypocenter(String time, double lat, double lon, double depth) {
         this(time, lat, lon, depth, 0.0, 0.0, 0.0, 0.0, null, null, null);

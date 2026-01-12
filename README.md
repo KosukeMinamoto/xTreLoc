@@ -6,7 +6,7 @@ Multi-method hypocenter location software with GUI and CLI support for earthquak
 
 - **Multiple Location Methods**:
   - **GRD**: Grid search using focused random search
-  - **STD**: Station-pair Double Difference method (Java port of `hypoEcc`)
+  - **LMO**: Levenberg-Marquardt optimization (Java port of `hypoEcc`)
   - **MCMC**: Markov Chain Monte Carlo method with uncertainty estimation
   - **TRD**: Triple Difference relative relocation (Guo & Zhang, 2016)
   - **CLS**: Spatial clustering and triple difference calculation (equivalent to `ph2dt` in `hypoDD`)
@@ -14,6 +14,11 @@ Multi-method hypocenter location software with GUI and CLI support for earthquak
 
 - **Dual Interface**: Interactive GUI and command-line interface for batch processing
 - **Visualization**: Built-in tools for result analysis and mapping
+  - Interactive map display with catalog, station, and shapefile support
+  - Statistical visualization (histograms, scatter plots)
+  - Real-time residual convergence plots
+  - Report generation and export
+- **Waveform Picking**: SAC file support with P/S arrival time picking and NONLINLOC `.obs` export
 - **Cross-platform**: Windows, macOS, and Linux support
 
 ## Quick Start
@@ -75,7 +80,7 @@ java -jar build/libs/xTreLoc-CLI-1.0-SNAPSHOT.jar <MODE> config.json
 java -jar target/xTreLoc-CLI-1.0-SNAPSHOT.jar <MODE> config.json
 ```
 
-Available modes: `GRD`, `STD`, `MCMC`, `TRD`, `CLS`, `SYN`
+Available modes: `GRD`, `LMO`, `MCMC`, `TRD`, `CLS`, `SYN`
 
 ## Creating Native Applications
 
@@ -127,9 +132,9 @@ For details, see the [jpackage official documentation](https://docs.oracle.com/e
 java -jar build/libs/xTreLoc-CLI-1.0-SNAPSHOT.jar SYN config.json
 # or with Maven: java -jar target/xTreLoc-CLI-1.0-SNAPSHOT.jar SYN config.json
 
-# 2. Locate hypocenters (GRD + STD)
+# 2. Locate hypocenters (GRD + LMO)
 java -jar build/libs/xTreLoc-CLI-1.0-SNAPSHOT.jar GRD config.json
-java -jar build/libs/xTreLoc-CLI-1.0-SNAPSHOT.jar STD config.json
+java -jar build/libs/xTreLoc-CLI-1.0-SNAPSHOT.jar LMO config.json
 
 # 3. Cluster events and calculate triple differences
 java -jar build/libs/xTreLoc-CLI-1.0-SNAPSHOT.jar CLS config.json

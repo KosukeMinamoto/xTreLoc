@@ -103,6 +103,11 @@ public class HypoGridSearch extends SolverBase {
             logger.info(String.format("Initial residual calculated: %.6f (input res was %.6f, using calculated value)", res, point.getRes()));
         }
         for (int focus = 0; focus < numFocus; focus++) {
+            if (Thread.currentThread().isInterrupted()) {
+                logger.info("Grid search interrupted by user");
+                throw new RuntimeException("Grid search was interrupted");
+            }
+            
             double rangeFactor = Math.pow(0.5, focus);
             double[] latGrids = generageRandomGrid(
                 lat - latRange * rangeFactor, 
@@ -118,6 +123,11 @@ public class HypoGridSearch extends SolverBase {
                 gridsPerFocus);
 
             for (int i = 0; i < gridsPerFocus; i++) {
+                // Check for interruption periodically
+                if (i % 100 == 0 && Thread.currentThread().isInterrupted()) {
+                    logger.info("Grid search interrupted by user");
+                    throw new RuntimeException("Grid search was interrupted");
+                }
                 Point pointNew = new Point(time, latGrids[i], lonGrids[i], depGrids[i], 
                     0, 0, 0, 0, "", "", -999);
                 double[] newSWaveTravelTime = travelTime(this.stationTable, usedIdx, pointNew);

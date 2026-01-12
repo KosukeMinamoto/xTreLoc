@@ -75,7 +75,7 @@ public final class XTreLocCLI {
                             });
                     break;
 
-                case "STD":
+                case "LMO":
                     runBatch(context, config,
                             (dat, out) -> {
                                 try {
@@ -83,7 +83,7 @@ public final class XTreLocCLI {
                                         new com.treloc.xtreloc.solver.HypoStationPairDiff(config);
                                     solver.start(dat, out);
                                 } catch (Exception e) {
-                                    logger.log(Level.SEVERE, "Station pair difference failed: " + dat, e);
+                                    logger.log(Level.SEVERE, "Levenberg-Marquardt optimization failed: " + dat, e);
                                     throw new RuntimeException(e);
                                 }
                             });
@@ -592,7 +592,7 @@ public final class XTreLocCLI {
         System.out.println();
         System.out.println("Modes:");
         System.out.println("  GRD   Grid search location");
-        System.out.println("  STD   Station-pair double difference");
+        System.out.println("  LMO   Levenberg-Marquardt optimization");
         System.out.println("  MCMC  Markov Chain Monte Carlo location");
         System.out.println("  TRD   Triple difference relocation");
         System.out.println("  CLS   Spatial clustering");

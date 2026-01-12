@@ -38,7 +38,7 @@ public interface ConvergenceCallback {
     }
     
     /**
-     * Called when iteration information is updated (for STD mode).
+     * Called when iteration information is updated (for LMO mode).
      * 
      * @param iteration iteration number
      * @param evaluations number of function evaluations

@@ -24,6 +24,8 @@ public class AppSettings {
     private boolean autoUpdateEnabled = true;
     private long lastUpdateCheck = 0;
     private String homeDirectory = System.getProperty("user.home");
+    private String theme = "System";
+    private double zoomWindowSeconds = 10.0; // Default zoom window: ±10 seconds
     
     /**
      * Loads application settings from the settings file.
@@ -61,6 +63,12 @@ public class AppSettings {
                 if (node.has("homeDirectory")) {
                     settings.homeDirectory = node.get("homeDirectory").asText();
                 }
+                if (node.has("theme")) {
+                    settings.theme = node.get("theme").asText();
+                }
+                if (node.has("zoomWindowSeconds")) {
+                    settings.zoomWindowSeconds = node.get("zoomWindowSeconds").asDouble();
+                }
                 return settings;
             } catch (IOException e) {
                 System.err.println("Failed to load settings file: " + e.getMessage());
@@ -85,6 +93,8 @@ public class AppSettings {
             node.put("autoUpdateEnabled", autoUpdateEnabled);
             node.put("lastUpdateCheck", lastUpdateCheck);
             node.put("homeDirectory", homeDirectory);
+            node.put("theme", theme);
+            node.put("zoomWindowSeconds", zoomWindowSeconds);
             mapper.writerWithDefaultPrettyPrinter().writeValue(settingsFile, node);
         } catch (IOException e) {
             System.err.println("Failed to save settings file: " + e.getMessage());
@@ -233,6 +243,42 @@ public class AppSettings {
      */
     public void setHomeDirectory(String homeDirectory) {
         this.homeDirectory = homeDirectory;
+    }
+    
+    /**
+     * Gets the UI theme preference.
+     * 
+     * @return theme name ("System", "Metal", "Nimbus", etc.)
+     */
+    public String getTheme() {
+        return theme;
+    }
+    
+    /**
+     * Sets the UI theme preference.
+     * 
+     * @param theme theme name ("System", "Metal", "Nimbus", etc.)
+     */
+    public void setTheme(String theme) {
+        this.theme = theme;
+    }
+    
+    /**
+     * Gets the zoom window size in seconds (half-width, so total window is 2x this value).
+     * 
+     * @return zoom window size in seconds (default: 10.0)
+     */
+    public double getZoomWindowSeconds() {
+        return zoomWindowSeconds;
+    }
+    
+    /**
+     * Sets the zoom window size in seconds (half-width, so total window is 2x this value).
+     * 
+     * @param zoomWindowSeconds zoom window size in seconds
+     */
+    public void setZoomWindowSeconds(double zoomWindowSeconds) {
+        this.zoomWindowSeconds = zoomWindowSeconds;
     }
 }
 

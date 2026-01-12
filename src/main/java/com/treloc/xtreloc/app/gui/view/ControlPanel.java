@@ -2,6 +2,7 @@ package com.treloc.xtreloc.app.gui.view;
 
 import com.treloc.xtreloc.io.AppConfig;
 import com.treloc.xtreloc.solver.HypoGridSearch;
+import com.treloc.xtreloc.util.ModeNameMapper;
 
 import javax.swing.*;
 import javax.swing.border.TitledBorder;
@@ -48,7 +49,13 @@ public class ControlPanel extends JPanel {
         modeGbc.gridx = 0; modeGbc.gridy = 0;
         modePanel.add(new JLabel("Mode:"), modeGbc);
         modeGbc.gridx = 1;
-        modeCombo = new JComboBox<>(new String[]{"GRD", "STD", "TRD", "CLS", "SYN"});
+        // Use display names in ComboBox, but filter to only show available modes
+        String[] availableModes = {"GRD", "LMO", "TRD", "CLS", "SYN"};
+        String[] displayNames = new String[availableModes.length];
+        for (int i = 0; i < availableModes.length; i++) {
+            displayNames[i] = ModeNameMapper.getDisplayName(availableModes[i]);
+        }
+        modeCombo = new JComboBox<>(displayNames);
         modeCombo.addActionListener(e -> updateParameterFields());
         modePanel.add(modeCombo, modeGbc);
         
@@ -129,7 +136,8 @@ public class ControlPanel extends JPanel {
     }
     
     private void executeSolver() {
-        String mode = (String) modeCombo.getSelectedItem();
+        String displayName = (String) modeCombo.getSelectedItem();
+        String mode = ModeNameMapper.getAbbreviation(displayName);
         
         // Select TauP model and update config
         String selectedModel = (String) taupModelCombo.getSelectedItem();
@@ -297,7 +305,7 @@ public class ControlPanel extends JPanel {
                     double lon = Double.parseDouble(parts1[1]);
                     double depth = Double.parseDouble(parts1[2]);
                     // Get the time from the file name (e.g. 071201.000030.dat → 071201.000030)
-                    // parts1[3] is the type (STD, INI, ERR etc.) so always get it from the file name
+                    // parts1[3] is the type (LMO, INI, ERR etc.) so always get it from the file name
                     String time = datFile.getName().replace(".dat", "");
                     
                     // 2nd line: xerr in km, yerr in km, zerr in km, rms residual

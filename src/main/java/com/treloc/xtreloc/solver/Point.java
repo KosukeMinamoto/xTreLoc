@@ -40,7 +40,6 @@ public class Point implements Clusterable {
         this.cid = cid;
     }
 
-    // Getters
     public String getTime() { return time; }
     public double getLat() { return lat; }
     public double getLon() { return lon; }
@@ -78,7 +77,6 @@ public class Point implements Clusterable {
         return new ArrayRealVector(new double[]{lon, lat, dep});
     }
 
-    // Setters
     public void setTime(String time) { this.time = time; }
     public void setLat(double lat) { this.lat = lat; }
     public void setLon(double lon) { this.lon = lon; }

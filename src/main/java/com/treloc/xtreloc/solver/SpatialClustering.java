@@ -57,7 +57,6 @@ public class SpatialClustering extends SolverBase {
     public SpatialClustering(AppConfig appConfig) throws TauModelException {
         super(appConfig);
         
-        // Get clustering parameters from config
         if (appConfig.modes != null && appConfig.modes.containsKey("CLS")) {
             var clsConfig = appConfig.modes.get("CLS");
             this.catalogFile = clsConfig.catalogFile;
@@ -140,10 +139,8 @@ public class SpatialClustering extends SolverBase {
      */
     public void start(String catalogFile, String outputDir) throws TauModelException {
         try {
-            // Load points from catalog
             List<Point> allPoints = loadPointsFromCatalog(this.catalogFile);
             
-            // Check if cluster IDs are already set in the catalog
             boolean hasExistingClusterIds = false;
             Set<Integer> existingClusterIds = new HashSet<>();
             for (Point p : allPoints) {
@@ -186,7 +183,6 @@ public class SpatialClustering extends SolverBase {
                     logger.info("Created output directory: " + outputDirFile.getAbsolutePath());
                 }
                 
-                // Write dat files for all points to output directory
                 int datFilesWritten = 0;
                 int datFilesSkipped = 0;
                 for (Point point : clusteredPoints) {
@@ -248,10 +244,8 @@ public class SpatialClustering extends SolverBase {
                 // No cluster IDs set - proceed with clustering
                 logger.info("Info: Proceeding with clustering (parameters: eps=" + this.eps + ", minPts=" + this.minPts + ")...");
                 
-                // Run clustering
                 List<Cluster<Point>> clusters = runClustering(allPoints, refPoint);
                 
-                // Update cluster IDs
                 clusteredPoints = new HashSet<>();
                 for (Cluster<Point> cluster : clusters) {
                     clusteredPoints.addAll(cluster.getPoints());
@@ -279,7 +273,6 @@ public class SpatialClustering extends SolverBase {
                     logger.info("Created output directory: " + outputDirFile.getAbsolutePath());
                 }
                 
-                // Write dat files for all points to output directory
                 int datFilesWritten = 0;
                 int datFilesSkipped = 0;
                 for (Point point : clusteredPoints) {
@@ -351,7 +344,6 @@ public class SpatialClustering extends SolverBase {
                 
                 logger.info("Processing cluster " + clusterId + " with " + clusterPoints.size() + " points");
                 
-                // Check if points have lag tables
                 int pointsWithLagTable = 0;
                 for (Point p : clusterPoints) {
                     if (p.getLagTable() != null) {
@@ -429,7 +421,6 @@ public class SpatialClustering extends SolverBase {
                 );
             }
             
-            // Store k-distances for plotting (will be accessed via getter)
             this.kDistances = kDistances;
             this.estimatedEps = estimatedEps;
             currentEps = estimatedEps;
@@ -457,7 +448,6 @@ public class SpatialClustering extends SolverBase {
         return clusters;
     }
     
-    // Store k-distances for plotting
     private List<Double> kDistances;
     private double estimatedEps;
     
@@ -662,10 +652,8 @@ public class SpatialClustering extends SolverBase {
         List<Point> points = new ArrayList<>();
         File file = new File(catalogFile);
         
-        // Load hypocenters from catalog
         List<Hypocenter> hypocenters = CatalogLoader.load(file);
         
-        // Filter hypocenters based on thresholds
         int filteredByRms = 0;
         int filteredByLocErr = 0;
         int totalBeforeFilter = hypocenters.size();

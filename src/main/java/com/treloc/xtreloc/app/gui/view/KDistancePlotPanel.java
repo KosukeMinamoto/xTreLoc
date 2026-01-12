@@ -36,16 +36,7 @@ public class KDistancePlotPanel extends JPanel {
         setLayout(new BorderLayout());
         setBorder(BorderFactory.createTitledBorder("k-Distance Graph"));
         
-        // Create empty chart initially
         createEmptyChart();
-        
-        // Add export button
-        JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
-        JButton exportButton = new JButton("画像出力");
-        exportButton.addActionListener(e -> exportChartImage());
-        buttonPanel.add(exportButton);
-        
-        add(buttonPanel, BorderLayout.NORTH);
         add(chartPanel, BorderLayout.CENTER);
     }
     
@@ -125,7 +116,6 @@ public class KDistancePlotPanel extends JPanel {
         renderer.setSeriesShapesVisible(1, true);
         plot.setRenderer(renderer);
         
-        // Add percentage markers
         double[] percentages = {0.7, 0.8, 0.9, 0.95};
         Color[] colors = {Color.GREEN, Color.ORANGE, Color.MAGENTA, Color.CYAN};
         Font labelFont = new Font("SansSerif", Font.PLAIN, 12);
@@ -143,7 +133,6 @@ public class KDistancePlotPanel extends JPanel {
             }
         }
         
-        // Elbow point marker
         int elbowIndex = -1;
         for (int i = 0; i < kDistances.size(); i++) {
             if (Math.abs(kDistances.get(i) - elbowEps) < 1e-6) {
@@ -163,41 +152,13 @@ public class KDistancePlotPanel extends JPanel {
         
         chart.getLegend().setPosition(org.jfree.ui.RectangleEdge.TOP);
         
-        // Update chart panel
         chartPanel.setChart(chart);
         chartPanel.repaint();
     }
     
     /**
      * Exports the chart as an image file.
-     */
-    private void exportChartImage() {
-        JFileChooser fileChooser = new JFileChooser();
-        fileChooser.setDialogTitle("グラフを画像として出力");
-        fileChooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter(
-            "PNG files (*.png)", "png"));
-        fileChooser.addChoosableFileFilter(new javax.swing.filechooser.FileNameExtensionFilter(
-            "JPEG files (*.jpg, *.jpeg)", "jpg", "jpeg"));
-        fileChooser.setSelectedFile(new File("kdistance.png"));
-        
-        int result = fileChooser.showSaveDialog(this);
-        if (result == JFileChooser.APPROVE_OPTION) {
-            File outputFile = fileChooser.getSelectedFile();
-            try {
-                exportChartImageToFile(outputFile);
-                JOptionPane.showMessageDialog(this,
-                    "グラフを画像として出力しました: " + outputFile.getAbsolutePath(),
-                    "情報", JOptionPane.INFORMATION_MESSAGE);
-            } catch (Exception e) {
-                JOptionPane.showMessageDialog(this,
-                    "画像の出力に失敗しました: " + e.getMessage(),
-                    "エラー", JOptionPane.ERROR_MESSAGE);
-            }
-        }
-    }
-    
-    /**
-     * Exports the chart as an image file.
+     * This method is called from ResidualPlotPanel's export button.
      * 
      * @param outputFile the output file
      * @throws Exception if export fails
@@ -221,7 +182,6 @@ public class KDistancePlotPanel extends JPanel {
         } else if (fileName.endsWith(".jpg") || fileName.endsWith(".jpeg")) {
             javax.imageio.ImageIO.write(image, "JPEG", outputFile);
         } else {
-            // Default to PNG
             File pngFile = new File(outputFile.getParent(), 
                 outputFile.getName() + ".png");
             javax.imageio.ImageIO.write(image, "PNG", pngFile);

@@ -385,8 +385,6 @@ public class ScipyLSQR {
 		double z = 0;
 		double cs2 = -1;
 		double sn2 = 0;
-
-		// Set up the first vectors u and v for the bidiagonalization.
 		// These satisfy beta*u = b - A@x, alfa*v = A'@u.
 		double[] u = Arrays.copyOf(b, b.length);
 		double bnorm = norm(b);
@@ -460,9 +458,7 @@ public class ScipyLSQR {
 			}
 		}
 
-		// Main iteration loop.
 		while (itn < iter_lim) {
-			// Check for interruption
 			if (Thread.currentThread().isInterrupted()) {
 				throw new RuntimeException("LSQR computation was interrupted");
 			}
@@ -520,7 +516,6 @@ public class ScipyLSQR {
 			phibar = sn * phibar;
 			double tau = sn * phi;
 
-			// Update x and w.
 			double t1 = phi / rho;
 			double t2 = -theta / rho;
 			double[] dk = scale(w, 1.0 / rho);

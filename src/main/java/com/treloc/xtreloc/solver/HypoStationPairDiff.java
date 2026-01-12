@@ -98,25 +98,25 @@ public class HypoStationPairDiff extends SolverBase {
         this.hypBottom = appConfig.hypBottom;
         
         // Load LM optimization parameters from config
-        if (appConfig.solver != null && appConfig.solver.containsKey("STD")) {
-            var stdSolver = appConfig.solver.get("STD");
-            if (stdSolver.has("initialStepBoundFactor")) {
-                this.initialStepBoundFactor = stdSolver.get("initialStepBoundFactor").asDouble();
+        if (appConfig.solver != null && appConfig.solver.containsKey("LMO")) {
+            var lmoSolver = appConfig.solver.get("LMO");
+            if (lmoSolver.has("initialStepBoundFactor")) {
+                this.initialStepBoundFactor = lmoSolver.get("initialStepBoundFactor").asDouble();
             }
-            if (stdSolver.has("costRelativeTolerance")) {
-                this.costRelativeTolerance = stdSolver.get("costRelativeTolerance").asDouble();
+            if (lmoSolver.has("costRelativeTolerance")) {
+                this.costRelativeTolerance = lmoSolver.get("costRelativeTolerance").asDouble();
             }
-            if (stdSolver.has("parRelativeTolerance")) {
-                this.parRelativeTolerance = stdSolver.get("parRelativeTolerance").asDouble();
+            if (lmoSolver.has("parRelativeTolerance")) {
+                this.parRelativeTolerance = lmoSolver.get("parRelativeTolerance").asDouble();
             }
-            if (stdSolver.has("orthoTolerance")) {
-                this.orthoTolerance = stdSolver.get("orthoTolerance").asDouble();
+            if (lmoSolver.has("orthoTolerance")) {
+                this.orthoTolerance = lmoSolver.get("orthoTolerance").asDouble();
             }
-            if (stdSolver.has("maxEvaluations")) {
-                this.maxEvaluations = stdSolver.get("maxEvaluations").asInt();
+            if (lmoSolver.has("maxEvaluations")) {
+                this.maxEvaluations = lmoSolver.get("maxEvaluations").asInt();
             }
-            if (stdSolver.has("maxIterations")) {
-                this.maxIterations = stdSolver.get("maxIterations").asInt();
+            if (lmoSolver.has("maxIterations")) {
+                this.maxIterations = lmoSolver.get("maxIterations").asInt();
             }
         }
         
@@ -135,14 +135,14 @@ public class HypoStationPairDiff extends SolverBase {
      */
     public void start(String datFile, String outFile) throws TauModelException {
         String fileName = new java.io.File(datFile).getName();
-        logger.info("Starting station-pair double difference location for: " + fileName);
-        System.out.println("Starting station-pair double difference location for: " + fileName);
+        logger.info("Starting Levenberg-Marquardt optimization for: " + fileName);
+        System.out.println("Starting Levenberg-Marquardt optimization for: " + fileName);
         
         Point point;
         try {
             point = loadPointFromDatFile(datFile);
         } catch (IOException e) {
-            StringBuilder errorMsg = new StringBuilder("Failed to read dat file in STD mode:\n");
+            StringBuilder errorMsg = new StringBuilder("Failed to read dat file in LMO mode:\n");
             errorMsg.append("  Input file: ").append(datFile).append("\n");
             errorMsg.append("  Error: ").append(e.getMessage()).append("\n");
             if (e.getCause() != null) {
@@ -181,6 +181,12 @@ public class HypoStationPairDiff extends SolverBase {
         partialDerivativeCache = null;
         
         for (int n = 0; n < 10; n++) {
+            // Check for interruption
+            if (Thread.currentThread().isInterrupted()) {
+                logger.info("Levenberg-Marquardt optimization interrupted by user");
+                throw new RuntimeException("Levenberg-Marquardt optimization was interrupted");
+            }
+            
             LeastSquaresProblem problem = new LeastSquaresBuilder()
                     .start(hypvec)
                     .target(target)
@@ -278,7 +284,7 @@ public class HypoStationPairDiff extends SolverBase {
                 if (dep > hypBottom) {
                     method = "ERR";
                 } else {
-                    method = "STD";
+                    method = "LMO";
                 }
 
                 boolean success = false;
@@ -331,10 +337,10 @@ public class HypoStationPairDiff extends SolverBase {
         
         try {
             pointsHandler.writeDatFile(outFile, codeStrings);
-            logger.info("Station-pair double difference location completed for: " + fileName);
-            System.out.println("Station-pair double difference location completed for: " + fileName);
+            logger.info("Levenberg-Marquardt optimization completed for: " + fileName);
+            System.out.println("Levenberg-Marquardt optimization completed for: " + fileName);
         } catch (IOException e) {
-            StringBuilder errorMsg = new StringBuilder("Failed to write output file in STD mode:\n");
+            StringBuilder errorMsg = new StringBuilder("Failed to write output file in LMO mode:\n");
             errorMsg.append("  Output file: ").append(outFile).append("\n");
             errorMsg.append("  Input file: ").append(datFile).append("\n");
             errorMsg.append("  Error: ").append(e.getMessage()).append("\n");

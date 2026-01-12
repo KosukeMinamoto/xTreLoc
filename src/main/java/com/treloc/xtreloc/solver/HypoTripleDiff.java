@@ -382,7 +382,6 @@ public class HypoTripleDiff extends SolverBase {
             
             int clusterId = 1;
             while (true) {
-                // Check for interruption
                 if (Thread.currentThread().isInterrupted()) {
                     logger.info("Triple difference relocation interrupted by user");
                     throw new RuntimeException("Triple difference relocation was interrupted");
@@ -454,7 +453,6 @@ public class HypoTripleDiff extends SolverBase {
                 }
                 
                 for (int i = 0; i < iterNumArray.length; i++) {
-                    // Check for interruption
                     if (Thread.currentThread().isInterrupted()) {
                         logger.info("Triple difference relocation interrupted by user");
                         throw new RuntimeException("Triple difference relocation was interrupted");
@@ -481,7 +479,6 @@ public class HypoTripleDiff extends SolverBase {
                     double[] dm = null;
                     
                     for (int j = 0; j < iterNum; j++) {
-                        // Check for interruption
                         if (Thread.currentThread().isInterrupted()) {
                             logger.info("Triple difference relocation interrupted by user");
                             throw new RuntimeException("Triple difference relocation was interrupted");
@@ -549,8 +546,6 @@ public class HypoTripleDiff extends SolverBase {
                                     "Actual: " + gCols);
                             }
                             
-                            // Check if dm length matches current expectedDmLength
-                            // This can happen if numTarget changed between iterations (e.g., due to ERR marking)
                             if (dm != null && dm.length != expectedDmLength) {
                                 logger.warning(String.format(
                                     "Cluster %d, stage %d, iteration %d: dm length mismatch. " +
@@ -852,15 +847,12 @@ public class HypoTripleDiff extends SolverBase {
                     continue;
                 }
                 
-                // Set entries for event1 (if it's a target event)
                 if (nCol1 >= 0) {
                     G.setEntry(rowIdx, 3 * nCol1, partialTbl[eve1][stnl][0] - partialTbl[eve1][stnk][0]);
                     G.setEntry(rowIdx, 3 * nCol1 + 1, partialTbl[eve1][stnl][1] - partialTbl[eve1][stnk][1]);
                     G.setEntry(rowIdx, 3 * nCol1 + 2, partialTbl[eve1][stnl][2] - partialTbl[eve1][stnk][2]);
                 }
-                // Note: If nCol1 == -1 (REF event), no column entry is set (REF position is fixed, δx = 0)
                 
-                // Set entries for event0 (if it's a target event)
                 if (nCol0 >= 0) {
                     G.setEntry(rowIdx, 3 * nCol0, -(partialTbl[eve0][stnl][0] - partialTbl[eve0][stnk][0]));
                     G.setEntry(rowIdx, 3 * nCol0 + 1, -(partialTbl[eve0][stnl][1] - partialTbl[eve0][stnk][1]));
@@ -923,15 +915,12 @@ public class HypoTripleDiff extends SolverBase {
                     continue;
                 }
                 
-                // Set entries for event1 (if it's a target event)
                 if (nCol1 >= 0) {
                     G.setEntry(rowIdx, 3 * nCol1, partialTbl[eve1][stnl][0] - partialTbl[eve1][stnk][0]);
                     G.setEntry(rowIdx, 3 * nCol1 + 1, partialTbl[eve1][stnl][1] - partialTbl[eve1][stnk][1]);
                     G.setEntry(rowIdx, 3 * nCol1 + 2, partialTbl[eve1][stnl][2] - partialTbl[eve1][stnk][2]);
                 }
-                // Note: If nCol1 == -1 (REF event), no column entry is set (REF position is fixed, δx = 0)
                 
-                // Set entries for event0 (if it's a target event)
                 if (nCol0 >= 0) {
                     G.setEntry(rowIdx, 3 * nCol0, -(partialTbl[eve0][stnl][0] - partialTbl[eve0][stnk][0]));
                     G.setEntry(rowIdx, 3 * nCol0 + 1, -(partialTbl[eve0][stnl][1] - partialTbl[eve0][stnk][1]));

@@ -125,6 +125,12 @@ public class HypoMCMC extends SolverBase {
         java.util.Random random = new java.util.Random();
         
         for (int i = 0; i < nSamples; i++) {
+            // Check for interruption periodically
+            if (i % 100 == 0 && Thread.currentThread().isInterrupted()) {
+                logger.info("MCMC sampling interrupted by user");
+                throw new RuntimeException("MCMC sampling was interrupted");
+            }
+            
             // Propose new hypocenter
             double newLon = lon + random.nextGaussian() * stepSize;
             double newLat = lat + random.nextGaussian() * stepSize;

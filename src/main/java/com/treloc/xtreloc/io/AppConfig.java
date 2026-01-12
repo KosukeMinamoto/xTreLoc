@@ -53,5 +53,5 @@ public class AppConfig {
     }
     
     /* ---------- solver specific parameters ---------- */
-    // STD mode LM optimization parameters are stored in solver.STD JsonNode
+    // LMO mode LM optimization parameters are stored in solver.LMO JsonNode
 }

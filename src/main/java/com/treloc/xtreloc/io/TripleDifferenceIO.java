@@ -61,10 +61,8 @@ public class TripleDifferenceIO {
     public static void saveBinary(List<TripleDifference> tripleDifferences, File outputFile) throws IOException {
         try (DataOutputStream dos = new DataOutputStream(
                 new BufferedOutputStream(new FileOutputStream(outputFile)))) {
-            // Write header: number of records
             dos.writeInt(tripleDifferences.size());
             
-            // Write each record
             for (TripleDifference td : tripleDifferences) {
                 dos.writeInt(td.eve0);
                 dos.writeInt(td.eve1);
@@ -90,10 +88,8 @@ public class TripleDifferenceIO {
         
         try (DataInputStream dis = new DataInputStream(
                 new BufferedInputStream(new FileInputStream(inputFile)))) {
-            // Read header: number of records
             int numRecords = dis.readInt();
             
-            // Read each record
             for (int i = 0; i < numRecords; i++) {
                 int eve0 = dis.readInt();
                 int eve1 = dis.readInt();

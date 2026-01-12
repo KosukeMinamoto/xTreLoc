@@ -9,7 +9,7 @@ import java.io.File;
  * - SYN mode: catalog_syn.csv
  * - Subsequent modes: append mode name with underscore
  *   - Example: catalog_syn.csv -> GRD -> catalog_syn_grd.csv
- *   - Example: catalog_syn_grd.csv -> STD -> catalog_syn_grd_std.csv
+ *   - Example: catalog_syn_grd.csv -> LMO -> catalog_syn_grd_lmo.csv
  *   - Example: catalog_syn_grd_std.csv -> CLS -> catalog_syn_grd_std_cls.csv
  */
 public class CatalogFileNameGenerator {
@@ -20,7 +20,7 @@ public class CatalogFileNameGenerator {
      * Generates catalog file name based on input catalog file and current mode.
      * 
      * @param inputCatalogFile input catalog file path (can be null for SYN mode)
-     * @param mode current processing mode (SYN, GRD, STD, MCMC, TRD, CLS)
+     * @param mode current processing mode (SYN, GRD, LMO, MCMC, TRD, CLS)
      * @param outputDir output directory
      * @return File object with appropriate catalog file name
      */
@@ -54,7 +54,7 @@ public class CatalogFileNameGenerator {
     /**
      * Converts mode name to lowercase suffix.
      * 
-     * @param mode mode name (SYN, GRD, STD, MCMC, TRD, CLS)
+     * @param mode mode name (SYN, GRD, LMO, MCMC, TRD, CLS)
      * @return lowercase mode suffix
      */
     private static String getModeSuffix(String mode) {
