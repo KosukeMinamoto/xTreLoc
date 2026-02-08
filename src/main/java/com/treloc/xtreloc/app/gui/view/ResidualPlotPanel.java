@@ -10,9 +10,12 @@ import org.jfree.chart.axis.NumberAxis;
 import org.jfree.data.xy.XYSeries;
 import org.jfree.data.xy.XYSeriesCollection;
 import com.treloc.xtreloc.util.ModeNameMapper;
+import com.treloc.xtreloc.app.gui.util.AppSettings;
+import com.treloc.xtreloc.app.gui.util.ChartAppearanceSettings;
 
 import javax.swing.*;
 import java.awt.*;
+import java.awt.image.BufferedImage;
 import java.util.Map;
 import java.util.HashMap;
 import java.util.List;
@@ -100,7 +103,7 @@ public class ResidualPlotPanel extends JPanel {
             this.chart = ChartFactory.createXYLineChart(
                 eventName + " - Residual Convergence",
                 "Iteration",
-                "Residual (s)",
+                "RMS Residual (s)",
                 dataset,
                 PlotOrientation.VERTICAL,
                 true,
@@ -108,21 +111,28 @@ public class ResidualPlotPanel extends JPanel {
                 false
             );
             
-            this.chart.getTitle().setFont(new Font("SansSerif", Font.BOLD, 12));
+            ResidualPlotPanel.applyChartAppearance(this.chart);
             
             XYPlot plot = this.chart.getXYPlot();
             XYLineAndShapeRenderer renderer = new XYLineAndShapeRenderer(true, false);
             renderer.setSeriesPaint(0, new Color(50, 150, 200));
-            renderer.setSeriesStroke(0, new BasicStroke(2.0f));
+            
+            ChartAppearanceSettings settings = AppSettings.load().getChartAppearance();
+            renderer.setSeriesStroke(0, new BasicStroke(settings.getLineWidth()));
             plot.setRenderer(renderer);
             
             NumberAxis xAxis = (NumberAxis) plot.getDomainAxis();
             xAxis.setAutoRange(true);
-            xAxis.setLabelFont(new Font("SansSerif", Font.PLAIN, 11));
+            xAxis.setLabelFont(settings.getAxisLabelFont());
+            xAxis.setTickLabelFont(settings.getTickLabelFont());
             
             NumberAxis yAxis = (NumberAxis) plot.getRangeAxis();
             yAxis.setAutoRange(true);
-            yAxis.setLabelFont(new Font("SansSerif", Font.PLAIN, 11));
+            yAxis.setLabelFont(settings.getAxisLabelFont());
+            yAxis.setTickLabelFont(settings.getTickLabelFont());
+            Color residualColor = new Color(50, 150, 200);
+            yAxis.setLabelPaint(residualColor);
+            yAxis.setTickLabelPaint(residualColor);
             
             this.chartPanel = new ChartPanel(this.chart);
             this.chartPanel.setPreferredSize(new Dimension(600, 200));
@@ -134,12 +144,15 @@ public class ResidualPlotPanel extends JPanel {
                 this.likelihoodSeries = new XYSeries(eventName + " (Log-Likelihood)");
                 this.dataset.addSeries(this.likelihoodSeries);
                 
+                Color likelihoodColor = new Color(200, 100, 50);
                 NumberAxis likelihoodAxis = new NumberAxis("Log-Likelihood");
                 likelihoodAxis.setAutoRange(true);
+                likelihoodAxis.setLabelPaint(likelihoodColor);
+                likelihoodAxis.setTickLabelPaint(likelihoodColor);
                 plot.setRangeAxis(1, likelihoodAxis);
                 plot.mapDatasetToRangeAxis(1, 1);
                 
-                renderer.setSeriesPaint(1, new Color(200, 100, 50));
+                renderer.setSeriesPaint(1, likelihoodColor);
                 renderer.setSeriesStroke(1, new BasicStroke(1.5f));
             }
         }
@@ -232,7 +245,7 @@ public class ResidualPlotPanel extends JPanel {
         chart = ChartFactory.createXYLineChart(
             "Residual Convergence",
             "Iteration",
-            "Residual (s)",
+            "RMS Residual (s)",
             dataset,
             PlotOrientation.VERTICAL,
             true,
@@ -240,22 +253,31 @@ public class ResidualPlotPanel extends JPanel {
             false
         );
         
-        chart.getTitle().setFont(new Font("SansSerif", Font.BOLD, 14));
+        applyChartAppearance(chart);
         
         XYPlot plot = chart.getXYPlot();
         XYLineAndShapeRenderer renderer = new XYLineAndShapeRenderer(true, false);
         renderer.setSeriesPaint(0, new Color(50, 150, 200));
-        renderer.setSeriesStroke(0, new BasicStroke(2.0f));
+        
+        // Get line width from settings
+        com.treloc.xtreloc.app.gui.util.ChartAppearanceSettings settings = 
+            com.treloc.xtreloc.app.gui.util.AppSettings.load().getChartAppearance();
+        renderer.setSeriesStroke(0, new BasicStroke(settings.getLineWidth()));
         plot.setRenderer(renderer);
         
         // Configure axes
         NumberAxis xAxis = (NumberAxis) plot.getDomainAxis();
         xAxis.setAutoRange(true);
-        xAxis.setLabelFont(new Font("SansSerif", Font.PLAIN, 12));
+        xAxis.setLabelFont(settings.getAxisLabelFont());
+        xAxis.setTickLabelFont(settings.getTickLabelFont());
         
         NumberAxis yAxis = (NumberAxis) plot.getRangeAxis();
         yAxis.setAutoRange(autoScale);
-        yAxis.setLabelFont(new Font("SansSerif", Font.PLAIN, 12));
+        yAxis.setLabelFont(settings.getAxisLabelFont());
+        yAxis.setTickLabelFont(settings.getTickLabelFont());
+        Color residualColor = new Color(50, 150, 200);
+        yAxis.setLabelPaint(residualColor);
+        yAxis.setTickLabelPaint(residualColor);
         
         chartPanel = new ChartPanel(chart);
         chartPanel.setPreferredSize(new Dimension(600, 400));
@@ -276,7 +298,13 @@ public class ResidualPlotPanel extends JPanel {
         boolean isLocationMode = "GRD".equals(mode) || "LMO".equals(mode) || 
                                 "MCMC".equals(mode) || "DE".equals(mode) || "TRD".equals(mode);
         
-        if (isLocationMode) {
+        if ("CLS".equals(mode)) {
+            // For CLS mode, show k-distance plot layout
+            if (contentCardLayout != null) {
+                contentCardLayout.show(contentPanel, "KDISTANCE");
+                currentView = "KDISTANCE";
+            }
+        } else if (isLocationMode) {
             contentCardLayout.show(contentPanel, "RESIDUAL");
             
             dataset.removeAllSeries();
@@ -293,11 +321,14 @@ public class ResidualPlotPanel extends JPanel {
                 
                 XYPlot plot = chart.getXYPlot();
                 XYLineAndShapeRenderer renderer = (XYLineAndShapeRenderer) plot.getRenderer();
-                renderer.setSeriesPaint(1, new Color(200, 100, 50));
+                Color likelihoodColor = new Color(200, 100, 50);
+                renderer.setSeriesPaint(1, likelihoodColor);
                 renderer.setSeriesStroke(1, new BasicStroke(1.5f));
                 
                 NumberAxis likelihoodAxis = new NumberAxis("Log-Likelihood");
                 likelihoodAxis.setAutoRange(true);
+                likelihoodAxis.setLabelPaint(likelihoodColor);
+                likelihoodAxis.setTickLabelPaint(likelihoodColor);
                 plot.setRangeAxis(1, likelihoodAxis);
                 plot.mapDatasetToRangeAxis(1, 1);
             } else if ("TRD".equals(mode)) {
@@ -386,7 +417,6 @@ public class ResidualPlotPanel extends JPanel {
                     residualSeries.getY(0).doubleValue() == 0) {
                     residualSeries.clear();
                 }
-                
                 residualSeries.add(iteration, residual);
                 
                 if (residualSeries.getItemCount() > maxDataPoints) {
@@ -417,7 +447,6 @@ public class ResidualPlotPanel extends JPanel {
                 info.series.getY(0).doubleValue() == 0) {
                 info.series.clear();
             }
-            
             info.series.add(iteration, residual);
             info.lastUpdateTime = System.currentTimeMillis();
             
@@ -452,7 +481,6 @@ public class ResidualPlotPanel extends JPanel {
                     chartInfo.series.getY(0).doubleValue() == 0) {
                     chartInfo.series.clear();
                 }
-                
                 chartInfo.series.add(iteration, residual);
                 chartInfo.lastUpdateTime = System.currentTimeMillis();
                 
@@ -835,14 +863,67 @@ public class ResidualPlotPanel extends JPanel {
     }
     
     /**
+     * Applies chart appearance settings to a JFreeChart.
+     * Static method so it can be called from static inner classes.
+     * 
+     * @param chart the chart to apply settings to
+     */
+    private static void applyChartAppearance(JFreeChart chart) {
+        ChartAppearanceSettings settings = AppSettings.load().getChartAppearance();
+        
+        if (chart.getTitle() != null) {
+            chart.getTitle().setFont(settings.getTitleFont());
+        }
+        
+        XYPlot plot = chart.getXYPlot();
+        if (plot != null) {
+            plot.setBackgroundPaint(settings.getBackgroundColorAsColor());
+            plot.setDomainGridlinePaint(settings.getGridlineColorAsColor());
+            plot.setRangeGridlinePaint(settings.getGridlineColorAsColor());
+            plot.setDomainGridlineStroke(settings.getGridlineStroke());
+            plot.setRangeGridlineStroke(settings.getGridlineStroke());
+            plot.setDomainGridlinesVisible(true);
+            plot.setRangeGridlinesVisible(true);
+            
+            NumberAxis domainAxis = (NumberAxis) plot.getDomainAxis();
+            if (domainAxis != null) {
+                domainAxis.setLabelFont(settings.getAxisLabelFont());
+                domainAxis.setTickLabelFont(settings.getTickLabelFont());
+            }
+            
+            NumberAxis rangeAxis = (NumberAxis) plot.getRangeAxis();
+            if (rangeAxis != null) {
+                rangeAxis.setLabelFont(settings.getAxisLabelFont());
+                rangeAxis.setTickLabelFont(settings.getTickLabelFont());
+            }
+        }
+        
+        if (chart.getLegend() != null) {
+            chart.getLegend().setItemFont(settings.getLegendFont());
+        }
+    }
+    
+    /**
      * Updates the chart display.
      */
     private void updateChart() {
         if (chart != null && chartPanel != null) {
+            applyChartAppearance(chart);
+            
             XYPlot plot = chart.getXYPlot();
             NumberAxis yAxis = (NumberAxis) plot.getRangeAxis();
             yAxis.setAutoRange(autoScale);
-            
+            Color residualColor = new Color(50, 150, 200);
+            yAxis.setLabelPaint(residualColor);
+            yAxis.setTickLabelPaint(residualColor);
+            if ("MCMC".equals(mode) && plot.getRangeAxisCount() > 1) {
+                NumberAxis likelihoodAxis = (NumberAxis) plot.getRangeAxis(1);
+                Color likelihoodColor = new Color(200, 100, 50);
+                if (likelihoodAxis != null) {
+                    likelihoodAxis.setLabelPaint(likelihoodColor);
+                    likelihoodAxis.setTickLabelPaint(likelihoodColor);
+                }
+            }
             chartPanel.repaint();
         }
     }
@@ -951,52 +1032,93 @@ public class ResidualPlotPanel extends JPanel {
     /**
      * Exports the chart as an image file.
      * Exports either residual plot or k-distance graph depending on which is currently displayed.
+     * For residual view, exports the actually visible component (single chart or split view panel).
      */
     private void exportChartImage() {
         JFileChooser fileChooser = new JFileChooser();
         fileChooser.setDialogTitle("Export Chart Image");
         fileChooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter(
             "PNG Images", "png"));
+        java.awt.Window parent = SwingUtilities.getWindowAncestor(this);
         
         if ("KDISTANCE".equals(currentView) && kDistancePlotPanel != null) {
             fileChooser.setSelectedFile(new java.io.File("kdistance.png"));
-            if (fileChooser.showSaveDialog(this) == JFileChooser.APPROVE_OPTION) {
+            if (fileChooser.showSaveDialog(parent != null ? parent : this) == JFileChooser.APPROVE_OPTION) {
                 try {
                     java.io.File file = fileChooser.getSelectedFile();
                     kDistancePlotPanel.exportChartImageToFile(file);
-                    JOptionPane.showMessageDialog(this,
+                    JOptionPane.showMessageDialog(parent != null ? parent : this,
                         "Chart exported successfully to:\n" + file.getAbsolutePath(),
                         "Export Success", JOptionPane.INFORMATION_MESSAGE);
                 } catch (Exception e) {
-                    JOptionPane.showMessageDialog(this,
+                    JOptionPane.showMessageDialog(parent != null ? parent : this,
                         "Error exporting chart: " + e.getMessage(),
                         "Export Error", JOptionPane.ERROR_MESSAGE);
                 }
             }
         } else {
             fileChooser.setSelectedFile(new java.io.File("residual_plot.png"));
-            if (fileChooser.showSaveDialog(this) == JFileChooser.APPROVE_OPTION) {
+            if (fileChooser.showSaveDialog(parent != null ? parent : this) == JFileChooser.APPROVE_OPTION) {
                 try {
                     java.io.File file = fileChooser.getSelectedFile();
                     if (!file.getName().toLowerCase().endsWith(".png")) {
                         file = new java.io.File(file.getAbsolutePath() + ".png");
                     }
-                    
                     int width = 1200;
                     int height = 800;
-                    java.awt.image.BufferedImage image = chart.createBufferedImage(width, height);
-                    javax.imageio.ImageIO.write(image, "png", file);
-                    
-                    JOptionPane.showMessageDialog(this,
-                        "Chart exported successfully to:\n" + file.getAbsolutePath(),
-                        "Export Success", JOptionPane.INFORMATION_MESSAGE);
+                    BufferedImage image = createVisibleResidualImage(width, height);
+                    if (image != null) {
+                        javax.imageio.ImageIO.write(image, "png", file);
+                        JOptionPane.showMessageDialog(parent != null ? parent : this,
+                            "Chart exported successfully to:\n" + file.getAbsolutePath(),
+                            "Export Success", JOptionPane.INFORMATION_MESSAGE);
+                    } else {
+                        JOptionPane.showMessageDialog(parent != null ? parent : this,
+                            "Could not export: no chart visible.",
+                            "Export Error", JOptionPane.ERROR_MESSAGE);
+                    }
                 } catch (Exception e) {
-                    JOptionPane.showMessageDialog(this,
+                    JOptionPane.showMessageDialog(parent != null ? parent : this,
                         "Error exporting chart: " + e.getMessage(),
                         "Export Error", JOptionPane.ERROR_MESSAGE);
                 }
             }
         }
+    }
+    
+    /**
+     * Renders the currently visible residual view (single chart or split view) to a BufferedImage.
+     */
+    private BufferedImage createVisibleResidualImage(int width, int height) {
+        if (contentPanel == null || contentPanel.getComponentCount() == 0) {
+            return chart != null ? chart.createBufferedImage(width, height) : null;
+        }
+        Component residualCard = contentPanel.getComponent(0);
+        if (!(residualCard instanceof JPanel)) {
+            return chart != null ? chart.createBufferedImage(width, height) : null;
+        }
+        JPanel residualContainer = (JPanel) residualCard;
+        if (residualContainer.getComponentCount() == 0) {
+            return chart != null ? chart.createBufferedImage(width, height) : null;
+        }
+        Component visible = residualContainer.getComponent(0);
+        if (visible instanceof ChartPanel) {
+            JFreeChart ch = ((ChartPanel) visible).getChart();
+            return ch != null ? ch.createBufferedImage(width, height) : null;
+        }
+        if (visible instanceof JScrollPane) {
+            Component view = ((JScrollPane) visible).getViewport().getView();
+            int w = Math.max(width, view.getWidth() > 0 ? view.getWidth() : width);
+            int h = Math.max(height, view.getHeight() > 0 ? view.getHeight() : height);
+            BufferedImage img = new BufferedImage(w, h, BufferedImage.TYPE_INT_RGB);
+            Graphics2D g2 = img.createGraphics();
+            g2.setColor(Color.WHITE);
+            g2.fillRect(0, 0, w, h);
+            view.paint(g2);
+            g2.dispose();
+            return img;
+        }
+        return chart != null ? chart.createBufferedImage(width, height) : null;
     }
     
     /**

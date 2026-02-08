@@ -15,6 +15,8 @@ public class CatalogInfo {
     private Color color;
     private SymbolType symbolType;
     private List<Hypocenter> hypocenters;
+    /** Filtered list for display (screening). When null, full hypocenters are shown. */
+    private List<Hypocenter> displayHypocenters;
     private File sourceFile;
     private boolean visible;
     
@@ -71,12 +73,32 @@ public class CatalogInfo {
         this.symbolType = symbolType;
     }
     
+    /**
+     * Returns the list of hypocenters to display.
+     * If a display filter is set (screening), returns the filtered list; otherwise returns the full list.
+     */
     public List<Hypocenter> getHypocenters() {
-        return hypocenters;
+        return displayHypocenters != null ? displayHypocenters : hypocenters;
     }
     
     public void setHypocenters(List<Hypocenter> hypocenters) {
         this.hypocenters = hypocenters;
+        this.displayHypocenters = null;
+    }
+    
+    /** Sets the filtered list for display (screening). Pass null to clear the filter. */
+    public void setDisplayHypocenters(List<Hypocenter> displayHypocenters) {
+        this.displayHypocenters = displayHypocenters;
+    }
+    
+    /** Clears the display filter so the full hypocenter list is shown. */
+    public void clearDisplayFilter() {
+        this.displayHypocenters = null;
+    }
+    
+    /** Returns the full (unfiltered) hypocenter list. */
+    public List<Hypocenter> getHypocentersFull() {
+        return hypocenters;
     }
     
     public File getSourceFile() {

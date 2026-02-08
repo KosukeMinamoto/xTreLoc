@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.util.logging.Logger;
 
 import com.treloc.xtreloc.io.AppConfig;
+import com.treloc.xtreloc.util.SolverLogger;
 import edu.sc.seis.TauP.TauModelException;
 
 import org.apache.commons.math3.fitting.leastsquares.LeastSquaresBuilder;
@@ -136,7 +137,7 @@ public class HypoStationPairDiff extends SolverBase {
     public void start(String datFile, String outFile) throws TauModelException {
         String fileName = new java.io.File(datFile).getName();
         logger.info("Starting Levenberg-Marquardt optimization for: " + fileName);
-        System.out.println("Starting Levenberg-Marquardt optimization for: " + fileName);
+        SolverLogger.fine("Starting Levenberg-Marquardt optimization for: " + fileName);
         
         Point point;
         try {
@@ -338,7 +339,7 @@ public class HypoStationPairDiff extends SolverBase {
         try {
             pointsHandler.writeDatFile(outFile, codeStrings);
             logger.info("Levenberg-Marquardt optimization completed for: " + fileName);
-            System.out.println("Levenberg-Marquardt optimization completed for: " + fileName);
+            SolverLogger.fine("Levenberg-Marquardt optimization completed for: " + fileName);
         } catch (IOException e) {
             StringBuilder errorMsg = new StringBuilder("Failed to write output file in LMO mode:\n");
             errorMsg.append("  Output file: ").append(outFile).append("\n");

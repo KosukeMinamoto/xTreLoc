@@ -22,11 +22,15 @@
 - [GUIモード](#guiモード)
   - [自動更新機能](#自動更新機能)
   - [ログファイルと設定ファイル](#ログファイルと設定ファイル)
+  - [Viewerタブの詳細機能](#viewerタブの詳細機能)
+  - [Pickingタブ](#pickingタブ)
 - [CLIモード](#cliモード)
   - [CLIモードの起動](#cliモードの起動)
   - [コマンド構文](#コマンド構文)
   - [利用可能なモード](#利用可能なモード)
   - [ヘルプ](#ヘルプ)
+- [TUIモード](#tuiモード)
+  - [TUIのビルドと起動](#tuiのビルドと起動)
 - [デモデータセットチュートリアル](#デモデータセットチュートリアル)
   - [準備](#準備)
   - [デモデータセット構造](#デモデータセット構造)
@@ -51,14 +55,16 @@ xTreLocは, 複数の震源決定手法をサポートする震源決定ソフ�
 - **GRD**: フォーカスドランダムサーチにより, 走時差の残差を最小とするグリッドを返す. LMOモードの前に実行することが推奨される. 
 - **LMO**: Levenberg-Marquardt最適化を用いた個々のイベントについての震源決定. Fortranで書かれた`hypoEcc` (Ide, 2010; Ohta et al., 2019) のJavaへの移植版であるが, `delaz4.f`などの軽微なバグを修正済み.
 - **MCMC**: マルコフ連鎖モンテカルロ法による震源決定. 不確実性の推定を提供する. 
+- **DE (Differential Evolution)**: 差分進化法による震源決定. グローバル最適化手法であり, 初期値依存を弱めつつ走時差残差を最小化する. LMOと同様に個々のイベントごとに最適化を行う.
 - **TRD**: Guo & Zhang (2016) によるTriple Difference法を用いた相対震源再決定. 
 - **CLS**: 空間クラスタリングによって震源のネットワークを構成し, 走時差についてイベント間の差分を計算する. `hypoDD` (Waldhauser & Ellsworth, 2000) における`ph2dt`と同等の役割であり, TRDモードの前に実行する必要がある. 
-- **SYN**: 震源決定モード (GRD, MCMC, LMO & TRD) に直接流せるシンセティックデータを作成する. 
+- **SYN**: 震源決定モード (GRD, MCMC, LMO, DE, TRD) に直接流せるシンセティックデータを作成する. 
 
-本ソフトウェアは2つのモードで使用できる: 
+本ソフトウェアは3つのインターフェースで使用できる: 
 
 - **GUIモード**: 対話型グラフィカルユーザーインターフェース
 - **CLIモード**: バッチ処理用のコマンドラインインターフェース
+- **TUIモード**: テキストベースの対話型インターフェース (Lanterna を用いたCUI). ターミナル上でメニューからモードとパラメータを選択して実行する.
 
 ---
 
@@ -79,19 +85,24 @@ xTreLocは, 複数の震源決定手法をサポートする震源決定ソフ�
 git clone https://github.com/KosukeMinamoto/xTreLoc.git
 cd xTreLoc
 
-# GUI版をビルド
+# メインJARをビルド (起動時にGUI/TUI/CLIを選択)
 ./gradlew build
 
-# CLI版をビルド
+# CLI専用JARをビルド
 ./gradlew cliJar
 
-# 両方をビルド
-./gradlew build cliJar
+# TUI専用JARをビルド
+./gradlew tuiJar
+
+# GUI専用JARをビルド
+./gradlew guiJar
 ```
 
 ビルドされたJARファイルは`build/libs/`に配置される: 
-- `xTreLoc-GUI-1.0-SNAPSHOT.jar` (GUI版)
-- `xTreLoc-CLI-1.0-SNAPSHOT.jar` (CLI版)
+- `xTreLoc-1.0-SNAPSHOT.jar` (`./gradlew build` で生成. 起動時にGUI/TUI/CLIを選択するランチャー.)
+- `xTreLoc-CLI-1.0-SNAPSHOT.jar` (`./gradlew cliJar` で生成)
+- `xTreLoc-TUI-1.0-SNAPSHOT.jar` (`./gradlew tuiJar` で生成)
+- `xTreLoc-GUI-1.0-SNAPSHOT.jar` (`./gradlew guiJar` で生成)
 
 #### Mavenを使用
 
@@ -130,7 +141,10 @@ ls -lh target/*.jar
 
 **GUIモード:**
 ```bash
-# Gradleでビルドした場合
+# GradleでメインJARをビルドした場合 (起動後メニューでGUIを選択)
+java -jar build/libs/xTreLoc-1.0-SNAPSHOT.jar
+
+# またはGUI専用JAR (./gradlew guiJar でビルドした場合)
 java -jar build/libs/xTreLoc-GUI-1.0-SNAPSHOT.jar
 
 # Mavenでビルドした場合
@@ -202,13 +216,15 @@ time,latitude,longitude,depth,xerr,yerr,zerr,rms,file,mode,cid
 
 これらの異なる誤差推定値は, 各モードで使用される異なる統計的フレームワークと最適化手法を反映しており, それに応じて解釈する必要がある.
 - **file**: 対応する`.dat`ファイルのパス
-- **mode**: イベント種別 (SYN, GRD, LMO, MCMC, TRD, ERR, REF)
+- **mode**: イベント種別 (SYN, GRD, LMO, MCMC, DE, TRD, ERR, REF)
 - **cid**: クラスタID (整数, 0はクラスタに分類されないイベント)
 
 **イベント種別**: 
 - **SYN**: SYNモードで生成されたイベント
 - **GRD**: GRDモードで決定されたイベント
 - **LMO**: LMOモードで決定されたイベント
+- **MCMC**: MCMCモードで決定されたイベント
+- **DE**: DEモードで決定されたイベント
 - **TRD**: TRDモードで再決定されたイベント
 - **ERR**: 震源決定中にエラーが生じたイベント (例: airquake)
 - **REF**: TRDモードにおいて固定される参照イベント (詳細は[参照イベント (REF)](#参照イベント-ref)セクションを参照)
@@ -316,8 +332,9 @@ Viewerタブの右側には以下の統計的可視化機能が利用可能:
 
 Solverタブの実行中に, リアルタイムで残差の収束状況をプロット表示する機能:
 
-- **STDモード**: 各イベントの残差の収束過程を表示
+- **LMOモード**: 各イベントの残差の収束過程を表示
 - **MCMCモード**: 残差と尤度の収束過程を表示
+- **DEモード**: 各イベントの残差の収束過程を表示
 - **TRDモード**: クラスタごとの残差収束を表示
 - **スプリットビュー**: 複数のイベントを並列表示して比較可能
 - **エクスポート機能**: プロットを画像ファイルとして保存可能
@@ -399,16 +416,18 @@ java -jar xTreLoc-CLI-1.0-SNAPSHOT.jar <MODE> [config.json]
 java -jar xTreLoc-CLI-1.0-SNAPSHOT.jar <MODE> [config.json]
 ```
 
-- `<MODE>`: GRD, LMO, MCMC, TRD, CLS, またはSYNのいずれか
-- `[config.json]`: 設定ファイルのパス (Default:`config.json`)
+- `<MODE>`: GRD, LMO, MCMC, TRD, CLS, またはSYNのいずれか (DEはCLIでは未実装のため, GUIまたはTUIで利用する.)
+- `[config.json]`: 設定ファイルのパス (Default: `config.json`)
 
 ### 利用可能なモード
 
 各震源決定モードには, 大まかには以下のような特徴がある:
 - **GRDモード**: 中程度の速度だが, 大まかな分布の推定や初期震源決定に適する.
-- **STDモード**: 高速に良好な精度を出すが, 初期値依存性が高いため, GRDモードの次に実行することが推奨される.
-- **MCMCモード**: 計算に時間を要するが, 良好な決定精度. 
-- **TRDモード**: インプットデータの震源決定精度が大きく影響するため, 上記のモードを実行後の再決定手法として用いられる. また一部の解は発散するためにデータ数が減る場合が多い. なお計算が重いため, ブートストラップ法を用いた誤差推定は現時点で未実装. 
+- **LMOモード**: 高速に良好な精度を出すが, 初期値依存性が高いため, GRDモードの次に実行することが推奨される.
+- **MCMCモード**: 計算に時間を要するが, 良好な決定精度である.
+- **TRDモード**: インプットデータの震源決定精度が大きく影響するため, 上記のモードを実行後の再決定手法として用いられる. また一部の解は発散するためにデータ数が減る場合が多い. なお計算が重いため, ブートストラップ法を用いた誤差推定は現時点で未実装である. 
+
+**注**: DE (差分進化) モードはGUIおよびTUIで利用可能である. CLIでは未実装である.
 
 #### GRDモード (グリッドサーチ)
 
@@ -432,7 +451,7 @@ java -jar xTreLoc-CLI-1.0-SNAPSHOT.jar LMO config.json
 java -jar xTreLoc-CLI-1.0-SNAPSHOT.jar MCMC config.json
 ```
 
-すべての`.dat`ファイルに対してMCMCを用いた震源決定を実行. 
+すべての`.dat`ファイルに対してMCMCを用いた震源決定を実行する. 
 
 #### CLSモード
 
@@ -469,6 +488,38 @@ java -jar xTreLoc-CLI-1.0-SNAPSHOT.jar --help
 ```bash
 java -jar xTreLoc-CLI-1.0-SNAPSHOT.jar
 ```
+
+---
+
+## TUIモード
+
+TUI (Text User Interface) は, ターミナル上で動作するテキストベースの対話型インターフェースである. Lanterna ライブラリを用いたCUIであり, メニューから震源決定モード (GRD, LMO, MCMC, DE, TRD, CLS, SYN) を選択し, パラメータを対話的に入力して実行できる. GUIが利用できない環境 (SSH接続先や軽量な実行) で, CLIのバッチ実行よりも柔軟にパラメータを変えながら試す場合に適する.
+
+### TUIのビルドと起動
+
+**TUI専用JARのビルド (Gradle):**
+
+```bash
+./gradlew tuiJar
+```
+
+ビルド後, `build/libs/xTreLoc-TUI-1.0-SNAPSHOT.jar` が生成される.
+
+**TUIの起動:**
+
+```bash
+java -jar build/libs/xTreLoc-TUI-1.0-SNAPSHOT.jar [config.json]
+```
+
+またはGradleから直接実行する場合:
+
+```bash
+./gradlew runTUI -PtuiArgs="[config.json]"
+```
+
+- `[config.json]`: 設定ファイルのパス (省略時は起動後にパスを入力するか, メニューで設定する).
+
+TUI起動後, 画面上のメニューからモードを選択し, 必要に応じてパラメータを編集して実行する. ログウィンドウは **L** キーまたは「Show Log Window」ボタンで開く. ソルバー実行中の詳細ログを確認できる.
 
 ---
 
@@ -814,30 +865,11 @@ java -jar build/libs/xTreLoc-CLI-1.0-SNAPSHOT.jar TRD config.json
 
 #### Python
 
-提供されたPythonスクリプト`map_njt.py`を使用してマップを作成できる. このスクリプトはCartopyとMatplotlibを使用しており, カスタマイズが容易である.
+提供されたPythonスクリプト`map_njt.py`を使用してマップを作成できる.
 
-**要件**: 
-- Python 3.6以上
-- 必要なパッケージ: `pandas`, `numpy`, `matplotlib`, `cartopy`
-
-**インストール**: 
 ```bash
-pip install pandas numpy matplotlib cartopy
+python3 map_njt.py --catalog ./dat-std/catalog.csv --station ./station.tbl --output catalog_std.pdf
 ```
-
-**使用方法**: 
-1. `demo/`ディレクトリに移動: 
-   ```bash
-   cd demo
-   ```
-2. コマンドライン引数でカタログファイル, 観測点ファイル, 出力ファイルを指定: 
-   ```bash
-   python3 map_njt.py --catalog ./dat-std/catalog.csv --station ./station.tbl --output catalog_std.pdf
-   ```
-3. またはデフォルト設定で実行: 
-   ```bash
-   python3 map_njt.py
-   ```
 
 **オプション**: 
 - `--catalog`: カタログCSVファイルのパス (デフォルト: `./catalog_ground_truth.csv`)
@@ -847,11 +879,7 @@ pip install pandas numpy matplotlib cartopy
 - `--lon-range`: 経度範囲 (デフォルト: `141.5 144.0`)
 - `--depth-range`: カラーバーの深さ範囲 (デフォルト: `10 20`)
 
-**特徴**: 
-- Cartopyによる地理投影
-- エラーバーの自動表示
-- カスタムカラーマップ (Gnuplotパレットと同等)
-- 海岸線, 陸地, 海洋の自動描画
+**例の出力**: ![Python Map](python_njt.png)
 
 #### GMT (Generic Mapping Tools)
 
@@ -890,29 +918,6 @@ sudo apt-get install gmt
    ```bash
    ./map_njt.sh
    ```
-
-**引数**: 
-- 第1引数: カタログCSVファイルのパス (デフォルト: `./catalog_ground_truth.csv`)
-- 第2引数: 観測点ファイルのパス (デフォルト: `./station.tbl`)
-- 第3引数: 出力PDFファイル名 (デフォルト: `catalog_map.pdf`)
-
-**特徴**: 
-- 高品質な地図出力
-- エラーバーの自動表示
-- カスタムカラーマップ (Gnuplotパレットと同等)
-- 海岸線の自動描画
-- 一時ファイルの自動削除
-
-**カスタマイズ**: 
-スクリプト内の以下の変数を編集することで, 地図の範囲や深さ範囲を変更できる: 
-```bash
-LON_MIN=141.5
-LON_MAX=144.0
-LAT_MIN=38.0
-LAT_MAX=40.5
-DEPTH_MIN=10
-DEPTH_MAX=20
-```
 
 #### GUI上での描画
 
@@ -960,10 +965,11 @@ demo
 │   ├── 000101.010000.dat
 │   ├── ...
 │   └── catalog_trd.csv
-├── map_njt.m                  # 描画用のMatlab Script
-├── map_njt.plt                # 描画用のGnuplot Script
-├── map_njt.py                 # 描画用のPython Script
-├── map_njt.sh                 # 描画用のGMT Script
+├── utils
+│   ├── map_njt.m
+│   ├── map_njt.plt
+│   ├── map_njt.py
+│   └── map_njt.sh
 └── station.tbl
 ```
 
@@ -977,5 +983,5 @@ demo
 ---
 
 **バージョン**: 1.0-SNAPSHOT  
-**最終更新**: 2024
+**最終更新**: 2026/2/1
 

@@ -9,7 +9,10 @@ import javax.swing.event.ListSelectionListener;
 import javax.swing.table.DefaultTableModel;
 import java.awt.*;
 import java.io.File;
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 /**
  * Panel for displaying catalog data in an Excel-like table format.
@@ -27,6 +30,7 @@ public class CatalogTablePanel extends JPanel {
     private JLabel statusLabel;
     private MapView mapView;
     private java.util.List<CatalogLoadListener> catalogLoadListeners = new java.util.ArrayList<>();
+    private java.util.List<Runnable> screeningChangeListeners = new java.util.ArrayList<>();
     
     private java.util.List<com.treloc.xtreloc.app.gui.model.CatalogInfo> catalogInfos = new java.util.ArrayList<>();
     private java.util.Map<com.treloc.xtreloc.app.gui.model.CatalogInfo, File> catalogFiles = new java.util.HashMap<>();
@@ -35,6 +39,32 @@ public class CatalogTablePanel extends JPanel {
     private File currentCatalogFile;
     
     private JButton removeButton;
+    
+    private boolean screeningEnabled;
+    private JTextField rmsMinField;
+    private JTextField rmsMaxField;
+    private JTextField depthMinField;
+    private JTextField depthMaxField;
+    private JTextField latMinField;
+    private JTextField latMaxField;
+    private JTextField lonMinField;
+    private JTextField lonMaxField;
+    private JTextField xerrMinField;
+    private JTextField xerrMaxField;
+    private JTextField yerrMinField;
+    private JTextField yerrMaxField;
+    private JTextField zerrMinField;
+    private JTextField zerrMaxField;
+    private JCheckBox modeGrdCheck;
+    private JCheckBox modeLmoCheck;
+    private JCheckBox modeMcmcCheck;
+    private JCheckBox modeDeCheck;
+    private JCheckBox modeTrdCheck;
+    private JCheckBox modeClsCheck;
+    private JCheckBox modeSynCheck;
+    
+    // Debounce timer for row selection to prevent UI freezing
+    private javax.swing.Timer selectionDebounceTimer;
     
     /**
      * Listener interface for catalog loading events.
@@ -55,6 +85,14 @@ public class CatalogTablePanel extends JPanel {
      */
     public void addCatalogLoadListener(CatalogLoadListener listener) {
         catalogLoadListeners.add(listener);
+    }
+    
+    /**
+     * Adds a listener that is run when event screening (filter) is applied.
+     * Use to refresh Hist/Scatter panels when Apply is pressed.
+     */
+    public void addScreeningChangeListener(Runnable listener) {
+        screeningChangeListeners.add(listener);
     }
 
     public CatalogTablePanel(MapView mapView) {
@@ -113,7 +151,7 @@ public class CatalogTablePanel extends JPanel {
         catalogListScrollPane.setPreferredSize(new Dimension(500, 150));
         splitPane.setTopComponent(catalogListScrollPane);
         
-        // 下部：データ表示テーブル（Excel風）
+        // Bottom: Data display table (Excel-style)
         String[] dataColumnNames = {"Row", "Time", "Latitude", "Longitude", "Depth (km)", "xerr (km)", "yerr (km)", "zerr (km)", "rms", "Cluster ID", "File Path"};
         dataTableModel = new DefaultTableModel(dataColumnNames, 0) {
             @Override
@@ -142,28 +180,47 @@ public class CatalogTablePanel extends JPanel {
             }
         });
         
+        // Initialize debounce timer for row selection
+        selectionDebounceTimer = new javax.swing.Timer(100, e -> {
+            // This will be set in the listener
+        });
+        selectionDebounceTimer.setRepeats(false);
+        
         dataTable.getSelectionModel().addListSelectionListener(new ListSelectionListener() {
             @Override
             public void valueChanged(ListSelectionEvent e) {
                 if (!e.getValueIsAdjusting()) {
-                    int selectedRow = dataTable.getSelectedRow();
-                    if (selectedRow >= 0 && getCurrentHypocenters() != null && 
-                        selectedRow < getCurrentHypocenters().size() && mapView != null) {
-                        Hypocenter h = getCurrentHypocenters().get(selectedRow);
-                        try {
-                            int catalogRow = catalogListTable.getSelectedRow();
-                            if (catalogRow >= 0 && catalogRow < catalogInfos.size()) {
-                                com.treloc.xtreloc.app.gui.model.CatalogInfo catalogInfo = catalogInfos.get(catalogRow);
-                                mapView.highlightPoint(h.lon, h.lat, null, 
-                                    catalogInfo.getSymbolType(), catalogInfo.getColor());
-                            } else {
-                                mapView.highlightPoint(h.lon, h.lat);
+                    // Cancel previous timer
+                    selectionDebounceTimer.stop();
+                    
+                    // Get selected row
+                    final int selectedRow = dataTable.getSelectedRow();
+                    
+                    // Set up debounced action
+                    selectionDebounceTimer = new javax.swing.Timer(50, evt -> {
+                        // Execute map update asynchronously to prevent UI freezing
+                        SwingUtilities.invokeLater(() -> {
+                            if (selectedRow >= 0 && getCurrentHypocenters() != null && 
+                                selectedRow < getCurrentHypocenters().size() && mapView != null) {
+                                Hypocenter h = getCurrentHypocenters().get(selectedRow);
+                                try {
+                                    int catalogRow = catalogListTable.getSelectedRow();
+                                    if (catalogRow >= 0 && catalogRow < catalogInfos.size()) {
+                                        com.treloc.xtreloc.app.gui.model.CatalogInfo catalogInfo = catalogInfos.get(catalogRow);
+                                        mapView.highlightPoint(h.lon, h.lat, null, 
+                                            catalogInfo.getSymbolType(), catalogInfo.getColor());
+                                    } else {
+                                        mapView.highlightPoint(h.lon, h.lat);
+                                    }
+                                } catch (Exception ex) {
+                                }
+                            } else if (mapView != null) {
+                                mapView.clearHighlight();
                             }
-                        } catch (Exception ex) {
-                        }
-                    } else if (mapView != null) {
-                        mapView.clearHighlight();
-                    }
+                        });
+                    });
+                    selectionDebounceTimer.setRepeats(false);
+                    selectionDebounceTimer.start();
                 }
             }
         });
@@ -186,7 +243,7 @@ public class CatalogTablePanel extends JPanel {
         
         add(splitPane, BorderLayout.CENTER);
 
-        // ステータスラベル
+        // Status label
         statusLabel = new JLabel("No catalog loaded");
         add(statusLabel, BorderLayout.SOUTH);
 
@@ -207,9 +264,361 @@ public class CatalogTablePanel extends JPanel {
                 mapView.setShowConnections(showConnectionsCheckBox.isSelected());
             }
         });
+        JButton screeningButton = new JButton("Event screening...");
+        screeningButton.addActionListener(e -> showScreeningDialog());
+        buttonPanel.add(screeningButton);
+        
         buttonPanel.add(showConnectionsCheckBox);
         
         add(buttonPanel, BorderLayout.NORTH);
+    }
+    
+    private static final int RANGE_FIELD_COLUMNS = 8;
+    private static final Color DISABLED_PANEL_BG = new Color(220, 220, 220);
+
+    private void showScreeningDialog() {
+        JDialog d = new JDialog((Frame) SwingUtilities.getWindowAncestor(this), "Event screening", true);
+        d.setLayout(new GridBagLayout());
+        GridBagConstraints gbc = new GridBagConstraints();
+        gbc.insets = new Insets(6, 8, 6, 8);
+        gbc.anchor = GridBagConstraints.WEST;
+        
+        JCheckBox enableCheck = new JCheckBox("Enable screening", screeningEnabled);
+        JTextField rmsMin = new JTextField(RANGE_FIELD_COLUMNS);
+        JTextField rmsMax = new JTextField(RANGE_FIELD_COLUMNS);
+        JTextField depthMin = new JTextField(RANGE_FIELD_COLUMNS);
+        JTextField depthMax = new JTextField(RANGE_FIELD_COLUMNS);
+        JTextField latMin = new JTextField(RANGE_FIELD_COLUMNS);
+        JTextField latMax = new JTextField(RANGE_FIELD_COLUMNS);
+        JTextField lonMin = new JTextField(RANGE_FIELD_COLUMNS);
+        JTextField lonMax = new JTextField(RANGE_FIELD_COLUMNS);
+        JTextField xerrMin = new JTextField(RANGE_FIELD_COLUMNS);
+        JTextField xerrMax = new JTextField(RANGE_FIELD_COLUMNS);
+        JTextField yerrMin = new JTextField(RANGE_FIELD_COLUMNS);
+        JTextField yerrMax = new JTextField(RANGE_FIELD_COLUMNS);
+        JTextField zerrMin = new JTextField(RANGE_FIELD_COLUMNS);
+        JTextField zerrMax = new JTextField(RANGE_FIELD_COLUMNS);
+        JCheckBox grd = new JCheckBox("GRD", false);
+        JCheckBox lmo = new JCheckBox("LMO", false);
+        JCheckBox mcmc = new JCheckBox("MCMC", false);
+        JCheckBox de = new JCheckBox("DE", false);
+        JCheckBox trd = new JCheckBox("TRD", false);
+        JCheckBox cls = new JCheckBox("CLS", false);
+        JCheckBox syn = new JCheckBox("SYN", false);
+        
+        JPanel paramsPanel = new JPanel(new GridBagLayout());
+        paramsPanel.setOpaque(true);
+        GridBagConstraints pgbc = new GridBagConstraints();
+        pgbc.insets = new Insets(4, 0, 4, 8);
+        pgbc.anchor = GridBagConstraints.WEST;
+        int pr = 0;
+        pgbc.gridx = 0; pgbc.gridy = pr; pgbc.gridwidth = 1;
+        paramsPanel.add(new JLabel("RMS"), pgbc);
+        pgbc.gridx = 1; paramsPanel.add(rmsMin, pgbc);
+        pgbc.gridx = 2; paramsPanel.add(new JLabel("–"), pgbc);
+        pgbc.gridx = 3; paramsPanel.add(rmsMax, pgbc);
+        pr++;
+        pgbc.gridx = 0; pgbc.gridy = pr;
+        paramsPanel.add(new JLabel("Depth (km)"), pgbc);
+        pgbc.gridx = 1; paramsPanel.add(depthMin, pgbc);
+        pgbc.gridx = 2; paramsPanel.add(new JLabel("–"), pgbc);
+        pgbc.gridx = 3; paramsPanel.add(depthMax, pgbc);
+        pr++;
+        pgbc.gridx = 0; pgbc.gridy = pr;
+        paramsPanel.add(new JLabel("Lat"), pgbc);
+        pgbc.gridx = 1; paramsPanel.add(latMin, pgbc);
+        pgbc.gridx = 2; paramsPanel.add(new JLabel("–"), pgbc);
+        pgbc.gridx = 3; paramsPanel.add(latMax, pgbc);
+        pr++;
+        pgbc.gridx = 0; pgbc.gridy = pr;
+        paramsPanel.add(new JLabel("Lon"), pgbc);
+        pgbc.gridx = 1; paramsPanel.add(lonMin, pgbc);
+        pgbc.gridx = 2; paramsPanel.add(new JLabel("–"), pgbc);
+        pgbc.gridx = 3; paramsPanel.add(lonMax, pgbc);
+        pr++;
+        pgbc.gridx = 0; pgbc.gridy = pr;
+        paramsPanel.add(new JLabel("xerr (km)"), pgbc);
+        pgbc.gridx = 1; paramsPanel.add(xerrMin, pgbc);
+        pgbc.gridx = 2; paramsPanel.add(new JLabel("–"), pgbc);
+        pgbc.gridx = 3; paramsPanel.add(xerrMax, pgbc);
+        pr++;
+        pgbc.gridx = 0; pgbc.gridy = pr;
+        paramsPanel.add(new JLabel("yerr (km)"), pgbc);
+        pgbc.gridx = 1; paramsPanel.add(yerrMin, pgbc);
+        pgbc.gridx = 2; paramsPanel.add(new JLabel("–"), pgbc);
+        pgbc.gridx = 3; paramsPanel.add(yerrMax, pgbc);
+        pr++;
+        pgbc.gridx = 0; pgbc.gridy = pr;
+        paramsPanel.add(new JLabel("zerr (km)"), pgbc);
+        pgbc.gridx = 1; paramsPanel.add(zerrMin, pgbc);
+        pgbc.gridx = 2; paramsPanel.add(new JLabel("–"), pgbc);
+        pgbc.gridx = 3; paramsPanel.add(zerrMax, pgbc);
+        pr++;
+        pgbc.gridx = 0; pgbc.gridy = pr; pgbc.gridwidth = 4;
+        paramsPanel.add(new JLabel("Mode (leave all unchecked = no filter):"), pgbc);
+        pr++;
+        pgbc.gridwidth = 1;
+        JPanel modePanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 2));
+        modePanel.add(grd); modePanel.add(lmo); modePanel.add(mcmc); modePanel.add(de);
+        modePanel.add(trd); modePanel.add(cls); modePanel.add(syn);
+        pgbc.gridx = 0; pgbc.gridy = pr; pgbc.gridwidth = 4;
+        paramsPanel.add(modePanel, pgbc);
+        
+        java.util.List<Component> paramComponents = new ArrayList<>();
+        paramComponents.add(rmsMin); paramComponents.add(rmsMax);
+        paramComponents.add(depthMin); paramComponents.add(depthMax);
+        paramComponents.add(latMin); paramComponents.add(latMax);
+        paramComponents.add(lonMin); paramComponents.add(lonMax);
+        paramComponents.add(xerrMin); paramComponents.add(xerrMax);
+        paramComponents.add(yerrMin); paramComponents.add(yerrMax);
+        paramComponents.add(zerrMin); paramComponents.add(zerrMax);
+        paramComponents.add(grd); paramComponents.add(lmo); paramComponents.add(mcmc);
+        paramComponents.add(de); paramComponents.add(trd); paramComponents.add(cls); paramComponents.add(syn);
+        
+        Runnable updateParamEnabled = () -> {
+            boolean on = enableCheck.isSelected();
+            for (Component c : paramComponents) c.setEnabled(on);
+            if (on) {
+                paramsPanel.setOpaque(false);
+                paramsPanel.setBackground(null);
+            } else {
+                paramsPanel.setOpaque(true);
+                paramsPanel.setBackground(DISABLED_PANEL_BG);
+            }
+        };
+        enableCheck.addActionListener(e -> updateParamEnabled.run());
+        updateParamEnabled.run();
+        
+        gbc.gridx = 0; gbc.gridy = 0; gbc.gridwidth = 2;
+        d.add(enableCheck, gbc);
+        gbc.gridy = 1; gbc.gridwidth = 2;
+        d.add(paramsPanel, gbc);
+        gbc.gridy = 2;
+        JPanel buttons = new JPanel(new FlowLayout(FlowLayout.RIGHT, 8, 8));
+        JButton applyBtn = new JButton("Apply");
+        applyBtn.addActionListener(e2 -> {
+            screeningEnabled = enableCheck.isSelected();
+            syncDialogToPanel(rmsMin, rmsMax, depthMin, depthMax, latMin, latMax, lonMin, lonMax,
+                xerrMin, xerrMax, yerrMin, yerrMax, zerrMin, zerrMax, grd, lmo, mcmc, de, trd, cls, syn);
+            applyScreeningFilter();
+            // Keep dialog open; map is updated by applyScreeningFilter() -> refreshAfterFilter() -> mapView.repaintMap()
+        });
+        JButton clearBtn = new JButton("Clear");
+        clearBtn.addActionListener(e2 -> {
+            rmsMin.setText(""); rmsMax.setText(""); depthMin.setText(""); depthMax.setText("");
+            latMin.setText(""); latMax.setText(""); lonMin.setText(""); lonMax.setText("");
+            xerrMin.setText(""); xerrMax.setText(""); yerrMin.setText(""); yerrMax.setText("");
+            zerrMin.setText(""); zerrMax.setText("");
+            grd.setSelected(false); lmo.setSelected(false); mcmc.setSelected(false); de.setSelected(false);
+            trd.setSelected(false); cls.setSelected(false); syn.setSelected(false);
+            clearScreeningFilter();
+        });
+        JButton closeBtn = new JButton("Close");
+        closeBtn.addActionListener(e2 -> d.dispose());
+        buttons.add(applyBtn); buttons.add(clearBtn); buttons.add(closeBtn);
+        d.add(buttons, gbc);
+        
+        syncPanelToDialog(rmsMin, rmsMax, depthMin, depthMax, latMin, latMax, lonMin, lonMax,
+            xerrMin, xerrMax, yerrMin, yerrMax, zerrMin, zerrMax, grd, lmo, mcmc, de, trd, cls, syn);
+        enableCheck.setSelected(screeningEnabled);
+        updateParamEnabled.run();
+        d.pack();
+        d.setLocationRelativeTo(this);
+        d.setVisible(true);
+    }
+    
+    private void syncPanelToDialog(JTextField rmsMin, JTextField rmsMax, JTextField depthMin, JTextField depthMax,
+                                    JTextField latMin, JTextField latMax, JTextField lonMin, JTextField lonMax,
+                                    JTextField xerrMin, JTextField xerrMax, JTextField yerrMin, JTextField yerrMax,
+                                    JTextField zerrMin, JTextField zerrMax,
+                                    JCheckBox grd, JCheckBox lmo, JCheckBox mcmc, JCheckBox de, JCheckBox trd, JCheckBox cls, JCheckBox syn) {
+        if (rmsMinField != null) { rmsMin.setText(rmsMinField.getText()); rmsMax.setText(rmsMaxField.getText()); }
+        if (depthMinField != null) { depthMin.setText(depthMinField.getText()); depthMax.setText(depthMaxField.getText()); }
+        if (latMinField != null) { latMin.setText(latMinField.getText()); latMax.setText(latMaxField.getText()); }
+        if (lonMinField != null) { lonMin.setText(lonMinField.getText()); lonMax.setText(lonMaxField.getText()); }
+        if (xerrMinField != null) { xerrMin.setText(xerrMinField.getText()); xerrMax.setText(xerrMaxField.getText()); }
+        if (yerrMinField != null) { yerrMin.setText(yerrMinField.getText()); yerrMax.setText(yerrMaxField.getText()); }
+        if (zerrMinField != null) { zerrMin.setText(zerrMinField.getText()); zerrMax.setText(zerrMaxField.getText()); }
+        if (modeGrdCheck != null) grd.setSelected(modeGrdCheck.isSelected());
+        if (modeLmoCheck != null) lmo.setSelected(modeLmoCheck.isSelected());
+        if (modeMcmcCheck != null) mcmc.setSelected(modeMcmcCheck.isSelected());
+        if (modeDeCheck != null) de.setSelected(modeDeCheck.isSelected());
+        if (modeTrdCheck != null) trd.setSelected(modeTrdCheck.isSelected());
+        if (modeClsCheck != null) cls.setSelected(modeClsCheck.isSelected());
+        if (modeSynCheck != null) syn.setSelected(modeSynCheck.isSelected());
+    }
+    
+    private void syncDialogToPanel(JTextField rmsMin, JTextField rmsMax, JTextField depthMin, JTextField depthMax,
+                                   JTextField latMin, JTextField latMax, JTextField lonMin, JTextField lonMax,
+                                   JTextField xerrMin, JTextField xerrMax, JTextField yerrMin, JTextField yerrMax,
+                                   JTextField zerrMin, JTextField zerrMax,
+                                   JCheckBox grd, JCheckBox lmo, JCheckBox mcmc, JCheckBox de, JCheckBox trd, JCheckBox cls, JCheckBox syn) {
+        ensureScreeningFields();
+        rmsMinField.setText(rmsMin.getText()); rmsMaxField.setText(rmsMax.getText());
+        depthMinField.setText(depthMin.getText()); depthMaxField.setText(depthMax.getText());
+        latMinField.setText(latMin.getText()); latMaxField.setText(latMax.getText());
+        lonMinField.setText(lonMin.getText()); lonMaxField.setText(lonMax.getText());
+        xerrMinField.setText(xerrMin.getText()); xerrMaxField.setText(xerrMax.getText());
+        yerrMinField.setText(yerrMin.getText()); yerrMaxField.setText(yerrMax.getText());
+        zerrMinField.setText(zerrMin.getText()); zerrMaxField.setText(zerrMax.getText());
+        modeGrdCheck.setSelected(grd.isSelected()); modeLmoCheck.setSelected(lmo.isSelected());
+        modeMcmcCheck.setSelected(mcmc.isSelected()); modeDeCheck.setSelected(de.isSelected());
+        modeTrdCheck.setSelected(trd.isSelected()); modeClsCheck.setSelected(cls.isSelected());
+        modeSynCheck.setSelected(syn.isSelected());
+    }
+    
+    private void ensureScreeningFields() {
+        if (rmsMinField != null) return;
+        rmsMinField = new JTextField(5); rmsMaxField = new JTextField(5);
+        depthMinField = new JTextField(5); depthMaxField = new JTextField(5);
+        latMinField = new JTextField(5); latMaxField = new JTextField(5);
+        lonMinField = new JTextField(5); lonMaxField = new JTextField(5);
+        xerrMinField = new JTextField(5); xerrMaxField = new JTextField(5);
+        yerrMinField = new JTextField(5); yerrMaxField = new JTextField(5);
+        zerrMinField = new JTextField(5); zerrMaxField = new JTextField(5);
+        modeGrdCheck = new JCheckBox("GRD", false);
+        modeLmoCheck = new JCheckBox("LMO", false);
+        modeMcmcCheck = new JCheckBox("MCMC", false);
+        modeDeCheck = new JCheckBox("DE", false);
+        modeTrdCheck = new JCheckBox("TRD", false);
+        modeClsCheck = new JCheckBox("CLS", false);
+        modeSynCheck = new JCheckBox("SYN", false);
+    }
+    
+    private void applyScreeningFilter() {
+        if (!screeningEnabled) {
+            for (com.treloc.xtreloc.app.gui.model.CatalogInfo info : catalogInfos) {
+                info.clearDisplayFilter();
+            }
+            refreshAfterFilter();
+            return;
+        }
+        ensureScreeningFields();
+        Double rmsMin = parseDoubleOrNull(rmsMinField.getText().trim());
+        Double rmsMax = parseDoubleOrNull(rmsMaxField.getText().trim());
+        Double depthMin = parseDoubleOrNull(depthMinField.getText().trim());
+        Double depthMax = parseDoubleOrNull(depthMaxField.getText().trim());
+        Double latMin = parseDoubleOrNull(latMinField.getText().trim());
+        Double latMax = parseDoubleOrNull(latMaxField.getText().trim());
+        Double lonMin = parseDoubleOrNull(lonMinField.getText().trim());
+        Double lonMax = parseDoubleOrNull(lonMaxField.getText().trim());
+        Double xerrMin = parseDoubleOrNull(xerrMinField.getText().trim());
+        Double xerrMax = parseDoubleOrNull(xerrMaxField.getText().trim());
+        Double yerrMin = parseDoubleOrNull(yerrMinField.getText().trim());
+        Double yerrMax = parseDoubleOrNull(yerrMaxField.getText().trim());
+        Double zerrMin = parseDoubleOrNull(zerrMinField.getText().trim());
+        Double zerrMax = parseDoubleOrNull(zerrMaxField.getText().trim());
+        Set<String> allowedModes = new HashSet<>();
+        if (modeGrdCheck.isSelected()) allowedModes.add("GRD");
+        if (modeLmoCheck.isSelected()) allowedModes.add("LMO");
+        if (modeMcmcCheck.isSelected()) allowedModes.add("MCMC");
+        if (modeDeCheck.isSelected()) allowedModes.add("DE");
+        if (modeTrdCheck.isSelected()) allowedModes.add("TRD");
+        if (modeClsCheck.isSelected()) allowedModes.add("CLS");
+        if (modeSynCheck.isSelected()) allowedModes.add("SYN");
+        boolean filterByMode = !allowedModes.isEmpty();
+        
+        boolean hasFilter = (rmsMin != null || rmsMax != null || depthMin != null || depthMax != null
+            || latMin != null || latMax != null || lonMin != null || lonMax != null
+            || xerrMin != null || xerrMax != null || yerrMin != null || yerrMax != null
+            || zerrMin != null || zerrMax != null || filterByMode);
+        
+        for (com.treloc.xtreloc.app.gui.model.CatalogInfo info : catalogInfos) {
+            List<Hypocenter> full = info.getHypocentersFull();
+            if (full == null) continue;
+            if (!hasFilter) {
+                info.clearDisplayFilter();
+                continue;
+            }
+            List<Hypocenter> filtered = new ArrayList<>();
+            for (Hypocenter h : full) {
+                if (rmsMin != null && h.rms < rmsMin) continue;
+                if (rmsMax != null && h.rms > rmsMax) continue;
+                if (depthMin != null && h.depth < depthMin) continue;
+                if (depthMax != null && h.depth > depthMax) continue;
+                if (latMin != null && h.lat < latMin) continue;
+                if (latMax != null && h.lat > latMax) continue;
+                if (lonMin != null && h.lon < lonMin) continue;
+                if (lonMax != null && h.lon > lonMax) continue;
+                if (xerrMin != null && h.xerr < xerrMin) continue;
+                if (xerrMax != null && h.xerr > xerrMax) continue;
+                if (yerrMin != null && h.yerr < yerrMin) continue;
+                if (yerrMax != null && h.yerr > yerrMax) continue;
+                if (zerrMin != null && h.zerr < zerrMin) continue;
+                if (zerrMax != null && h.zerr > zerrMax) continue;
+                if (filterByMode) {
+                    String type = h.type != null ? h.type.trim().toUpperCase() : "";
+                    if (!allowedModes.contains(type)) continue;
+                }
+                filtered.add(h);
+            }
+            info.setDisplayHypocenters(filtered);
+        }
+        
+        refreshAfterFilter();
+    }
+    
+    private void clearScreeningFilter() {
+        ensureScreeningFields();
+        rmsMinField.setText(""); rmsMaxField.setText("");
+        depthMinField.setText(""); depthMaxField.setText("");
+        latMinField.setText(""); latMaxField.setText("");
+        lonMinField.setText(""); lonMaxField.setText("");
+        xerrMinField.setText(""); xerrMaxField.setText("");
+        yerrMinField.setText(""); yerrMaxField.setText("");
+        zerrMinField.setText(""); zerrMaxField.setText("");
+        if (modeGrdCheck != null) modeGrdCheck.setSelected(false);
+        if (modeLmoCheck != null) modeLmoCheck.setSelected(false);
+        if (modeMcmcCheck != null) modeMcmcCheck.setSelected(false);
+        if (modeDeCheck != null) modeDeCheck.setSelected(false);
+        if (modeTrdCheck != null) modeTrdCheck.setSelected(false);
+        if (modeClsCheck != null) modeClsCheck.setSelected(false);
+        if (modeSynCheck != null) modeSynCheck.setSelected(false);
+        for (com.treloc.xtreloc.app.gui.model.CatalogInfo info : catalogInfos) {
+            info.clearDisplayFilter();
+        }
+        refreshAfterFilter();
+    }
+    
+    private static java.awt.Color parseHexColor(String hex) {
+        if (hex == null || hex.isEmpty()) return java.awt.Color.BLACK;
+        try {
+            return java.awt.Color.decode(hex.startsWith("#") ? hex : "#" + hex);
+        } catch (Exception e) {
+            return java.awt.Color.BLACK;
+        }
+    }
+    
+    private Double parseDoubleOrNull(String s) {
+        if (s == null || s.isEmpty()) return null;
+        try {
+            return Double.parseDouble(s);
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+    
+    private void refreshAfterFilter() {
+        int selectedRow = catalogListTable.getSelectedRow();
+        if (selectedRow >= 0 && selectedRow < catalogInfos.size()) {
+            com.treloc.xtreloc.app.gui.model.CatalogInfo info = catalogInfos.get(selectedRow);
+            displayCatalogData(info);
+            int displayCount = info.getHypocenters().size();
+            int fullCount = info.getHypocentersFull() == null ? 0 : info.getHypocentersFull().size();
+            catalogListModel.setValueAt(displayCount + (displayCount != fullCount ? " (" + fullCount + ")" : ""), selectedRow, 2);
+        }
+        for (int r = 0; r < catalogInfos.size(); r++) {
+            com.treloc.xtreloc.app.gui.model.CatalogInfo info = catalogInfos.get(r);
+            int displayCount = info.getHypocenters().size();
+            int fullCount = info.getHypocentersFull() == null ? 0 : info.getHypocentersFull().size();
+            catalogListModel.setValueAt(displayCount + (displayCount != fullCount ? " (" + fullCount + ")" : ""), r, 2);
+        }
+        if (mapView != null) {
+            mapView.repaintMap();
+        }
+        for (Runnable r : screeningChangeListeners) {
+            r.run();
+        }
     }
     
     /**
@@ -351,7 +760,13 @@ public class CatalogTablePanel extends JPanel {
                 java.awt.Color.ORANGE, java.awt.Color.MAGENTA, java.awt.Color.CYAN,
                 java.awt.Color.YELLOW, java.awt.Color.PINK
             };
-            java.awt.Color color = defaultColors[catalogInfos.size() % defaultColors.length];
+            java.awt.Color color;
+            if (catalogInfos.isEmpty()) {
+                String hex = com.treloc.xtreloc.app.gui.util.AppSettings.load().getDefaultSymbolColor();
+                color = parseHexColor(hex);
+            } else {
+                color = defaultColors[catalogInfos.size() % defaultColors.length];
+            }
             
             com.treloc.xtreloc.app.gui.model.CatalogInfo.SymbolType symbolType = 
                 com.treloc.xtreloc.app.gui.model.CatalogInfo.SymbolType.values()[

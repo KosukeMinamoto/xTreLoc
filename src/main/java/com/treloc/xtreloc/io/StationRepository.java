@@ -30,8 +30,8 @@ public final class StationRepository {
             codes[i] = s.getCode();
             stationTable[i][0] = s.getLat();
             stationTable[i][1] = s.getLon();
-            // 深度をメートルからキロメートルに変換（符号も反転）
-            // 入力: -m (メートル、負の値) → 出力: km (キロメートル、正の値、地下の深度)
+            // Convert depth from meters to kilometers (also invert sign)
+            // Input: -m (meters, negative value) → Output: km (kilometers, positive value, underground depth)
             double depKm = -s.getDep() / 1000.0;
             stationTable[i][2] = depKm;
             stationTable[i][3] = s.getPc();

@@ -89,6 +89,10 @@ RELEASE_IMPROVEMENTS.md
 # Test data directories
 demo/dat*
 
+# Excluded from repo (large or local-only demo data)
+demo/tohoku2007/
+demo/picking_example/
+
 # ============================================
 # Cleanup Directory
 # ============================================

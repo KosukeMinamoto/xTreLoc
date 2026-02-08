@@ -15,6 +15,7 @@ import com.treloc.xtreloc.io.FileScanner;
 import com.treloc.xtreloc.io.RunContext;
 import com.treloc.xtreloc.io.RunContextFactory;
 import com.treloc.xtreloc.util.LogInitializer;
+import com.treloc.xtreloc.util.SolverLogger;
 
 /**
  * CLI entry point for xTreLoc
@@ -47,7 +48,13 @@ public final class XTreLocCLI {
 
         try {
             java.io.File logFile = com.treloc.xtreloc.app.gui.util.LogHistoryManager.getLogFile();
-            LogInitializer.setup(logFile.getAbsolutePath(), configPath);
+            // Setup logging (config file is optional for logging setup)
+            try {
+                LogInitializer.setup(logFile.getAbsolutePath(), configPath);
+            } catch (Exception e) {
+                // If config file doesn't exist, use default log level
+                LogInitializer.setup(logFile.getAbsolutePath(), java.util.logging.Level.INFO);
+            }
             
             java.util.logging.Logger logger = java.util.logging.Logger.getLogger("com.treloc.xtreloc");
             String version = com.treloc.xtreloc.app.gui.util.VersionInfo.getVersionString();
@@ -57,8 +64,29 @@ public final class XTreLocCLI {
             logger.info("Log file: " + logFile.getAbsolutePath());
             logger.info("========================================");
 
+            // Check if config file exists
+            java.io.File configFile = new java.io.File(configPath);
+            if (!configFile.exists()) {
+                System.err.println("\n========================================");
+                System.err.println("ERROR: Configuration file not found: " + configPath);
+                System.err.println("========================================");
+                System.err.println("Please ensure the configuration file exists and the path is correct.");
+                System.err.println("You can specify a different path as the second argument:");
+                System.err.println("  java -jar xTreLoc.jar " + mode + " /path/to/config.json");
+                System.err.println("========================================");
+                logger.severe("Configuration file not found: " + configPath);
+                System.exit(1);
+            }
+
             ConfigLoader loader = new ConfigLoader(configPath);
             AppConfig config = loader.getConfig();
+            
+            // Set CLI mode for SolverLogger
+            SolverLogger.setMode(false, true, false);
+            SolverLogger.setCallback((message, level) -> {
+                // CLI: messages will go to stdout/stderr based on level
+            });
+            
             RunContext context = RunContextFactory.fromCLI(mode, config);
             switch (mode) {
                 case "GRD":

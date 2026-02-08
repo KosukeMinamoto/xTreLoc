@@ -32,7 +32,7 @@ public class CatalogLoader {
                 
                 String[] p;
                 if (isCsv) {
-                    // CSV形式: カンマ区切り
+                    // CSV format: comma-separated
                     p = line.trim().split(",");
                 } else {
                     // DAT形式またはLIST形式: 空白区切り
@@ -41,23 +41,23 @@ public class CatalogLoader {
                 
                 if (p.length >= 4) {
                     // CSV形式の場合: time,latitude,longitude,depth,xerr,yerr,zerr,rms,file,mode,cid
-                    // DAT形式の場合: 時刻、緯度、経度、深度の順（エラー情報は別行）
+                    // DAT format: time, latitude, longitude, depth order (error information is on separate line)
                     if (isCsv && p.length >= 8) {
-                        // CSV形式でエラー情報が含まれている場合
+                        // CSV format with error information included
                         double xerr = p.length > 4 ? Double.parseDouble(p[4].trim()) : 0.0;
                         double yerr = p.length > 5 ? Double.parseDouble(p[5].trim()) : 0.0;
                         double zerr = p.length > 6 ? Double.parseDouble(p[6].trim()) : 0.0;
                         double rms = p.length > 7 ? Double.parseDouble(p[7].trim()) : 0.0;
-                        // カラム順序: time,latitude,longitude,depth,xerr,yerr,zerr,rms,file,mode,cid
+                        // Column order: time,latitude,longitude,depth,xerr,yerr,zerr,rms,file,mode,cid
                         String datFilePath = p.length > 8 ? p[8].trim() : null;
                         String type = p.length > 9 ? p[9].trim() : null;
-                        // cidカラム（10番目、インデックス10）を読み込む
+                        // Load cid column (10th column, index 10)
                         Integer clusterId = null;
                         if (p.length > 10 && !p[10].trim().isEmpty()) {
                             try {
                                 clusterId = Integer.parseInt(p[10].trim());
                             } catch (NumberFormatException e) {
-                                // cidが数値でない場合はnullのまま
+                                // Keep null if cid is not numeric
                             }
                         }
                         list.add(new Hypocenter(
@@ -67,7 +67,7 @@ public class CatalogLoader {
                                 Double.parseDouble(p[3].trim()),
                                 xerr, yerr, zerr, rms, clusterId, datFilePath, type));
                     } else {
-                        // DAT形式またはエラー情報がないCSV形式
+                        // DAT format or CSV format without error information
                         list.add(new Hypocenter(
                                 p[0].trim(),
                                 Double.parseDouble(p[1].trim()),

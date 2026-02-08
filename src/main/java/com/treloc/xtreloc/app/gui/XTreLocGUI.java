@@ -5,20 +5,38 @@ import com.treloc.xtreloc.app.gui.controller.MapController;
 
 import javax.swing.*;
 import java.awt.*;
+import java.awt.image.BufferedImage;
 import java.io.File;
 
 import org.geotools.swing.JMapFrame;
 
+import com.treloc.xtreloc.app.gui.util.AppSettings;
+import com.treloc.xtreloc.app.gui.util.ChartAppearanceSettings;
+
 public class XTreLocGUI {
 
     public static void main(String[] args) throws Exception {
+        com.treloc.xtreloc.app.gui.util.AppSettings appSettings = null;
+        try {
+            appSettings = com.treloc.xtreloc.app.gui.util.AppSettings.load();
+        } catch (Exception e) {
+            // use defaults
+        }
         try {
             File logFile = com.treloc.xtreloc.app.gui.util.LogHistoryManager.getLogFile();
-            com.treloc.xtreloc.util.LogInitializer.setup(
-                logFile.getAbsolutePath(), 
-                java.util.logging.Level.INFO
-            );
-            
+            if (appSettings != null) {
+                com.treloc.xtreloc.util.LogInitializer.setup(
+                    logFile.getAbsolutePath(),
+                    java.util.logging.Level.INFO,
+                    appSettings.getLogLimitBytes(),
+                    appSettings.getLogCount()
+                );
+            } else {
+                com.treloc.xtreloc.util.LogInitializer.setup(
+                    logFile.getAbsolutePath(),
+                    java.util.logging.Level.INFO
+                );
+            }
             java.util.logging.Logger logger = java.util.logging.Logger.getLogger("com.treloc.xtreloc");
             logger.info("========================================");
             logger.info("xTreLoc application started");
@@ -28,10 +46,9 @@ public class XTreLocGUI {
             System.err.println("Failed to initialize logging: " + e.getMessage());
         }
         
-        // Load settings and apply theme before creating any UI components
-        com.treloc.xtreloc.app.gui.util.AppSettings appSettings = 
-            com.treloc.xtreloc.app.gui.util.AppSettings.load();
-        String theme = appSettings.getTheme();
+        final com.treloc.xtreloc.app.gui.util.AppSettings appSettingsForUI =
+            (appSettings != null) ? appSettings : com.treloc.xtreloc.app.gui.util.AppSettings.load();
+        String theme = appSettingsForUI.getTheme();
         if (theme != null) {
             applyTheme(theme);
         }
@@ -56,10 +73,8 @@ public class XTreLocGUI {
                 MapView view = new MapView();
                 MapController ctrl = new MapController(view);
                 
-                // appSettings is already loaded above, just apply other settings
-                applyAppSettings(appSettings, mainFrame, view);
-                
-                checkForUpdatesAsync(appSettings, mainFrame);
+                applyAppSettings(appSettingsForUI, mainFrame, view);
+                checkForUpdatesAsync(appSettingsForUI, mainFrame);
                 
                 com.treloc.xtreloc.io.AppConfig config = null;
                 try {
@@ -102,7 +117,7 @@ public class XTreLocGUI {
                 com.treloc.xtreloc.app.gui.view.ReportPanel reportPanel = 
                     new com.treloc.xtreloc.app.gui.view.ReportPanel(view);
                 
-                com.treloc.xtreloc.app.gui.view.SettingsPanel settingsPanel = 
+                com.treloc.xtreloc.app.gui.view.SettingsPanel settingsPanel =
                     new com.treloc.xtreloc.app.gui.view.SettingsPanel(view, mainFrame);
                 
                 com.treloc.xtreloc.app.gui.view.WaveformPickingPanel pickingPanel = 
@@ -121,6 +136,11 @@ public class XTreLocGUI {
                 JPanel scatterPanel = createScatterPanel(reportPanel, view);
                 viewerRightTabs.addTab("Scatter", scatterPanel);
                 
+                catalogPanel.addScreeningChangeListener(() -> {
+                    histogramPanel.repaint();
+                    scatterPanel.repaint();
+                });
+                
                 com.treloc.xtreloc.app.gui.view.MicrosoftStyleTabbedPane mainTabbedPane = 
                     new com.treloc.xtreloc.app.gui.view.MicrosoftStyleTabbedPane();
                 
@@ -137,9 +157,28 @@ public class XTreLocGUI {
                 mainTabbedPane.addTab("picking", new JPanel());
                 mainTabbedPane.addTab("settings", new JPanel());
                 
+                JPanel leftSidePanel = new JPanel(new BorderLayout());
+                leftSidePanel.add(mainTabbedPane, BorderLayout.NORTH);
+                leftSidePanel.add(leftPanelContainer, BorderLayout.CENTER);
+                leftSidePanel.setMinimumSize(new java.awt.Dimension(200, 0));
+                
+                JSplitPane mainSplit = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT,
+                    leftSidePanel, rightPanelContainer);
+                mainSplit.setResizeWeight(0.3);
+                mainSplit.setOneTouchExpandable(true);
+                mainSplit.setDividerLocation(500);
+                final int[] lastDividerLocation = { 500 };
+                
                 mainTabbedPane.addChangeListener(e -> {
                     int selectedIndex = mainTabbedPane.getSelectedIndex();
                     String selectedTitle = selectedIndex >= 0 ? mainTabbedPane.getTitleAt(selectedIndex) : "";
+                    
+                    if ("settings".equals(selectedTitle)) {
+                        lastDividerLocation[0] = mainSplit.getDividerLocation();
+                        mainSplit.setDividerLocation(1.0);
+                    } else {
+                        mainSplit.setDividerLocation(Math.min(lastDividerLocation[0], mainSplit.getSize().width - 50));
+                    }
                     
                     leftPanelContainer.removeAll();
                     if ("solver".equals(selectedTitle)) {
@@ -150,7 +189,7 @@ public class XTreLocGUI {
                         leftPanelContainer.add(pickingPanel.getLeftPanel(), BorderLayout.CENTER);
                     } else if ("settings".equals(selectedTitle)) {
                         JPanel settingsWrapper = new JPanel(new BorderLayout());
-                        settingsWrapper.add(settingsPanel, BorderLayout.NORTH);
+                        settingsWrapper.add(settingsPanel, BorderLayout.CENTER);
                         leftPanelContainer.add(settingsWrapper, BorderLayout.CENTER);
                     }
                     leftPanelContainer.revalidate();
@@ -169,15 +208,6 @@ public class XTreLocGUI {
                     rightPanelContainer.revalidate();
                     rightPanelContainer.repaint();
                 });
-                
-                JPanel leftSidePanel = new JPanel(new BorderLayout());
-                leftSidePanel.add(mainTabbedPane, BorderLayout.NORTH);
-                leftSidePanel.add(leftPanelContainer, BorderLayout.CENTER);
-                
-                JSplitPane mainSplit = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT,
-                    leftSidePanel, rightPanelContainer);
-                mainSplit.setResizeWeight(0.3);
-                mainSplit.setDividerLocation(500);
                 
                 mainFrame.add(mainSplit, BorderLayout.CENTER);
                 
@@ -205,7 +235,7 @@ public class XTreLocGUI {
     }
     
     /**
-     * Histogram panelを作成（カタログ間比較対応）
+     * Creates histogram panel (supports catalog comparison)
      */
     private static JPanel createHistogramPanel(com.treloc.xtreloc.app.gui.view.CatalogTablePanel catalogPanel, MapView mapView) {
         JPanel histogramPanelWrapper = new JPanel(new BorderLayout());
@@ -239,6 +269,10 @@ public class XTreLocGUI {
             radioButton.addActionListener(e -> histogramPanel.repaint());
         }
         
+        JButton saveImageButton = new JButton("Save image");
+        saveImageButton.addActionListener(e -> exportPanelToImage(histogramPanel, histogramPanelWrapper, "histogram.png"));
+        columnSelectionPanel.add(saveImageButton);
+        
         if (mapView != null) {
             mapView.addCatalogVisibilityChangeListener(() -> histogramPanel.repaint());
         }
@@ -249,10 +283,76 @@ public class XTreLocGUI {
         return histogramPanelWrapper;
     }
     
+    private static void exportPanelToImage(JPanel panel, java.awt.Component parent, String defaultName) {
+        JFileChooser fc = new JFileChooser();
+        fc.setSelectedFile(new File(defaultName));
+        if (fc.showSaveDialog(parent) != JFileChooser.APPROVE_OPTION) return;
+        File f = fc.getSelectedFile();
+        String path = f.getAbsolutePath();
+        if (!path.toLowerCase().endsWith(".png") && !path.toLowerCase().endsWith(".jpg") && !path.toLowerCase().endsWith(".jpeg")) {
+            f = new File(path + ".png");
+        }
+        try {
+            int w = panel.getWidth() > 0 ? panel.getWidth() : 600;
+            int h = panel.getHeight() > 0 ? panel.getHeight() : 450;
+            BufferedImage img = new BufferedImage(w, h, BufferedImage.TYPE_INT_RGB);
+            Graphics2D g2 = img.createGraphics();
+            g2.setColor(java.awt.Color.WHITE);
+            g2.fillRect(0, 0, w, h);
+            panel.paint(g2);
+            g2.dispose();
+            String ext = f.getName().toLowerCase();
+            if (ext.endsWith(".jpg") || ext.endsWith(".jpeg")) {
+                try {
+                    javax.imageio.ImageIO.write(img, "JPEG", f);
+                } catch (Exception jpegEx) {
+                    File pngFile = new File(f.getParent(), f.getName().replaceFirst("\\.[jJ][pP][eE]?[gG]$", ".png"));
+                    javax.imageio.ImageIO.write(img, "PNG", pngFile);
+                    f = pngFile;
+                }
+            } else {
+                javax.imageio.ImageIO.write(img, "PNG", f);
+            }
+            JOptionPane.showMessageDialog(parent, "Saved: " + f.getAbsolutePath());
+        } catch (Exception ex) {
+            JOptionPane.showMessageDialog(parent, "Failed to save: " + ex.getMessage(), "Error", JOptionPane.ERROR_MESSAGE);
+        }
+    }
+    
+    private static Color parseChartColor(String hex) {
+        if (hex == null || hex.isEmpty()) return Color.BLACK;
+        try {
+            return Color.decode(hex.startsWith("#") ? hex : "#" + hex);
+        } catch (Exception e) {
+            return Color.BLACK;
+        }
+    }
+    
+    private static java.awt.Stroke gridStroke(ChartAppearanceSettings chart) {
+        float w = chart.getGridlineWidth();
+        String style = chart.getGridlineStyle();
+        if (style == null) style = "solid";
+        switch (style.toLowerCase()) {
+            case "dash":
+                return new java.awt.BasicStroke(w, java.awt.BasicStroke.CAP_BUTT, java.awt.BasicStroke.JOIN_MITER, 10f, new float[]{8f, 4f}, 0f);
+            case "dot":
+                return new java.awt.BasicStroke(w, java.awt.BasicStroke.CAP_ROUND, java.awt.BasicStroke.JOIN_MITER, 10f, new float[]{2f, 4f}, 0f);
+            default:
+                return new java.awt.BasicStroke(w);
+        }
+    }
+    
     private static void drawHistogram(Graphics g, com.treloc.xtreloc.app.gui.view.CatalogTablePanel catalogPanel,
                                      java.util.List<JRadioButton> columnRadioButtons, String[] columnNames,
                                      MapView mapView) {
         try {
+            ChartAppearanceSettings chart = AppSettings.load().getChartAppearance();
+            Font titleFont = chart.getTitleFont();
+            Font tickFont = chart.getTickLabelFont();
+            Font legendFont = chart.getLegendFont();
+            Color bgColor = parseChartColor(chart.getBackgroundColor());
+            Color axisColor = parseChartColor(chart.getAxisLineColor());
+            
             int selectedColumnIndex = -1;
             String selectedColumnName = null;
             for (int i = 0; i < columnRadioButtons.size() && i < columnNames.length; i++) {
@@ -264,8 +364,8 @@ public class XTreLocGUI {
             }
             
             if (selectedColumnIndex == -1) {
-                g.setColor(Color.BLACK);
-                g.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 14));
+                g.setColor(axisColor);
+                g.setFont(tickFont);
                 FontMetrics fm = g.getFontMetrics();
                 String message = "Please select a parameter";
                 int x = (g.getClipBounds().width - fm.stringWidth(message)) / 2;
@@ -285,8 +385,8 @@ public class XTreLocGUI {
             }
             
             if (selectedCatalogs.isEmpty()) {
-                g.setColor(Color.BLACK);
-                g.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 14));
+                g.setColor(axisColor);
+                g.setFont(tickFont);
                 FontMetrics fm = g.getFontMetrics();
                 String message = "Please select at least one catalog";
                 int x = (g.getClipBounds().width - fm.stringWidth(message)) / 2;
@@ -302,8 +402,24 @@ public class XTreLocGUI {
             int chartWidth = width - 2 * margin;
             int chartHeight = height - 2 * margin - 60;
             
-            g.setColor(Color.WHITE);
+            g.setColor(bgColor);
             g.fillRect(0, 0, width, height);
+            
+            Color gridColor = parseChartColor(chart.getGridlineColor());
+            if (g instanceof Graphics2D) {
+                Graphics2D g2 = (Graphics2D) g;
+                java.awt.Stroke prev = g2.getStroke();
+                g2.setStroke(gridStroke(chart));
+                g2.setColor(gridColor);
+                for (int i = 1; i <= 4; i++) {
+                    int vx = margin + (int) (chartWidth * i / 5);
+                    g2.drawLine(vx, margin, vx, margin + chartHeight);
+                    int hy = margin + (int) (chartHeight * i / 5);
+                    g2.drawLine(margin, hy, margin + chartWidth, hy);
+                }
+                g2.setStroke(prev);
+            }
+            
             double globalMin = Double.MAX_VALUE;
             double globalMax = Double.MIN_VALUE;
             java.util.List<java.util.List<Double>> allValues = new java.util.ArrayList<>();
@@ -323,8 +439,8 @@ public class XTreLocGUI {
             }
             
             if (globalMin == Double.MAX_VALUE) {
-                g.setColor(Color.BLACK);
-                g.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 14));
+                g.setColor(axisColor);
+                g.setFont(tickFont);
                 FontMetrics fm = g.getFontMetrics();
                 String message = "No data available";
                 int x = (g.getClipBounds().width - fm.stringWidth(message)) / 2;
@@ -389,11 +505,11 @@ public class XTreLocGUI {
                 }
             }
             
-            g.setColor(Color.BLACK);
+            g.setColor(axisColor);
             g.drawLine(margin, margin + chartHeight, margin + chartWidth, margin + chartHeight);
             g.drawLine(margin, margin, margin, margin + chartHeight);
             
-            g.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 10));
+            g.setFont(tickFont);
             FontMetrics fm = g.getFontMetrics();
             
             for (int i = 0; i <= 5; i++) {
@@ -410,11 +526,12 @@ public class XTreLocGUI {
             }
             
             String title = selectedColumnName + " Histogram";
-            g.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 12));
-            int titleWidth = fm.stringWidth(title);
+            g.setFont(titleFont);
+            FontMetrics titleFm = g.getFontMetrics();
+            int titleWidth = titleFm.stringWidth(title);
             g.drawString(title, (width - titleWidth) / 2, 20);
             
-            g.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 10));
+            g.setFont(legendFont);
             int legendY = margin + chartHeight + 50;
             int legendX = margin;
             int legendItemHeight = 15;
@@ -426,7 +543,7 @@ public class XTreLocGUI {
                 g.setColor(catalogColor);
                 g.fillRect(legendX, legendY, 15, 10);
                 
-                g.setColor(Color.BLACK);
+                g.setColor(axisColor);
                 g.drawString(info.getName(), legendX + 20, legendY + 8);
                 
                 legendX += 120;
@@ -503,6 +620,9 @@ public class XTreLocGUI {
         JButton updateButton = new JButton("Update");
         updateButton.addActionListener(e -> plotPanel.repaint());
         controlPanel.add(updateButton);
+        JButton saveImageButton = new JButton("Save image");
+        saveImageButton.addActionListener(e -> exportPanelToImage(plotPanel, scatterPanel, "scatter.png"));
+        controlPanel.add(saveImageButton);
         
         scatterPanel.add(controlPanel, BorderLayout.NORTH);
         scatterPanel.add(plotPanel, BorderLayout.CENTER);
@@ -520,6 +640,13 @@ public class XTreLocGUI {
     private static void drawScatterPlot(Graphics g, com.treloc.xtreloc.app.gui.view.ReportPanel reportPanel, 
                                        JComboBox<String> xAxisCombo, JComboBox<String> yAxisCombo, MapView mapView) {
         try {
+            ChartAppearanceSettings chart = AppSettings.load().getChartAppearance();
+            Font titleFont = chart.getTitleFont();
+            Font tickFont = chart.getTickLabelFont();
+            Font legendFont = chart.getLegendFont();
+            Color bgColor = parseChartColor(chart.getBackgroundColor());
+            Color axisColor = parseChartColor(chart.getAxisLineColor());
+            
             String xAxisName = (String) xAxisCombo.getSelectedItem();
             String yAxisName = (String) yAxisCombo.getSelectedItem();
             
@@ -534,8 +661,8 @@ public class XTreLocGUI {
             }
             
             if (selectedCatalogs.isEmpty()) {
-                g.setColor(Color.BLACK);
-                g.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 14));
+                g.setColor(axisColor);
+                g.setFont(tickFont);
                 FontMetrics fm = g.getFontMetrics();
                 String message = "Please select at least one catalog in Map";
                 int x = (g.getClipBounds().width - fm.stringWidth(message)) / 2;
@@ -569,8 +696,8 @@ public class XTreLocGUI {
             }
             
             if (allXValues.isEmpty()) {
-                g.setColor(Color.BLACK);
-                g.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 14));
+                g.setColor(axisColor);
+                g.setFont(tickFont);
                 FontMetrics fm = g.getFontMetrics();
                 String message = "No data available";
                 int x = (g.getClipBounds().width - fm.stringWidth(message)) / 2;
@@ -608,10 +735,25 @@ public class XTreLocGUI {
             int chartWidth = width - 2 * margin;
             int chartHeight = height - 2 * margin - 60;
             
-            g.setColor(Color.WHITE);
+            g.setColor(bgColor);
             g.fillRect(0, 0, width, height);
             
-            g.setColor(Color.BLACK);
+            Color gridColor = parseChartColor(chart.getGridlineColor());
+            if (g instanceof Graphics2D) {
+                Graphics2D g2 = (Graphics2D) g;
+                java.awt.Stroke prev = g2.getStroke();
+                g2.setStroke(gridStroke(chart));
+                g2.setColor(gridColor);
+                for (int i = 1; i <= 4; i++) {
+                    int vx = margin + (int) (chartWidth * i / 5);
+                    g2.drawLine(vx, margin, vx, margin + chartHeight);
+                    int hy = margin + (int) (chartHeight * i / 5);
+                    g2.drawLine(margin, hy, margin + chartWidth, hy);
+                }
+                g2.setStroke(prev);
+            }
+            
+            g.setColor(axisColor);
             g.drawLine(margin, margin + chartHeight, margin + chartWidth, margin + chartHeight);
             g.drawLine(margin, margin, margin, margin + chartHeight);
             
@@ -633,7 +775,7 @@ public class XTreLocGUI {
                 }
             }
             
-            g.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 10));
+            g.setFont(tickFont);
             FontMetrics fm = g.getFontMetrics();
             
             for (int i = 0; i <= 5; i++) {
@@ -650,12 +792,13 @@ public class XTreLocGUI {
                 g.drawString(label, margin - fm.stringWidth(label) - 5, y);
             }
             
-            g.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 12));
+            g.setFont(titleFont);
             String title = yAxisName + " vs " + xAxisName;
-            int titleWidth = fm.stringWidth(title);
+            FontMetrics titleFm = g.getFontMetrics();
+            int titleWidth = titleFm.stringWidth(title);
             g.drawString(title, (width - titleWidth) / 2, 20);
             
-            g.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 10));
+            g.setFont(legendFont);
             int legendY = margin + chartHeight + 50;
             int legendX = margin;
             int legendItemHeight = 15;
@@ -667,7 +810,7 @@ public class XTreLocGUI {
                 g.setColor(catalogColor);
                 g.fillOval(legendX, legendY, 8, 8);
                 
-                g.setColor(Color.BLACK);
+                g.setColor(axisColor);
                 g.drawString(info.getName(), legendX + 12, legendY + 8);
                 
                 legendX += 120;

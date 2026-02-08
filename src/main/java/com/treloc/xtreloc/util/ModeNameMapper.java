@@ -22,15 +22,20 @@ public class ModeNameMapper {
      */
     private static final Map<String, String> DISPLAY_TO_ABBREV = new HashMap<>();
     
+    // Ordered list of modes for display
+    private static final String[] MODE_ORDER = {
+        "GRD", "LMO", "MCMC", "DE", "CLS", "TRD", "SYN"
+    };
+    
     static {
         // Initialize mappings
         ABBREV_TO_DISPLAY.put("GRD", "Grid Search");
         ABBREV_TO_DISPLAY.put("LMO", "Levenberg-Marquardt");
-        ABBREV_TO_DISPLAY.put("TRD", "Triple Difference");
         ABBREV_TO_DISPLAY.put("MCMC", "MCMC");
         ABBREV_TO_DISPLAY.put("DE", "Differential Evolution");
-        ABBREV_TO_DISPLAY.put("CLS", "Clustering");
-        ABBREV_TO_DISPLAY.put("SYN", "Synthetic Test");
+        ABBREV_TO_DISPLAY.put("CLS", "Spatial Clustering (DBSCAN)");
+        ABBREV_TO_DISPLAY.put("TRD", "Triple Difference");
+        ABBREV_TO_DISPLAY.put("SYN", "Create Synthetic data");
         
         // Create reverse mapping
         for (Map.Entry<String, String> entry : ABBREV_TO_DISPLAY.entrySet()) {
@@ -84,12 +89,16 @@ public class ModeNameMapper {
     }
     
     /**
-     * Gets all available display names.
+     * Gets all available display names in the specified order.
      * 
-     * @return array of display names
+     * @return array of display names in order: GRD, LMO, MCMC, DE, CLS, TRD, SYN
      */
     public static String[] getAllDisplayNames() {
-        return ABBREV_TO_DISPLAY.values().toArray(new String[0]);
+        String[] displayNames = new String[MODE_ORDER.length];
+        for (int i = 0; i < MODE_ORDER.length; i++) {
+            displayNames[i] = ABBREV_TO_DISPLAY.get(MODE_ORDER[i]);
+        }
+        return displayNames;
     }
     
     /**

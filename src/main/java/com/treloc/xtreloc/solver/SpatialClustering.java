@@ -22,6 +22,7 @@ import com.treloc.xtreloc.io.TripleDifferenceIO;
 import com.treloc.xtreloc.io.TripleDifferenceIO.TripleDifference;
 import com.treloc.xtreloc.io.AppConfig;
 import com.treloc.xtreloc.util.CatalogFileNameGenerator;
+import com.treloc.xtreloc.util.SolverLogger;
 
 import edu.sc.seis.TauP.TauModelException;
 
@@ -167,8 +168,7 @@ public class SpatialClustering extends SolverBase {
                     this.catalogFile, allPoints.size(), pointsWithCid, existingClusterIds.toString()
                 );
                 logger.info(skipMsg);
-                System.out.println(skipMsg);
-                System.err.println(skipMsg);
+                SolverLogger.warning(skipMsg);
                 
                 clusteredPoints = new HashSet<>(allPoints);
                 
@@ -228,7 +228,7 @@ public class SpatialClustering extends SolverBase {
                         }
                         String errorStr = errorMsg.toString();
                         logger.warning(errorStr);
-                        System.err.println("WARNING: " + errorStr);
+                        SolverLogger.warning("WARNING: " + errorStr);
                         datFilesSkipped++;
                     }
                 }
@@ -318,7 +318,7 @@ public class SpatialClustering extends SolverBase {
                         }
                         String errorStr = errorMsg.toString();
                         logger.warning(errorStr);
-                        System.err.println("WARNING: " + errorStr);
+                        SolverLogger.warning("WARNING: " + errorStr);
                         datFilesSkipped++;
                     }
                 }
@@ -358,7 +358,7 @@ public class SpatialClustering extends SolverBase {
                 if (trpDiff.isEmpty()) {
                     String warningMsg = "Cluster " + clusterId + ": No triple differences calculated. This may be because lag tables are missing or no matching pairs found.";
                     logger.warning(warningMsg);
-                    System.err.println("WARNING: " + warningMsg);
+                    SolverLogger.warning("WARNING: " + warningMsg);
                 } else {
                     saveTripleDifferences(trpDiff, clusterId);
                     totalTripleDiffs += trpDiff.size();
@@ -376,7 +376,7 @@ public class SpatialClustering extends SolverBase {
                 errorMsg += "\n  Caused by: " + e.getCause().getClass().getSimpleName() + ": " + e.getCause().getMessage();
             }
             logger.severe(errorMsg);
-            System.err.println(errorMsg);
+            SolverLogger.severe(errorMsg);
             e.printStackTrace(System.err);
             throw new RuntimeException("Clustering failed", e);
         }
@@ -628,7 +628,7 @@ public class SpatialClustering extends SolverBase {
                 errorMsg += "\n  Caused by: " + e.getCause().getClass().getSimpleName() + ": " + e.getCause().getMessage();
             }
             logger.severe(errorMsg);
-            System.err.println(errorMsg);
+            SolverLogger.severe(errorMsg);
             e.printStackTrace(System.err);
         } catch (Exception e) {
             String errorMsg = "ERROR: Unexpected error writing triple differences: " + e.getMessage();
@@ -636,7 +636,7 @@ public class SpatialClustering extends SolverBase {
                 errorMsg += "\n  Caused by: " + e.getCause().getClass().getSimpleName() + ": " + e.getCause().getMessage();
             }
             logger.severe(errorMsg);
-            System.err.println(errorMsg);
+            SolverLogger.severe(errorMsg);
             e.printStackTrace(System.err);
         }
     }
@@ -782,13 +782,13 @@ public class SpatialClustering extends SolverBase {
                         pointsWithoutLagTable++;
                         String warningMsg = "Lag table is null for " + datFile.getName();
                         logger.warning(warningMsg);
-                        System.err.println("WARNING: " + warningMsg);
+                        SolverLogger.warning("WARNING: " + warningMsg);
                     }
                 } catch (Exception e) {
                     pointsWithoutLagTable++;
                     String warningMsg = "Failed to load lag table from " + datFile.getAbsolutePath() + ": " + e.getMessage();
                     logger.warning(warningMsg);
-                    System.err.println("WARNING: " + warningMsg);
+                    SolverLogger.warning("WARNING: " + warningMsg);
                 }
             } else {
                 pointsWithoutLagTable++;

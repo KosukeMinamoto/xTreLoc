@@ -32,6 +32,9 @@ public class ReportPanel extends JPanel {
     private JPanel excelTablePanel; // Excelテーブルパネル
     private JPanel histogramPanelWrapper; // ヒストグラムパネル
     
+    // Debounce timer for row selection to prevent UI freezing
+    private javax.swing.Timer selectionDebounceTimer;
+    
     public ReportPanel(MapView mapView) {
         this.mapView = mapView;
         initComponents();
@@ -130,33 +133,52 @@ public class ReportPanel extends JPanel {
             }
         });
         
-        // 行選択イベントリスナーを追加
+        // Initialize debounce timer for row selection
+        selectionDebounceTimer = new javax.swing.Timer(100, e -> {
+            // This will be set in the listener
+        });
+        selectionDebounceTimer.setRepeats(false);
+        
+        // Add row selection event listener
         catalogTable.getSelectionModel().addListSelectionListener(new javax.swing.event.ListSelectionListener() {
             @Override
             public void valueChanged(javax.swing.event.ListSelectionEvent e) {
                 if (!e.getValueIsAdjusting()) {
-                    int selectedRow = catalogTable.getSelectedRow();
-                    // 行選択の場合、マップでハイライト
-                    if (selectedRow >= 0 && selectedRow < hypocenters.size() && mapView != null) {
-                        Hypocenter h = hypocenters.get(selectedRow);
-                        try {
-                            com.treloc.xtreloc.app.gui.model.CatalogInfo catalogInfo = mapView.findCatalogForHypocenter(h);
-                            if (catalogInfo != null) {
-                                mapView.highlightPoint(h.lon, h.lat, null, 
-                                    catalogInfo.getSymbolType(), catalogInfo.getColor());
-                            } else {
-                                mapView.highlightPoint(h.lon, h.lat);
+                    // Cancel previous timer
+                    selectionDebounceTimer.stop();
+                    
+                    // Get selected row
+                    final int selectedRow = catalogTable.getSelectedRow();
+                    
+                    // Set up debounced action
+                    selectionDebounceTimer = new javax.swing.Timer(50, evt -> {
+                        // Execute map update asynchronously to prevent UI freezing
+                        SwingUtilities.invokeLater(() -> {
+                            // 行選択の場合、マップでハイライト
+                            if (selectedRow >= 0 && selectedRow < hypocenters.size() && mapView != null) {
+                                Hypocenter h = hypocenters.get(selectedRow);
+                                try {
+                                    com.treloc.xtreloc.app.gui.model.CatalogInfo catalogInfo = mapView.findCatalogForHypocenter(h);
+                                    if (catalogInfo != null) {
+                                        mapView.highlightPoint(h.lon, h.lat, null, 
+                                            catalogInfo.getSymbolType(), catalogInfo.getColor());
+                                    } else {
+                                        mapView.highlightPoint(h.lon, h.lat);
+                                    }
+                                } catch (Exception ex) {
+                                }
+                            } else if (mapView != null) {
+                                mapView.clearHighlight();
                             }
-                        } catch (Exception ex) {
-                        }
-                    } else if (mapView != null) {
-                        mapView.clearHighlight();
-                    }
+                        });
+                    });
+                    selectionDebounceTimer.setRepeats(false);
+                    selectionDebounceTimer.start();
                 }
             }
         });
         
-        // 列選択イベントリスナーを追加
+        // Add column selection event listener
         catalogTable.getColumnModel().getSelectionModel().addListSelectionListener(new javax.swing.event.ListSelectionListener() {
             @Override
             public void valueChanged(javax.swing.event.ListSelectionEvent e) {
@@ -246,7 +268,7 @@ public class ReportPanel extends JPanel {
         // 数値列かどうかを判定
         boolean isNumeric = (columnIndex >= 1 && columnIndex <= 3) || // 1:緯度, 2:経度, 3:深度
                            (columnIndex >= 4 && columnIndex <= 7) || // 4:xerr, 5:yerr, 6:zerr, 7:rms
-                           columnIndex == 8; // 8:クラスタ番号
+                           columnIndex == 8; // 8: Cluster ID
         
         if (isNumeric && mapView != null) {
             double[] values = new double[hypocenters.size()];
@@ -274,7 +296,7 @@ public class ReportPanel extends JPanel {
                     case 7: // rms
                         values[i] = h.rms;
                         break;
-                    case 8: // クラスタ番号
+                    case 8: // Cluster ID
                         values[i] = h.clusterId != null ? h.clusterId : -1;
                         break;
                     default:
@@ -287,7 +309,7 @@ public class ReportPanel extends JPanel {
                 try {
                     mapView.showHypocenters(hypocenters, columnName, values);
                 } catch (Exception e) {
-                    // GeoToolsのレンダリングエラーを抑制（NullPointerExceptionなど）
+                    // Suppress GeoTools rendering errors (NullPointerException, etc.)
                     if (e instanceof NullPointerException && 
                         e.getMessage() != null && 
                         e.getMessage().contains("loops")) {
@@ -298,12 +320,12 @@ public class ReportPanel extends JPanel {
                 }
             });
         } else if (mapView != null) {
-            // 数値列でない場合は通常の表示（Swingイベントディスパッチスレッドで実行）
+            // Normal display for non-numeric columns (run on Swing event dispatch thread)
             SwingUtilities.invokeLater(() -> {
                 try {
                     mapView.showHypocenters(hypocenters);
                 } catch (Exception e) {
-                    // GeoToolsのレンダリングエラーを抑制（NullPointerExceptionなど）
+                    // Suppress GeoTools rendering errors (NullPointerException, etc.)
                     if (e instanceof NullPointerException && 
                         e.getMessage() != null && 
                         e.getMessage().contains("loops")) {
@@ -363,7 +385,7 @@ public class ReportPanel extends JPanel {
                 case 7: // rms
                     value = h.rms;
                     break;
-                case 8: // クラスタ番号
+                case 8: // Cluster ID
                     value = h.clusterId != null ? h.clusterId : -1;
                     break;
                 default:
@@ -445,7 +467,7 @@ public class ReportPanel extends JPanel {
         g.setColor(Color.WHITE);
         g.fillRect(0, 0, width, height);
         
-        // 全選択列のデータ範囲を計算
+        // Calculate data range for all selected columns
         double globalMin = Double.MAX_VALUE;
         double globalMax = Double.MIN_VALUE;
         java.util.List<java.util.List<Double>> allValues = new ArrayList<>();
@@ -510,7 +532,7 @@ public class ReportPanel extends JPanel {
             maxFreq = 1;
         }
         
-        // 色の配列（複数の列を異なる色で表示）
+        // Color array (display multiple columns in different colors)
         Color[] colors = {Color.BLUE, Color.RED, Color.GREEN, Color.ORANGE, Color.MAGENTA, Color.CYAN, Color.PINK};
         
         // 各列のヒストグラムを重ね書き
@@ -561,7 +583,7 @@ public class ReportPanel extends JPanel {
             g.drawString(label, margin - fm.stringWidth(label) - 5, y);
         }
         
-        // タイトルと凡例
+        // Title and legend
         StringBuilder title = new StringBuilder();
         for (int idx : selectedColumns) {
             if (title.length() > 0) title.append(", ");
@@ -669,7 +691,7 @@ public class ReportPanel extends JPanel {
     public void setHypocenters(List<Hypocenter> hypocenters) {
         this.hypocenters = hypocenters;
         
-        // テーブルにデータを表示
+        // Display data in table
         if (catalogTableModel != null) {
             catalogTableModel.setRowCount(0);
             if (hypocenters != null) {
@@ -783,7 +805,7 @@ public class ReportPanel extends JPanel {
             @Override
             protected void process(List<String> chunks) {
                 for (String message : chunks) {
-                    // ログエリアがあれば表示（ReportPanelにはログエリアがないので、後で追加するか、JOptionPaneで表示）
+                    // Display in log area if available (ReportPanel doesn't have a log area, so use JOptionPane or add later)
                     System.out.println(message);
                 }
             }
@@ -791,7 +813,7 @@ public class ReportPanel extends JPanel {
             @Override
             protected void done() {
                 try {
-                    get(); // 例外があればスロー
+                    get(); // Throw exception if any
                     JOptionPane.showMessageDialog(ReportPanel.this,
                         "Catalog generation completed",
                         "Information", JOptionPane.INFORMATION_MESSAGE);
@@ -807,7 +829,7 @@ public class ReportPanel extends JPanel {
     }
     
     /**
-     * .datファイルを再帰的に検索
+     * Recursively search for .dat files
      */
     private List<File> findDatFiles(File directory) {
         List<File> datFiles = new ArrayList<>();
@@ -829,12 +851,12 @@ public class ReportPanel extends JPanel {
     }
     
     /**
-     * .datファイルから震源データを読み込む
+     * Load hypocenter data from .dat file
      */
     private List<Hypocenter> loadHypocentersFromDatFile(File datFile) {
         List<Hypocenter> hypocenters = new ArrayList<>();
         try (java.io.BufferedReader br = new java.io.BufferedReader(new java.io.FileReader(datFile))) {
-            // 1行目: 緯度 経度 深度 タイプ
+            // Line 1: latitude longitude depth type
             String line1 = br.readLine();
             if (line1 != null) {
                 String[] parts1 = line1.trim().split("\\s+");
@@ -842,7 +864,7 @@ public class ReportPanel extends JPanel {
                     double lat = Double.parseDouble(parts1[0]);
                     double lon = Double.parseDouble(parts1[1]);
                     double depth = Double.parseDouble(parts1[2]);
-                    // ファイル名から時刻を取得（例: 071201.000030.dat → 071201.000030）
+                    // Extract time from filename (e.g., 071201.000030.dat → 071201.000030)
                     String time = datFile.getName().replace(".dat", "");
                     
                     // 2行目: xerr in km, yerr in km, zerr in km, rms residual
@@ -864,12 +886,12 @@ public class ReportPanel extends JPanel {
                                 rms = Double.parseDouble(parts2[3]);
                             }
                         } catch (NumberFormatException e) {
-                            // 2行目が観測点ペアの場合（エラー情報行がない形式）
+                            // Line 2 is station pair (format without error information line)
                         }
                     }
                     
-                    // カタログファイルの基準ディレクトリからの相対パスを計算
-                    String datFilePath = datFile.getName(); // デフォルトはファイル名のみ
+                    // Calculate relative path from catalog file base directory
+                    String datFilePath = datFile.getName(); // Default is filename only
                     String type = parts1.length > 3 ? parts1[3] : null;
                     hypocenters.add(new Hypocenter(time, lat, lon, depth, xerr, yerr, zerr, rms, null, datFilePath, type));
                 }

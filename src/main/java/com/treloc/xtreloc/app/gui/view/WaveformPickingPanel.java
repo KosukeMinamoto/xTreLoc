@@ -8,6 +8,8 @@ import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.GridLayout;
 import java.awt.Insets;
+import java.awt.event.KeyEvent;
+import java.awt.event.KeyListener;
 import java.awt.event.MouseEvent;
 import java.io.File;
 import java.util.Arrays;
@@ -101,6 +103,10 @@ public class WaveformPickingPanel extends JPanel {
     private String stationFilePath; // Path to station file
     private HashMap<String, String> channelMap; // Maps "station_component" to channel number
     
+    /** Key state for key+click picking (Settings > Picking). */
+    private volatile boolean pickingKeyPDown;
+    private volatile boolean pickingKeySDown;
+    
     // Panels for left and right sides
     private JPanel leftPanel;
     private JPanel rightPanel;
@@ -164,6 +170,26 @@ public class WaveformPickingPanel extends JPanel {
         return rightPanel;
     }
     
+    private static int mouseButtonFromSetting(String s) {
+        if (s == null) return MouseEvent.BUTTON1;
+        switch (s.trim().toLowerCase()) {
+            case "right": return MouseEvent.BUTTON3;
+            case "middle": return MouseEvent.BUTTON2;
+            default: return MouseEvent.BUTTON1;
+        }
+    }
+    
+    private static int keyCodeFromSetting(String s) {
+        if (s == null || "none".equalsIgnoreCase(s.trim())) return 0;
+        switch (s.trim().toUpperCase()) {
+            case "P": return KeyEvent.VK_P;
+            case "S": return KeyEvent.VK_S;
+            case "1": return KeyEvent.VK_1;
+            case "2": return KeyEvent.VK_2;
+            default: return 0;
+        }
+    }
+    
     /**
      * Creates the right panel with waveform display and zoom window.
      * 
@@ -193,7 +219,7 @@ public class WaveformPickingPanel extends JPanel {
         // Add mouse click guide at the bottom of the right panel
         JPanel guidePanel = new JPanel(new BorderLayout());
         guidePanel.setBorder(BorderFactory.createEmptyBorder(5, 10, 5, 10));
-        JLabel guideLabel = new JLabel("<html><small>Guide: Left=P, Right=S, Middle=Context Menu (Cancel)</small></html>");
+        JLabel guideLabel = new JLabel("<html><small>Guide: P/S by mouse or hold key then click. Configure in Settings → Picking.</small></html>");
         guideLabel.setForeground(new Color(100, 100, 100));
         guidePanel.add(guideLabel, BorderLayout.CENTER);
         panel.add(guidePanel, BorderLayout.SOUTH);
@@ -852,26 +878,40 @@ public class WaveformPickingPanel extends JPanel {
         // Disable default popup menu (right-click context menu)
         chartPanelComponent.setPopupMenu(null);
         
-        // Add mouse listener to show context menu ONLY on middle button click
-        // and prevent default popup menu on right-click
+        chartPanelComponent.setFocusable(true);
+        chartPanelComponent.addKeyListener(new KeyListener() {
+            @Override
+            public void keyPressed(KeyEvent e) {
+                int code = e.getKeyCode();
+                if (code == keyCodeFromSetting(AppSettings.load().getPickingKeyP())) pickingKeyPDown = true;
+                if (code == keyCodeFromSetting(AppSettings.load().getPickingKeyS())) pickingKeySDown = true;
+            }
+            @Override
+            public void keyReleased(KeyEvent e) {
+                int code = e.getKeyCode();
+                if (code == keyCodeFromSetting(AppSettings.load().getPickingKeyP())) pickingKeyPDown = false;
+                if (code == keyCodeFromSetting(AppSettings.load().getPickingKeyS())) pickingKeySDown = false;
+            }
+            @Override
+            public void keyTyped(KeyEvent e) {}
+        });
+        
+        // Add mouse listener to show context menu on configured button only
         chartPanelComponent.addMouseListener(new java.awt.event.MouseAdapter() {
             @Override
             public void mousePressed(java.awt.event.MouseEvent e) {
-                if (e.getButton() == MouseEvent.BUTTON2) {
-                    // Middle button: show context menu
+                int contextButton = mouseButtonFromSetting(AppSettings.load().getPickingMouseContext());
+                if (e.getButton() == contextButton) {
                     if (contextMenu != null) {
                         contextMenu.show(chartPanelComponent, e.getX(), e.getY());
                     }
                 } else if (e.getButton() == MouseEvent.BUTTON3) {
-                    // Right button: consume the event to prevent default popup menu
                     e.consume();
                 }
             }
-            
             @Override
             public void mouseReleased(java.awt.event.MouseEvent e) {
                 if (e.getButton() == MouseEvent.BUTTON3) {
-                    // Right button: consume the event to prevent default popup menu
                     e.consume();
                 }
             }
@@ -879,7 +919,7 @@ public class WaveformPickingPanel extends JPanel {
         
         chartPanel.add(chartPanelComponent);
         
-        // Mouse listener for picking
+        // Mouse listener for picking (uses Settings > Picking for button/key mapping)
         chartPanelComponent.addChartMouseListener(new ChartMouseListener() {
             @Override
             public void chartMouseClicked(ChartMouseEvent event) {
@@ -897,19 +937,27 @@ public class WaveformPickingPanel extends JPanel {
                     int button = event.getTrigger().getButton();
                     Date xDate = new Date(xTime.getFirstMillisecond());
                     
-                    // Button mapping: Left = P, Right = S, Middle = cancel (JFreeChart context menu)
-                    if (button == MouseEvent.BUTTON1) {
-                        // Left button = P
-                        arrivalTimeManager.updateArrivalTime(stationName, component, "P", xDate);
-                    } else if (button == MouseEvent.BUTTON3) {
-                        // Right button = S
-                        arrivalTimeManager.updateArrivalTime(stationName, component, "S", xDate);
-                    } else if (button == MouseEvent.BUTTON2) {
-                        // Middle button = Cancel (show JFreeChart context menu)
-                        // The context menu will be shown by the MouseListener we add below
-                        return; // Don't process picking for middle button
+                    AppSettings settings = AppSettings.load();
+                    int buttonP = mouseButtonFromSetting(settings.getPickingMouseP());
+                    int buttonS = mouseButtonFromSetting(settings.getPickingMouseS());
+                    int buttonContext = mouseButtonFromSetting(settings.getPickingMouseContext());
+                    int keyP = keyCodeFromSetting(settings.getPickingKeyP());
+                    int keyS = keyCodeFromSetting(settings.getPickingKeyS());
+                    
+                    String phase = null;
+                    if (keyP != 0 && pickingKeyPDown) {
+                        phase = "P";
+                    } else if (keyS != 0 && pickingKeySDown) {
+                        phase = "S";
                     } else {
-                        return; // Unknown button, ignore
+                        if (button == buttonContext) return;
+                        if (button == buttonP) phase = "P";
+                        else if (button == buttonS) phase = "S";
+                    }
+                    if (phase != null) {
+                        arrivalTimeManager.updateArrivalTime(stationName, component, phase, xDate);
+                    } else {
+                        return;
                     }
                     
                     // Refresh annotations

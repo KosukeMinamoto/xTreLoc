@@ -1,5 +1,6 @@
 package com.treloc.xtreloc.solver;
 
+import java.io.File;
 import java.util.logging.Logger;
 
 import com.treloc.xtreloc.io.AppConfig;
@@ -38,6 +39,10 @@ public class HypoUtils {
     private final VelocityModel velMod;
     private TauModel tauMod;
     private final double threshold;
+    
+    // Cache for TauModel loading to avoid serialization issues
+    private static java.util.Map<String, TauModel> modelCache = new java.util.HashMap<>();
+
     
     private static class TravelTimeCacheEntry {
         double lon;
@@ -127,9 +132,20 @@ public class HypoUtils {
         if (isDefaultModel) {
             try {
                 tauMod = TauModelLoader.load(taupFile);
-            } catch (TauModelException e) {
-                logger.severe("Error loading TauP default model: " + e.getMessage());
-                throw e;
+            } catch (Exception e) {
+                // Try clearing cache and retry for serialization issues
+                if (e.getMessage() != null && e.getMessage().contains("serialVersionUID")) {
+                    logger.info("TauModel serialization issue detected. Trying alternative loading method...");
+                    try {
+                        tauMod = loadTauModelWithFallback(taupFile);
+                    } catch (Exception retryError) {
+                        logger.severe("Error loading TauP default model after retry: " + retryError.getMessage());
+                        throw new TauModelException("Failed to load TauP model", retryError);
+                    }
+                } else {
+                    logger.severe("Error loading TauP default model: " + e.getMessage());
+                    throw new TauModelException("Failed to load TauP model", e);
+                }
             }
         } else {
             String extension = FileUtils.getFileExtension(taupFile);
@@ -138,17 +154,62 @@ public class HypoUtils {
                 case "nd":
                     try {
                         tauMod = TauModelLoader.load(taupFile);
-                    } catch (TauModelException e) {
-                        logger.severe("Error loading TauP model: " + e.getMessage());
-                        throw e;
+                    } catch (Exception e) {
+                        // Try alternative loading on serialization error
+                        if (e.getMessage() != null && e.getMessage().contains("serialVersionUID")) {
+                            logger.info("TauModel serialization issue detected. Trying alternative loading method...");
+                            try {
+                                tauMod = loadTauModelWithFallback(taupFile);
+                            } catch (Exception retryError) {
+                                logger.severe("Error loading TauP model after retry: " + retryError.getMessage());
+                                throw new TauModelException("Failed to load TauP model", retryError);
+                            }
+                        } else {
+                            logger.severe("Error loading TauP model: " + e.getMessage());
+                            throw new TauModelException("Failed to load TauP model", e);
+                        }
                     }
                     break;
                 case "taup":
                     try {
                         tauMod = TauModel.readModel(taupFile);
                     } catch (Exception e) {
-                        logger.severe("Error: Loading TauP model: " + e.getMessage());
-                        throw new TauModelException("Failed to load TauP model", e);
+                        // Check for version mismatch issues
+                        if (e.getMessage() != null && e.getMessage().contains("serialVersionUID")) {
+                            logger.info("TauModel serialVersionUID mismatch detected. Attempting version-tolerant loading...");
+                            
+                            try {
+                                // Try loading with custom ObjectInputStream that tolerates version mismatch
+                                tauMod = loadTaupFileWithVersionTolerance(taupFile);
+                                logger.info("Successfully loaded .taup file with version tolerance");
+                            } catch (Exception retryError) {
+                                // If all strategies fail, provide detailed guidance to user
+                                String errorMsg = "TauModel.taup file version mismatch.\n" +
+                                    "The .taup file was generated with a different TauP library version.\n" +
+                                    "Solutions:\n" +
+                                    "1. Use .nd format instead (recommended): Convert your .taup model to .nd format\n" +
+                                    "2. Regenerate .taup file: Run TauP_Time tool in your environment to regenerate the .taup file\n" +
+                                    "   Command: java -cp $TAUP_JAR edu.sc.seis.TauP.TauP_Time -version\n" +
+                                    "   Then use taup_create or TauP_Create to generate a new .taup file\n" +
+                                    "3. Update your TauP library to match the version used to create the .taup file\n\n" +
+                                    "File: " + taupFile;
+                                
+                                logger.severe(errorMsg);
+                                throw new TauModelException(errorMsg, retryError);
+                            }
+                        } else {
+                            logger.severe("Error: Loading TauP model: " + e.getMessage());
+                            throw new TauModelException("Failed to load TauP model", e);
+                        }
+                    }
+                    break;
+                case "tvel":
+                    // Support for .tvel velocity format (try as TauModelLoader first)
+                    try {
+                        tauMod = TauModelLoader.load(taupFile);
+                    } catch (TauModelException e) {
+                        logger.severe("Error: .tvel file format not directly supported. Please convert to .nd format.");
+                        throw new TauModelException("Failed to load .tvel file. Please use .nd or .taup format instead.", e);
                     }
                     break;
                 default:
@@ -157,6 +218,169 @@ public class HypoUtils {
         }
         velMod = tauMod.getVelocityModel();
         logger.info("Loaded velocity model: " + taupFile);
+    }
+    
+    /**
+     * Loads a .taup file with tolerance for serialVersionUID mismatches.
+     * Uses a custom ObjectInputStream that ignores version conflicts.
+     */
+    private static TauModel loadTaupFileWithVersionTolerance(String taupFile) throws Exception {
+        java.io.ObjectInputStream ois = null;
+        try {
+            java.io.FileInputStream fis = new java.io.FileInputStream(taupFile);
+            ois = new java.io.ObjectInputStream(fis) {
+                @Override
+                protected java.io.ObjectStreamClass readClassDescriptor() throws java.io.IOException, ClassNotFoundException {
+                    java.io.ObjectStreamClass classDesc = super.readClassDescriptor();
+                    // Check if this is a TauModel class
+                    if (classDesc.getName().contains("TauModel")) {
+                        logger.fine("Reading TauModel with version tolerance...");
+                        // Get the local class descriptor
+                        try {
+                            java.io.ObjectStreamClass localClassDesc = 
+                                java.io.ObjectStreamClass.lookup(Class.forName(classDesc.getName()));
+                            if (localClassDesc != null) {
+                                logger.fine("Using local TauModel class descriptor instead of serialized one");
+                                return localClassDesc;
+                            }
+                        } catch (ClassNotFoundException e) {
+                            logger.fine("Could not find local class: " + classDesc.getName());
+                        }
+                    }
+                    return classDesc;
+                }
+            };
+            
+            Object obj = ois.readObject();
+            if (obj instanceof TauModel) {
+                return (TauModel) obj;
+            } else {
+                throw new TauModelException("File does not contain a TauModel object");
+            }
+        } catch (java.io.InvalidClassException e) {
+            // This can still happen if the class structure has changed significantly
+            logger.severe("Class structure mismatch: " + e.getMessage());
+            throw new TauModelException("TauModel class structure mismatch", e);
+        } finally {
+            if (ois != null) {
+                ois.close();
+            }
+        }
+    }
+    
+    /**
+     * Loads TauModel with fallback strategy to handle serialization issues.
+     * This method uses multiple strategies to avoid deserializing corrupted cache.
+     * For .taup files with version mismatch, this attempts to extract and use the model data.
+     */
+    private static TauModel loadTauModelWithFallback(String taupFile) throws Exception {
+        String extension = FileUtils.getFileExtension(taupFile);
+        
+        // For .taup files, try reading as text/nd format first
+        if ("taup".equalsIgnoreCase(extension)) {
+            logger.info("For .taup files with serialization issues, trying to read model information...");
+            // Since the .taup file has version mismatch, we can't deserialize it
+            // Best strategy is to ask user to convert to .nd format
+            throw new TauModelException(
+                "Cannot load .taup file with version mismatch. Please convert to .nd format using TauP tools.");
+        }
+        
+        // Strategy 1: Try loading as nd/default format
+        try {
+            logger.info("Trying TauModelLoader.load() for fallback...");
+            return TauModelLoader.load(taupFile);
+        } catch (Exception e1) {
+            logger.info("TauModelLoader.load() failed: " + e1.getMessage());
+        }
+        
+        // Strategy 2: Try reading as taup model
+        try {
+            logger.info("Trying TauModel.readModel() for fallback...");
+            return TauModel.readModel(taupFile);
+        } catch (Exception e2) {
+            logger.info("TauModel.readModel() failed, trying cache cleanup...");
+        }
+        
+        // Strategy 3: Try reloading with deleted cache hint
+        try {
+            // Delete TauP cache directory if it exists
+            String homeDir = System.getProperty("user.home");
+            File taupCacheDir = new File(homeDir, ".taup");
+            if (taupCacheDir.exists() && taupCacheDir.isDirectory()) {
+                logger.info("Found TauP cache directory at: " + taupCacheDir.getAbsolutePath());
+                logger.info("Deleting cache files to resolve serialization issues...");
+                deleteCacheFiles(taupCacheDir);
+            }
+            
+            // Try loading again after cache deletion
+            logger.info("Retrying load after cache cleanup...");
+            return TauModelLoader.load(taupFile);
+        } catch (Exception e3) {
+            logger.warning("Failed to load even after cache cleanup: " + e3.getMessage());
+            throw e3;
+        }
+    }
+    
+    /**
+     * Recursively deletes cache files in a directory.
+     */
+    private static void deleteCacheFiles(File dir) {
+        if (!dir.exists()) return;
+        
+        File[] files = dir.listFiles();
+        if (files != null) {
+            for (File file : files) {
+                if (file.isDirectory()) {
+                    deleteCacheFiles(file);
+                } else {
+                    // Only delete .taup and .ser files
+                    if (file.getName().endsWith(".taup") || file.getName().endsWith(".ser")) {
+                        if (file.delete()) {
+                            logger.fine("Deleted cache file: " + file.getName());
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    /**
+     * Clears the TauP internal model cache to resolve serialization issues.
+     * This uses reflection to access and clear the static cache in TauModelLoader.
+     */
+    private static void clearTauPCache() {
+        try {
+            // Try to clear TauModelLoader's internal cache via reflection
+            java.lang.reflect.Field cacheField = null;
+            try {
+                cacheField = TauModelLoader.class.getDeclaredField("modelCache");
+            } catch (NoSuchFieldException e1) {
+                // Try alternative cache field names
+                try {
+                    cacheField = TauModelLoader.class.getDeclaredField("cache");
+                } catch (NoSuchFieldException e2) {
+                    // Try another common name
+                    try {
+                        cacheField = TauModelLoader.class.getDeclaredField("models");
+                    } catch (NoSuchFieldException e3) {
+                        // Field not found, continue without clearing
+                        logger.warning("Could not find TauModelLoader cache field");
+                        return;
+                    }
+                }
+            }
+            
+            if (cacheField != null) {
+                cacheField.setAccessible(true);
+                Object cache = cacheField.get(null);
+                if (cache instanceof java.util.Map) {
+                    ((java.util.Map<?, ?>) cache).clear();
+                    logger.info("Cleared TauModelLoader internal cache");
+                }
+            }
+        } catch (Exception e) {
+            logger.warning("Could not clear TauModelLoader cache: " + e.getMessage());
+        }
     }
 
     /**

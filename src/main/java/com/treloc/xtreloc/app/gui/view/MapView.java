@@ -34,6 +34,7 @@ public class MapView {
 	private JLabel coordLabel = new JLabel(" ");
 	private ColorBarPanel colorBarPanel;
 	private int symbolSize = 10;
+	private boolean showErrorEllipse = true;
 	private ScaleBarPanel scaleBarPanel;
 	
 	private java.util.List<Hypocenter> lastHypocenters = null;
@@ -101,6 +102,13 @@ public class MapView {
 		frame.getToolBar().add(Box.createHorizontalStrut(10));
 		frame.getToolBar().add(coordLabel);
 		
+		JCheckBox showErrorEllipseCheckBox = new JCheckBox("Error ellipse", showErrorEllipse);
+		showErrorEllipseCheckBox.addActionListener(e -> {
+			showErrorEllipse = showErrorEllipseCheckBox.isSelected();
+			setShowErrorEllipse(showErrorEllipse);
+		});
+		frame.getToolBar().add(Box.createHorizontalStrut(10));
+		frame.getToolBar().add(showErrorEllipseCheckBox);
 		
 		colorBarPanel = new ColorBarPanel(currentPalette);
 		
@@ -162,6 +170,13 @@ public class MapView {
 	
 	public JMapFrame getFrame() {
 		return frame;
+	}
+	
+	/** Repaints the map frame (e.g. after screening filter change). */
+	public void repaintMap() {
+		if (frame != null) {
+			frame.repaint();
+		}
 	}
 	
 	private void setupMouseListener() {
@@ -465,9 +480,37 @@ public class MapView {
 	}
 	
 	/**
+	 * Sets whether to show error ellipses for hypocenters that have xerr/yerr.
+	 *
+	 * @param show true to show error ellipses, false to hide them
+	 */
+	public void setShowErrorEllipse(boolean show) {
+		showErrorEllipse = show;
+		if (lastHypocenters != null && !lastHypocenters.isEmpty()) {
+			try {
+				showHypocenters(lastHypocenters, lastColorColumn, lastColorValues);
+			} catch (Exception e) {
+				forceMapRepaint();
+			}
+		} else {
+			updateMultipleCatalogsDisplay();
+		}
+	}
+	
+	/**
+	 * Returns whether error ellipses are shown.
+	 */
+	public boolean isShowErrorEllipse() {
+		return showErrorEllipse;
+	}
+	
+	/**
 	 * Updates the display of multiple catalogs.
 	 */
 	public void updateMultipleCatalogsDisplay() {
+		int fromSettings = com.treloc.xtreloc.app.gui.util.AppSettings.load().getSymbolSize();
+		this.symbolSize = Math.max(5, Math.min(50, fromSettings));
+		
 		java.util.List<Layer> layersToRemove = new java.util.ArrayList<>();
 		for (Layer layer : map.layers()) {
 			if (layer.getTitle() != null && 
@@ -492,16 +535,35 @@ public class MapView {
 		GeometryFactory gf = new GeometryFactory();
 		SimpleFeatureType hypoType;
 		SimpleFeatureType connectionType;
+		SimpleFeatureType errorBarType;
 		
 		try {
 			hypoType = DataUtilities.createType("Hypo", 
 				"geom:Point,time:String,depth:Double");
 			connectionType = DataUtilities.createType("Connection", 
 				"geom:LineString");
+			errorBarType = DataUtilities.createType("ErrorBar", "geom:Polygon");
 		} catch (Exception e) {
 			java.util.logging.Logger.getLogger(MapView.class.getName())
 				.severe("Failed to create feature types: " + e.getMessage());
 			return;
+		}
+		
+		DefaultFeatureCollection errorBarCollection = new DefaultFeatureCollection("ErrorBarLayer", errorBarType);
+		if (showErrorEllipse) {
+			for (com.treloc.xtreloc.app.gui.model.CatalogInfo catalogInfo : catalogInfos) {
+				if (!catalogInfo.isVisible() || catalogInfo.getHypocenters() == null) continue;
+				for (Hypocenter h : catalogInfo.getHypocenters()) {
+					if (h.xerr > 0 || h.yerr > 0) {
+						org.locationtech.jts.geom.Polygon errorEllipse = createErrorEllipse(h.lon, h.lat, h.xerr, h.yerr, gf);
+						if (errorEllipse != null) {
+							SimpleFeature errorFeature = DataUtilities.template(errorBarType);
+							errorFeature.setDefaultGeometry(errorEllipse);
+							errorBarCollection.add(errorFeature);
+						}
+					}
+				}
+			}
 		}
 		
 		DefaultFeatureCollection connectionCollection = new DefaultFeatureCollection("ConnectionLayer", connectionType);
@@ -530,6 +592,13 @@ public class MapView {
 			
 			String label = (colorMapColumn != null) ? colorMapColumn : "Value";
 			setColorRange(minValue, maxValue, label);
+		}
+		
+		if (showErrorEllipse && !errorBarCollection.isEmpty()) {
+			Style errorBarStyle = StyleFactory.createErrorBarStyle();
+			FeatureLayer errorBarLayer = new FeatureLayer(errorBarCollection, errorBarStyle);
+			errorBarLayer.setTitle("ErrorBarLayer");
+			map.addLayer(errorBarLayer);
 		}
 		
 		for (com.treloc.xtreloc.app.gui.model.CatalogInfo catalogInfo : catalogInfos) {
@@ -1112,7 +1181,7 @@ public class MapView {
 			f.setAttribute("depth", h.depth);
 			col.add(f);
 			
-			if (h.xerr > 0 || h.yerr > 0) {
+			if (showErrorEllipse && (h.xerr > 0 || h.yerr > 0)) {
 				org.locationtech.jts.geom.Polygon errorEllipse = createErrorEllipse(h.lon, h.lat, h.xerr, h.yerr, gf);
 				if (errorEllipse != null) {
 					SimpleFeature errorFeature = DataUtilities.template(errorBarType);
@@ -1122,7 +1191,7 @@ public class MapView {
 			}
 		}
 		
-		if (!errorBarCollection.isEmpty()) {
+		if (showErrorEllipse && !errorBarCollection.isEmpty()) {
 			Style errorBarStyle = StyleFactory.createErrorBarStyle();
 			FeatureLayer errorBarLayer = new FeatureLayer(errorBarCollection, errorBarStyle);
 			errorBarLayer.setTitle("ErrorBarLayer");
@@ -1274,6 +1343,11 @@ public class MapView {
 					String currentLabel = colorBarPanel.getLabel();
 					setColorRange(min, max, currentLabel);
 					refreshMapColors();
+				});
+				colorBarPanel.setPaletteChangeCallback(() -> {
+					currentPalette = colorBarPanel.getPalette();
+					updateMultipleCatalogsDisplay();
+					repaintMap();
 				});
 				
 				if (legendPanel != null) {
@@ -1852,10 +1926,12 @@ public class MapView {
 		if (result == JFileChooser.APPROVE_OPTION) {
 			File outputFile = fileChooser.getSelectedFile();
 			try {
-				exportMapImageToFile(outputFile);
-				JOptionPane.showMessageDialog(frame,
-					"Map exported as image: " + outputFile.getAbsolutePath(),
-					"Information", JOptionPane.INFORMATION_MESSAGE);
+				File savedFile = exportMapImageToFile(outputFile);
+				String msg = "Map exported as image: " + savedFile.getAbsolutePath();
+				if (!savedFile.equals(outputFile)) {
+					msg += "\n(Saved as PNG because JPEG is not available on this system.)";
+				}
+				JOptionPane.showMessageDialog(frame, msg, "Information", JOptionPane.INFORMATION_MESSAGE);
 			} catch (Exception e) {
 				JOptionPane.showMessageDialog(frame,
 					"Failed to export image: " + e.getMessage(),
@@ -1864,7 +1940,13 @@ public class MapView {
 		}
 	}
 	
-	public void exportMapImageToFile(File outputFile) throws Exception {
+	/**
+	 * Exports the map pane to an image file. Supports PNG and JPEG.
+	 * On systems where JPEG ImageIO plugin fails (e.g. some macOS/JDK), JPEG is fallback to PNG automatically.
+	 * @param outputFile target file (extension determines format)
+	 * @return the file that was actually written (may differ from outputFile if JPEG fallback to PNG occurred)
+	 */
+	public File exportMapImageToFile(File outputFile) throws Exception {
 		Component mapPane = frame.getMapPane();
 		BufferedImage image = new BufferedImage(
 			mapPane.getWidth(), 
@@ -1877,8 +1959,23 @@ public class MapView {
 		String extension = getFileExtension(outputFile.getName()).toLowerCase();
 		if ("png".equals(extension)) {
 			javax.imageio.ImageIO.write(image, "PNG", outputFile);
+			return outputFile;
 		} else if ("jpg".equals(extension) || "jpeg".equals(extension)) {
-			javax.imageio.ImageIO.write(image, "JPEG", outputFile);
+			try {
+				javax.imageio.ImageIO.write(image, "JPEG", outputFile);
+				return outputFile;
+			} catch (Exception jpegEx) {
+				// On some macOS/JDK combinations, JPEG ImageIO plugin fails (e.g. ServiceConfigurationError,
+				// vendorName == null). Fall back to PNG with the same base name.
+				String baseName = outputFile.getName();
+				int lastDot = baseName.lastIndexOf('.');
+				if (lastDot > 0) {
+					baseName = baseName.substring(0, lastDot);
+				}
+				File pngFile = new File(outputFile.getParent(), baseName + ".png");
+				javax.imageio.ImageIO.write(image, "PNG", pngFile);
+				return pngFile;
+			}
 		} else {
 			throw new IllegalArgumentException("Unsupported image format. Use PNG or JPEG.");
 		}
@@ -1906,6 +2003,7 @@ public class MapView {
 		private ColorPalette palette = ColorPalette.BLUE_TO_RED;
 		private JPanel colorBarDrawingPanel;
 		private RangeChangeListener rangeChangeListener;
+		private Runnable paletteChangeCallback;
 		private boolean labelsVisible = true;
 		private int numLabels = 5;
 		private Color[] colorArray;
@@ -1917,6 +2015,10 @@ public class MapView {
 		
 		public void setRangeChangeListener(RangeChangeListener listener) {
 			this.rangeChangeListener = listener;
+		}
+		
+		public void setPaletteChangeCallback(Runnable callback) {
+			this.paletteChangeCallback = callback;
 		}
 		
 		private void generateColorArray() {
@@ -2131,6 +2233,9 @@ public class MapView {
 		public void setPalette(ColorPalette palette) {
 			this.palette = palette;
 			generateColorArray();
+			if (paletteChangeCallback != null) {
+				paletteChangeCallback.run();
+			}
 			if (colorBarDrawingPanel != null) {
 				colorBarDrawingPanel.repaint();
 			}

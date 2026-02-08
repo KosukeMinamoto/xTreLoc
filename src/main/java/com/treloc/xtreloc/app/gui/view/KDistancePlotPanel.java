@@ -9,8 +9,11 @@ import org.jfree.chart.plot.PlotOrientation;
 import org.jfree.chart.plot.XYPlot;
 import org.jfree.chart.renderer.xy.XYLineAndShapeRenderer;
 import org.jfree.chart.plot.ValueMarker;
+import org.jfree.chart.axis.NumberAxis;
 import org.jfree.ui.RectangleAnchor;
 import org.jfree.ui.TextAnchor;
+import com.treloc.xtreloc.app.gui.util.AppSettings;
+import com.treloc.xtreloc.app.gui.util.ChartAppearanceSettings;
 
 import javax.swing.*;
 import java.awt.*;
@@ -57,6 +60,25 @@ public class KDistancePlotPanel extends JPanel {
             true,
             false
         );
+        
+        applyChartAppearance(chart);
+        
+        XYPlot plot = chart.getXYPlot();
+        if (plot != null) {
+            NumberAxis xAxis = (NumberAxis) plot.getDomainAxis();
+            if (xAxis != null) {
+                ChartAppearanceSettings settings = AppSettings.load().getChartAppearance();
+                xAxis.setLabelFont(settings.getAxisLabelFont());
+                xAxis.setTickLabelFont(settings.getTickLabelFont());
+            }
+            
+            NumberAxis yAxis = (NumberAxis) plot.getRangeAxis();
+            if (yAxis != null) {
+                ChartAppearanceSettings settings = AppSettings.load().getChartAppearance();
+                yAxis.setLabelFont(settings.getAxisLabelFont());
+                yAxis.setTickLabelFont(settings.getTickLabelFont());
+            }
+        }
         
         chartPanel = new ChartPanel(chart);
         chartPanel.setPreferredSize(new Dimension(800, 600));
@@ -109,16 +131,36 @@ public class KDistancePlotPanel extends JPanel {
             false
         );
         
+        applyChartAppearance(chart);
+        
         XYPlot plot = chart.getXYPlot();
         XYLineAndShapeRenderer renderer = new XYLineAndShapeRenderer();
         renderer.setSeriesPaint(0, Color.BLUE);
         renderer.setSeriesPaint(1, Color.RED);
         renderer.setSeriesShapesVisible(1, true);
+        
+        // Get line width from settings
+        ChartAppearanceSettings settings = AppSettings.load().getChartAppearance();
+        renderer.setSeriesStroke(0, new BasicStroke(settings.getLineWidth()));
+        renderer.setSeriesStroke(1, new BasicStroke(settings.getLineWidth()));
         plot.setRenderer(renderer);
+        
+        // Configure axes
+        NumberAxis xAxis = (NumberAxis) plot.getDomainAxis();
+        if (xAxis != null) {
+            xAxis.setLabelFont(settings.getAxisLabelFont());
+            xAxis.setTickLabelFont(settings.getTickLabelFont());
+        }
+        
+        NumberAxis yAxis = (NumberAxis) plot.getRangeAxis();
+        if (yAxis != null) {
+            yAxis.setLabelFont(settings.getAxisLabelFont());
+            yAxis.setTickLabelFont(settings.getTickLabelFont());
+        }
         
         double[] percentages = {0.7, 0.8, 0.9, 0.95};
         Color[] colors = {Color.GREEN, Color.ORANGE, Color.MAGENTA, Color.CYAN};
-        Font labelFont = new Font("SansSerif", Font.PLAIN, 12);
+        Font labelFont = settings.getTickLabelFont();
         for (int i = 0; i < percentages.length; i++) {
             int index = (int) (percentages[i] * kDistances.size()) - 1;
             if (index >= 0 && index < kDistances.size()) {
@@ -151,9 +193,40 @@ public class KDistancePlotPanel extends JPanel {
         }
         
         chart.getLegend().setPosition(org.jfree.ui.RectangleEdge.TOP);
+        if (chart.getLegend() != null) {
+            chart.getLegend().setItemFont(settings.getLegendFont());
+        }
         
         chartPanel.setChart(chart);
         chartPanel.repaint();
+    }
+    
+    /**
+     * Applies chart appearance settings to a JFreeChart.
+     * 
+     * @param chart the chart to apply settings to
+     */
+    private void applyChartAppearance(JFreeChart chart) {
+        ChartAppearanceSettings settings = AppSettings.load().getChartAppearance();
+        
+        if (chart.getTitle() != null) {
+            chart.getTitle().setFont(settings.getTitleFont());
+        }
+        
+        XYPlot plot = chart.getXYPlot();
+        if (plot != null) {
+            plot.setBackgroundPaint(settings.getBackgroundColorAsColor());
+            plot.setDomainGridlinePaint(settings.getGridlineColorAsColor());
+            plot.setRangeGridlinePaint(settings.getGridlineColorAsColor());
+            plot.setDomainGridlineStroke(settings.getGridlineStroke());
+            plot.setRangeGridlineStroke(settings.getGridlineStroke());
+            plot.setDomainGridlinesVisible(true);
+            plot.setRangeGridlinesVisible(true);
+        }
+        
+        if (chart.getLegend() != null) {
+            chart.getLegend().setItemFont(settings.getLegendFont());
+        }
     }
     
     /**

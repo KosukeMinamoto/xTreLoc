@@ -1,0 +1,32 @@
+{
+  "logLevel" : "INFO",
+  "numJobs" : 4,
+  "stationFile" : "/Users/kosukeminamoto/kminamoto/java/xTreLoc/demo/locating_example/station.tbl",
+  "taupFile" : "prem",
+  "hypBottom" : 100.0,
+  "threshold" : 0.0,
+  "modes" : {
+    "GRD" : {
+      "datDirectory" : null,
+      "outDirectory" : null,
+      "catalogFile" : null,
+      "randomSeed" : null,
+      "phsErr" : null,
+      "locErr" : null,
+      "minSelectRate" : null,
+      "maxSelectRate" : null,
+      "minPts" : null,
+      "eps" : null,
+      "epsPercentile" : null,
+      "useBinaryFormat" : null,
+      "rmsThreshold" : null,
+      "locErrThreshold" : null
+    }
+  },
+  "solver" : {
+    "GRD" : {
+      "totalGrids" : 300,
+      "numFocus" : 3
+    }
+  }
+}

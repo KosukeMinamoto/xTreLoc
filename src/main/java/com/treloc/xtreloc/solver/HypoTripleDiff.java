@@ -870,20 +870,22 @@ public class HypoTripleDiff extends SolverBase {
                 rowIdx++;
             }
             
-            double constraintWeight = 0;
-            
+            // Add constraint rows: sum{delta m} = 0 for each component (x, y, z)
+            // Constraint row for x component: sum(delta_x_i) = 0
             for (int k = 0; k < N; k++) {
-                G.setEntry(validRowCount, 3 * k, constraintWeight);
+                G.setEntry(validRowCount, 3 * k, 1.0);
             }
             d[validRowCount] = 0.0;
             
+            // Constraint row for y component: sum(delta_y_i) = 0
             for (int k = 0; k < N; k++) {
-                G.setEntry(validRowCount + 1, 3 * k + 1, constraintWeight);
+                G.setEntry(validRowCount + 1, 3 * k + 1, 1.0);
             }
             d[validRowCount + 1] = 0.0;
             
+            // Constraint row for z component: sum(delta_z_i) = 0
             for (int k = 0; k < N; k++) {
-                G.setEntry(validRowCount + 2, 3 * k + 2, constraintWeight);
+                G.setEntry(validRowCount + 2, 3 * k + 2, 1.0);
             }
             d[validRowCount + 2] = 0.0;
             
@@ -938,20 +940,22 @@ public class HypoTripleDiff extends SolverBase {
                 rowIdx++;
             }
             
-            double constraintWeight = 0;
-            
+            // Add constraint rows: sum{delta m} = 0 for each component (x, y, z)
+            // Constraint row for x component: sum(delta_x_i) = 0
             for (int k = 0; k < N; k++) {
-                G.setEntry(validRowCount, 3 * k, constraintWeight);
+                G.setEntry(validRowCount, 3 * k, 1.0);
             }
             d[validRowCount] = 0.0;
             
+            // Constraint row for y component: sum(delta_y_i) = 0
             for (int k = 0; k < N; k++) {
-                G.setEntry(validRowCount + 1, 3 * k + 1, constraintWeight);
+                G.setEntry(validRowCount + 1, 3 * k + 1, 1.0);
             }
             d[validRowCount + 1] = 0.0;
             
+            // Constraint row for z component: sum(delta_z_i) = 0
             for (int k = 0; k < N; k++) {
-                G.setEntry(validRowCount + 2, 3 * k + 2, constraintWeight);
+                G.setEntry(validRowCount + 2, 3 * k + 2, 1.0);
             }
             d[validRowCount + 2] = 0.0;
             

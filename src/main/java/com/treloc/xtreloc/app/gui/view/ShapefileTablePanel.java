@@ -78,7 +78,7 @@ public class ShapefileTablePanel extends JPanel {
         listScrollPane.setPreferredSize(new Dimension(500, 150));
         splitPane.setTopComponent(listScrollPane);
         
-        // 下部：Shapefile属性データテーブル
+        // Bottom: Shapefile attribute data table
         dataTableModel = new DefaultTableModel(new String[]{"Attribute", "Value"}, 0) {
             @Override
             public boolean isCellEditable(int row, int column) {
@@ -101,7 +101,7 @@ public class ShapefileTablePanel extends JPanel {
         statusLabel = new JLabel("No shapefile loaded");
         add(statusLabel, BorderLayout.SOUTH);
         
-        // 行選択イベント（Shapefileを選択すると属性データを表示）
+        // Row selection event (display attribute data when Shapefile is selected)
         table.getSelectionModel().addListSelectionListener(e -> {
             if (!e.getValueIsAdjusting()) {
                 int selectedRow = table.getSelectedRow();
@@ -260,7 +260,7 @@ public class ShapefileTablePanel extends JPanel {
             java.util.List<org.geotools.api.feature.type.PropertyDescriptor> descriptors = new java.util.ArrayList<>(descriptorsCollection);
             
             // 最初のFeatureを取得して属性値を表示
-            // FeatureSourceからFeatureCollectionを取得
+            // Get FeatureCollection from FeatureSource
             org.geotools.api.data.Query query = org.geotools.api.data.Query.ALL;
             var features = featureSource.getFeatures(query);
             
@@ -279,7 +279,7 @@ public class ShapefileTablePanel extends JPanel {
                         dataTableModel.addRow(new Object[]{name, valueStr});
                     }
                 } else {
-                    // Featureがない場合、属性名のみ表示
+                    // Display only attribute names if no features
                     for (org.geotools.api.feature.type.PropertyDescriptor descriptor : descriptors) {
                         String name = descriptor.getName().toString();
                         dataTableModel.addRow(new Object[]{name, ""});

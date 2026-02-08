@@ -5,6 +5,7 @@ import java.util.logging.Logger;
 
 import com.treloc.xtreloc.io.AppConfig;
 import com.fasterxml.jackson.databind.JsonNode;
+import com.treloc.xtreloc.util.SolverLogger;
 import edu.sc.seis.TauP.TauModelException;
 
 /**
@@ -43,7 +44,7 @@ public class HypoGridSearch extends SolverBase {
             this.numFocus = 3;
         }
         
-        logger.info(String.format("Grid search parameters: totalGrids=%d, numFocus=%d, gridsPerFocus=%d",
+        SolverLogger.fine(String.format("Grid search parameters: totalGrids=%d, numFocus=%d, gridsPerFocus=%d",
             totalGrids, numFocus, totalGrids / numFocus));
     }
 
@@ -55,8 +56,7 @@ public class HypoGridSearch extends SolverBase {
      */
     public void start(String datFile, String outFile) throws TauModelException {
         String fileName = new java.io.File(datFile).getName();
-        logger.info("Starting grid search for: " + fileName);
-        System.out.println("Starting grid search for: " + fileName);
+        SolverLogger.info("Starting grid search for: " + fileName);
         
         Point point;
         try {
@@ -68,7 +68,7 @@ public class HypoGridSearch extends SolverBase {
             if (e.getCause() != null) {
                 errorMsg.append("  Caused by: ").append(e.getCause().getMessage()).append("\n");
             }
-            logger.severe(errorMsg.toString());
+            SolverLogger.severe(errorMsg.toString());
             throw new RuntimeException("Failed to read dat file: " + datFile, e);
         }
         
@@ -97,14 +97,14 @@ public class HypoGridSearch extends SolverBase {
         
         if (res <= 0.0 || res >= 999.0) {
             res = initialRes;
-            logger.info(String.format("Initial residual calculated: %.6f (input res was %.6f)", res, point.getRes()));
+            SolverLogger.fine(String.format("Initial residual calculated: %.6f (input res was %.6f)", res, point.getRes()));
         } else {
             res = initialRes;
-            logger.info(String.format("Initial residual calculated: %.6f (input res was %.6f, using calculated value)", res, point.getRes()));
+            SolverLogger.fine(String.format("Initial residual calculated: %.6f (input res was %.6f, using calculated value)", res, point.getRes()));
         }
         for (int focus = 0; focus < numFocus; focus++) {
             if (Thread.currentThread().isInterrupted()) {
-                logger.info("Grid search interrupted by user");
+                SolverLogger.info("Grid search interrupted by user");
                 throw new RuntimeException("Grid search was interrupted");
             }
             
@@ -125,7 +125,7 @@ public class HypoGridSearch extends SolverBase {
             for (int i = 0; i < gridsPerFocus; i++) {
                 // Check for interruption periodically
                 if (i % 100 == 0 && Thread.currentThread().isInterrupted()) {
-                    logger.info("Grid search interrupted by user");
+                    SolverLogger.info("Grid search interrupted by user");
                     throw new RuntimeException("Grid search was interrupted");
                 }
                 Point pointNew = new Point(time, latGrids[i], lonGrids[i], depGrids[i], 
@@ -163,8 +163,7 @@ public class HypoGridSearch extends SolverBase {
         
         try {
             dataHandler.writeDatFile(outFile, codeStrings);
-            logger.info("Grid search completed for: " + fileName);
-            System.out.println("Grid search completed for: " + fileName);
+            SolverLogger.info("Grid search completed for: " + fileName);
         } catch (IOException e) {
             StringBuilder errorMsg = new StringBuilder("Failed to write output file in GRD mode:\n");
             errorMsg.append("  Output file: ").append(outFile).append("\n");
@@ -173,11 +172,11 @@ public class HypoGridSearch extends SolverBase {
             if (e.getCause() != null) {
                 errorMsg.append("  Caused by: ").append(e.getCause().getMessage()).append("\n");
             }
-            logger.severe(errorMsg.toString());
+            SolverLogger.severe(errorMsg.toString());
             throw new RuntimeException("Failed to write output file: " + outFile, e);
         }
 
-        logger.info(String.format("%s %.3f %.3f %.3f %.3f %.3f %.3f %.3f", 
+        SolverLogger.fine(String.format("%s %.3f %.3f %.3f %.3f %.3f %.3f %.3f", 
             time, lon, lat, dep, elon, elat, edep, res));
     }
 

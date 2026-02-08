@@ -30,6 +30,7 @@ repositories {
     }
 }
 
+// Common dependencies (used by all modes)
 dependencies {
     // Commons Math 3
     implementation 'org.apache.commons:commons-math3:3.6.1'
@@ -37,15 +38,37 @@ dependencies {
     implementation 'com.fasterxml.jackson.core:jackson-databind:2.16.1'
     // seisFile for SAC file support
     implementation 'edu.sc.seis:seisFile:2.0.6'
-    // JFreeChart
-    implementation 'jfree:jfreechart:1.0.13'
-    // JUnit
-    testImplementation 'junit:junit:4.11'
     // TauP
     implementation 'edu.sc.seis:TauP:2.6.1'
     // GeographicLib Java
     implementation 'net.sf.geographiclib:GeographicLib-Java:1.49'
-    // GeoTools dependencies
+    // Lanterna for TUI
+    implementation 'com.googlecode.lanterna:lanterna:3.1.3'
+    // JUnit
+    testImplementation 'junit:junit:4.11'
+}
+
+// GUI-specific dependencies (heavy - GeoTools, Swing, etc.)
+configurations {
+    guiOnly
+}
+
+dependencies {
+    // GUI-only dependencies
+    guiOnly "org.geotools:gt-main:${geotoolsVersion}"
+    guiOnly "org.geotools:gt-api:${geotoolsVersion}"
+    guiOnly "org.geotools:gt-shapefile:${geotoolsVersion}"
+    guiOnly "org.geotools:gt-swing:${geotoolsVersion}"
+    guiOnly "org.geotools:gt-render:${geotoolsVersion}"
+    guiOnly "org.geotools:gt-tile-client:${geotoolsVersion}"
+    guiOnly "org.geotools:gt-grid:${geotoolsVersion}"
+    guiOnly "org.geotools:gt-referencing:${geotoolsVersion}"
+    guiOnly 'org.locationtech.jts:jts-core:1.19.0'
+    guiOnly 'com.formdev:flatlaf:3.2.5'
+    guiOnly 'jfree:jfreechart:1.0.13'
+    
+    // Include GUI dependencies in main configuration for full build
+    // Comment out these lines to build lightweight CLI/TUI-only versions
     implementation "org.geotools:gt-main:${geotoolsVersion}"
     implementation "org.geotools:gt-api:${geotoolsVersion}"
     implementation "org.geotools:gt-shapefile:${geotoolsVersion}"
@@ -54,17 +77,15 @@ dependencies {
     implementation "org.geotools:gt-tile-client:${geotoolsVersion}"
     implementation "org.geotools:gt-grid:${geotoolsVersion}"
     implementation "org.geotools:gt-referencing:${geotoolsVersion}"
-    
-    // JTS for geometry operations
     implementation 'org.locationtech.jts:jts-core:1.19.0'
-    // FlatLaf for modern Look and Feel
     implementation 'com.formdev:flatlaf:3.2.5'
+    implementation 'jfree:jfreechart:1.0.13'
 }
 
 jar {
     manifest {
         attributes(
-                'Main-Class': 'com.treloc.xtreloc.app.gui.XTreLocGUI',
+                'Main-Class': 'com.treloc.xtreloc.app.XTreLoc',
                 'Implementation-Version': project.version
         )
     }
@@ -77,12 +98,12 @@ jar {
     exclude 'META-INF/*.SF'
     exclude 'META-INF/*.DSA'
     exclude 'META-INF/*.RSA'
-    archiveBaseName = 'xTreLoc-GUI'
+    archiveBaseName = 'xTreLoc'
 }
 
 task cliJar(type: Jar) {
     group = 'build'
-    description = 'Creates a CLI-only JAR file'
+    description = 'Creates a CLI-only JAR file (lightweight, excludes GUI dependencies)'
     archiveBaseName = 'xTreLoc-CLI'
     manifest {
         attributes(
@@ -91,10 +112,64 @@ task cliJar(type: Jar) {
         )
     }
     from {
-        configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
+        // Exclude GUI-only dependencies for smaller JAR size
+        def runtimeClasspath = configurations.runtimeClasspath
+        def guiOnlyConfig = configurations.guiOnly
+        runtimeClasspath.filter { dep ->
+            !guiOnlyConfig.contains(dep)
+        }.collect { it.isDirectory() ? it : zipTree(it) }
     }
     from sourceSets.main.output
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    exclude 'META-INF/*.SF'
+    exclude 'META-INF/*.DSA'
+    exclude 'META-INF/*.RSA'
+    // Exclude GUI classes
+    exclude 'com/treloc/xtreloc/app/gui/**'
+    exclude 'com/treloc/xtreloc/app/gui/**'
+}
+
+task tuiJar(type: Jar) {
+    group = 'build'
+    description = 'Creates a TUI-only JAR file (lightweight, excludes GUI dependencies)'
+    archiveBaseName = 'xTreLoc-TUI'
+    manifest {
+        attributes(
+                'Main-Class': 'com.treloc.xtreloc.app.tui.XTreLocTUI',
+                'Implementation-Version': project.version
+        )
+    }
+    from {
+        // Exclude GUI-only dependencies for smaller JAR size
+        def runtimeClasspath = configurations.runtimeClasspath
+        def guiOnlyConfig = configurations.guiOnly
+        runtimeClasspath.filter { dep ->
+            !guiOnlyConfig.contains(dep)
+        }.collect { it.isDirectory() ? it : zipTree(it) }
+    }
+    from sourceSets.main.output
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    exclude 'META-INF/*.SF'
+    exclude 'META-INF/*.DSA'
+    exclude 'META-INF/*.RSA'
+    // Exclude GUI classes
+    exclude 'com/treloc/xtreloc/app/gui/**'
+}
+
+task guiJar(type: Jar) {
+    group = 'build'
+    description = 'Creates a GUI-only JAR file'
+    archiveBaseName = 'xTreLoc-GUI'
+    manifest {
+        attributes(
+                'Main-Class': 'com.treloc.xtreloc.app.gui.XTreLocGUI',
+                'Implementation-Version': project.version
+        )
+    }
+    from {
+        configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
+    }
+    duplicatesStrategy = DuplicatesStrategy.INCLUDE
     exclude 'META-INF/*.SF'
     exclude 'META-INF/*.DSA'
     exclude 'META-INF/*.RSA'
@@ -124,7 +199,7 @@ task javadocJar(type: Jar, dependsOn: javadoc) {
 }
 
 application {
-    mainClass = 'com.treloc.xtreloc.app.gui.XTreLocGUI'
+    mainClass = 'com.treloc.xtreloc.app.XTreLoc'
 }
 
 test {
@@ -138,6 +213,14 @@ task runCLI(type: JavaExec) {
     classpath = sourceSets.main.runtimeClasspath
     mainClass = 'com.treloc.xtreloc.app.cli.XTreLocCLI'
     args = project.hasProperty('cliArgs') ? project.cliArgs.tokenize() : ['--help']
+}
+
+task runTUI(type: JavaExec) {
+    group = 'application'
+    description = 'Run the TUI version of xTreLoc'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'com.treloc.xtreloc.app.tui.XTreLocTUI'
+    args = project.hasProperty('tuiArgs') ? project.tuiArgs.tokenize() : []
 }
 
 task createIcons {
@@ -232,14 +315,14 @@ task createApp(type: Exec) {
             appVersion = "${appVersion}.0"
         }
         
-        // コマンドラインを構築
+        // Build command line
         def cmd = [
             jpackageExec,
             '--type', 'app-image',
             '--input', "${project.buildDir}/libs",
             '--name', appName,
             '--main-jar', "${project.jar.archiveBaseName.get()}-${project.version}.jar",
-            '--main-class', 'com.treloc.xtreloc.app.gui.XTreLocGUI',
+            '--main-class', 'com.treloc.xtreloc.app.XTreLoc',
             '--dest', "${project.buildDir}/dist",
             '--app-version', appVersion,
             '--vendor', 'xTreLoc',
@@ -319,14 +402,14 @@ task createDmg(type: Exec) {
             appVersion = "${appVersion}.0"
         }
         
-        // コマンドラインを構築
+        // Build command line
         def cmd = [
             jpackageExec,
             '--type', 'dmg',
             '--input', "${project.buildDir}/libs",
             '--name', appName,
             '--main-jar', "${project.jar.archiveBaseName.get()}-${project.version}.jar",
-            '--main-class', 'com.treloc.xtreloc.app.gui.XTreLocGUI',
+            '--main-class', 'com.treloc.xtreloc.app.XTreLoc',
             '--dest', "${project.buildDir}/dist",
             '--app-version', appVersion,
             '--vendor', 'xTreLoc',

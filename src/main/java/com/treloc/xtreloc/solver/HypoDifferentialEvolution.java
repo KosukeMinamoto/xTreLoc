@@ -5,6 +5,7 @@ import java.util.logging.Logger;
 import java.util.Random;
 
 import com.treloc.xtreloc.io.AppConfig;
+import com.treloc.xtreloc.util.SolverLogger;
 import com.fasterxml.jackson.databind.JsonNode;
 import edu.sc.seis.TauP.TauModelException;
 
@@ -138,7 +139,7 @@ public class HypoDifferentialEvolution extends SolverBase {
     public void start(String datFile, String outFile) throws TauModelException {
         String fileName = new java.io.File(datFile).getName();
         logger.info("Starting Differential Evolution location for: " + fileName);
-        System.out.println("Starting Differential Evolution location for: " + fileName);
+        SolverLogger.fine("Starting Differential Evolution location for: " + fileName);
         
         Point point;
         try {
@@ -337,7 +338,7 @@ public class HypoDifferentialEvolution extends SolverBase {
         try {
             pointsHandler.writeDatFile(outFile, codeStrings);
             logger.info("Differential Evolution location completed for: " + fileName);
-            System.out.println("Differential Evolution location completed for: " + fileName);
+            SolverLogger.fine("Differential Evolution location completed for: " + fileName);
         } catch (IOException e) {
             StringBuilder errorMsg = new StringBuilder("Failed to write output file in DE mode:\n");
             errorMsg.append("  Output file: ").append(outFile).append("\n");

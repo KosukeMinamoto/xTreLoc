@@ -17,13 +17,22 @@ public final class ConfigLoader {
     }
 
     public ConfigLoader(Path jsonFile) throws IOException {
+        java.io.File file = jsonFile.toFile();
+        if (!file.exists()) {
+            throw new IOException("Configuration file not found: " + jsonFile + 
+                "\nPlease ensure the file exists and the path is correct.");
+        }
+        if (!file.isFile()) {
+            throw new IOException("Configuration path is not a file: " + jsonFile);
+        }
+        
         ObjectMapper mapper = new ObjectMapper();
         // Register Path deserializer module
         com.fasterxml.jackson.databind.module.SimpleModule module = 
             new com.fasterxml.jackson.databind.module.SimpleModule();
         module.addDeserializer(Path.class, new PathDeserializer());
         mapper.registerModule(module);
-        this.config = mapper.readValue(jsonFile.toFile(), AppConfig.class);
+        this.config = mapper.readValue(file, AppConfig.class);
     }
 
     public AppConfig getConfig() {

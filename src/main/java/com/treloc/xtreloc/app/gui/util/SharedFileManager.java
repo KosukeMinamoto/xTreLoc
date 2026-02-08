@@ -5,7 +5,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * 共通ファイル選択を管理するクラス
+ * Class for managing shared file selection
  */
 public class SharedFileManager {
     private static SharedFileManager instance;
@@ -31,7 +31,7 @@ public class SharedFileManager {
     
     public void setStationFile(File file) {
         this.stationFile = file;
-        // 全てのリスナーに通知
+        // Notify all listeners
         for (StationFileListener listener : stationFileListeners) {
             listener.onStationFileChanged(file);
         }
@@ -51,7 +51,7 @@ public class SharedFileManager {
     
     public void setTaupFile(String file) {
         this.taupFile = file;
-        // 全てのリスナーに通知
+        // Notify all listeners
         for (TaupFileListener listener : taupFileListeners) {
             listener.onTaupFileChanged(file);
         }
@@ -66,14 +66,14 @@ public class SharedFileManager {
     }
     
     /**
-     * 観測点ファイル変更のリスナー
+     * Listener for station file changes
      */
     public interface StationFileListener {
         void onStationFileChanged(File file);
     }
     
     /**
-     * 速度構造ファイル変更のリスナー
+     * Listener for velocity structure file changes
      */
     public interface TaupFileListener {
         void onTaupFileChanged(String file);

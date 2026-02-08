@@ -1,6 +1,9 @@
 package com.treloc.xtreloc.app.gui.view;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
 import com.treloc.xtreloc.io.AppConfig;
+import com.treloc.xtreloc.io.PathSerializer;
 import com.treloc.xtreloc.solver.HypoGridSearch;
 import com.treloc.xtreloc.solver.HypoStationPairDiff;
 import com.treloc.xtreloc.solver.SyntheticTest;
@@ -12,7 +15,10 @@ import javax.swing.border.TitledBorder;
 import javax.swing.DefaultComboBoxModel;
 import java.awt.*;
 import java.io.File;
+import java.nio.file.Path;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Logger;
@@ -49,6 +55,7 @@ public class HypocenterLocationPanel extends JPanel {
     private JLabel outputFileLabel;
     private JButton executeButton;
     private JButton cancelButton;
+    private JButton exportJsonButton;
     private JTextArea logArea;
     private JPanel logPanel;
     private JScrollPane logScrollPane;
@@ -119,9 +126,14 @@ public class HypocenterLocationPanel extends JPanel {
     private JPanel parameterPanel;
     private JTable parameterTable;
     private javax.swing.table.DefaultTableModel parameterTableModel;
+    private JButton parameterHelpButton;
     
     private JPanel leftPanel;
     private JPanel inputDataPanel;
+    
+    /** Per-mode parameter cache so that switching back to a mode restores previously entered values. */
+    private final Map<String, Map<String, String>> modeParameterCache = new HashMap<>();
+    private String lastSelectedMode = "GRD";
     
     public HypocenterLocationPanel(MapView mapView) {
         this.mapView = mapView;
@@ -167,28 +179,30 @@ public class HypocenterLocationPanel extends JPanel {
         }
         
         final int PANEL_WIDTH = 450;
+        // 幅はリサイズ可能にするため最大値は指定しない（Integer.MAX_VALUE は BoxLayout で問題を起こすため Short.MAX_VALUE を使用）
+        final int maxWidth = Short.MAX_VALUE;
         
         JPanel modePanel = createModePanel();
         modePanel.setPreferredSize(new Dimension(PANEL_WIDTH, 70));
-        modePanel.setMaximumSize(new Dimension(PANEL_WIDTH, 70));
+        modePanel.setMaximumSize(new Dimension(maxWidth, 70));
         leftPanel.add(modePanel);
         leftPanel.add(Box.createVerticalStrut(5));
         
         inputDataPanel = createInputDataPanel();
         inputDataPanel.setPreferredSize(new Dimension(PANEL_WIDTH, 200));
-        inputDataPanel.setMaximumSize(new Dimension(PANEL_WIDTH, 200));
+        inputDataPanel.setMaximumSize(new Dimension(maxWidth, 200));
         leftPanel.add(inputDataPanel);
         leftPanel.add(Box.createVerticalStrut(5));
         
         JPanel paramPanel = createParameterPanel();
         paramPanel.setPreferredSize(new Dimension(PANEL_WIDTH, 240));
-        paramPanel.setMaximumSize(new Dimension(PANEL_WIDTH, 240));
+        paramPanel.setMaximumSize(new Dimension(maxWidth, 240));
         leftPanel.add(paramPanel);
         leftPanel.add(Box.createVerticalStrut(5));
         
         JPanel outputPanel = createOutputPanel();
         outputPanel.setPreferredSize(new Dimension(PANEL_WIDTH, 120));
-        outputPanel.setMaximumSize(new Dimension(PANEL_WIDTH, 120));
+        outputPanel.setMaximumSize(new Dimension(maxWidth, 120));
         leftPanel.add(outputPanel);
         leftPanel.add(Box.createVerticalStrut(5));
         
@@ -206,8 +220,30 @@ public class HypocenterLocationPanel extends JPanel {
         residualPlotPanel.setPreferredSize(new Dimension(500, 400));
         setupConvergenceCallback();
         
+        // Create convergence log panel with CardLayout to support mode-specific messages
         convergenceLogPanel = new JPanel(new BorderLayout());
-        convergenceLogPanel.add(residualPlotPanel, BorderLayout.CENTER);
+        CardLayout convergenceCardLayout = new CardLayout();
+        JPanel convergenceContentPanel = new JPanel(convergenceCardLayout);
+        convergenceContentPanel.setMinimumSize(new Dimension(300, 250));
+        convergenceContentPanel.setPreferredSize(new Dimension(500, 400));
+        
+        // Add residual plot panel
+        convergenceContentPanel.add(residualPlotPanel, "PLOT");
+        
+        // Create message label for SYN mode
+        convergenceLogCommentLabel = new JLabel(
+            "<html><div style='text-align: left; padding: 20px; color: #333;'>" +
+            "<div style='font-size: 18px; font-weight: bold;'>Convergence log is available only for location modes</div>" +
+            "</div></html>"
+        );
+        convergenceLogCommentLabel.setHorizontalAlignment(SwingConstants.LEFT);
+        convergenceLogCommentLabel.setVerticalAlignment(SwingConstants.CENTER);
+        convergenceLogCommentLabel.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 14));
+        convergenceLogCommentLabel.setMinimumSize(new Dimension(300, 250));
+        convergenceLogCommentLabel.setPreferredSize(new Dimension(500, 400));
+        convergenceContentPanel.add(convergenceLogCommentLabel, "MESSAGE");
+        
+        convergenceLogPanel.add(convergenceContentPanel, BorderLayout.CENTER);
         convergenceLogPanel.setMinimumSize(new Dimension(300, 250));
         convergenceLogPanel.setPreferredSize(new Dimension(500, 400));
         
@@ -230,7 +266,15 @@ public class HypocenterLocationPanel extends JPanel {
         rightTabbedPane = new JTabbedPane();
         rightTabbedPane.addTab("Execution Log", logPanel);
         rightTabbedPane.addTab("Convergence Log", convergenceLogPanel);
-        rightTabbedPane.setSelectedIndex(1);
+        rightTabbedPane.setSelectedIndex(0); // Default to Execution Log
+        
+        // Initialize convergence log display based on initial mode
+        if (modeCombo != null) {
+            String initialMode = getSelectedModeAbbreviation();
+            if (initialMode != null) {
+                updateConvergenceLogForMode(initialMode);
+            }
+        }
         
         rightPanel = new JPanel(new BorderLayout());
         rightPanel.add(rightTabbedPane, BorderLayout.CENTER);
@@ -250,6 +294,7 @@ public class HypocenterLocationPanel extends JPanel {
             String initialMode = getSelectedModeAbbreviation();
             if (initialMode != null) {
                 residualPlotPanel.setMode(initialMode);
+                updateConvergenceLogForMode(initialMode);
             }
         }
     }
@@ -270,6 +315,92 @@ public class HypocenterLocationPanel extends JPanel {
         if (inputDataPanel != null) {
             updateInputDataPanelForMode(mode);
         }
+        updateConvergenceLogForMode(mode);
+    }
+    
+    /**
+     * Updates Convergence Log panel based on selected mode.
+     * For SYN mode, shows available modes message instead of convergence log.
+     * For CLS mode, shows k-distance plot layout.
+     */
+    private void updateConvergenceLogForMode(String mode) {
+        if (rightTabbedPane == null || convergenceLogPanel == null) {
+            return;
+        }
+        
+        boolean isSynMode = "SYN".equals(mode);
+        boolean isClsMode = "CLS".equals(mode);
+        
+        // Enable/disable Convergence Log tab
+        int convergenceLogTabIndex = 1;
+        if (rightTabbedPane.getTabCount() > convergenceLogTabIndex) {
+            rightTabbedPane.setEnabledAt(convergenceLogTabIndex, !isSynMode);
+        }
+        
+        // Update content based on mode
+        if (isSynMode) {
+            // Show message for SYN mode
+            if (convergenceLogCommentLabel != null) {
+                convergenceLogCommentLabel.setText(
+                    "<html><div style='text-align: left; padding: 20px; color: #333;'>" +
+                    "<div style='font-size: 18px; font-weight: bold;'>Convergence log is available only for location modes</div>" +
+                    "</div></html>"
+                );
+            }
+            
+            // Show message instead of plot
+            Component[] components = convergenceLogPanel.getComponents();
+            for (Component comp : components) {
+                if (comp instanceof JPanel) {
+                    LayoutManager layout = ((JPanel) comp).getLayout();
+                    if (layout instanceof CardLayout) {
+                        CardLayout cardLayout = (CardLayout) layout;
+                        cardLayout.show((JPanel) comp, "MESSAGE");
+                        break;
+                    }
+                }
+            }
+        } else if (isClsMode) {
+            // For CLS mode, show k-distance plot layout
+            if (residualPlotPanel != null) {
+                // Switch to k-distance plot view (empty state will be shown until data is available)
+                residualPlotPanel.setMode("CLS");
+            }
+            
+            // Show plot (k-distance will be displayed when clustering is executed)
+            Component[] components = convergenceLogPanel.getComponents();
+            for (Component comp : components) {
+                if (comp instanceof JPanel) {
+                    LayoutManager layout = ((JPanel) comp).getLayout();
+                    if (layout instanceof CardLayout) {
+                        CardLayout cardLayout = (CardLayout) layout;
+                        cardLayout.show((JPanel) comp, "PLOT");
+                        break;
+                    }
+                }
+            }
+        } else {
+            // For other modes, show residual convergence plot
+            if (residualPlotPanel != null) {
+                residualPlotPanel.setMode(mode);
+            }
+            
+            // Show plot
+            Component[] components = convergenceLogPanel.getComponents();
+            for (Component comp : components) {
+                if (comp instanceof JPanel) {
+                    LayoutManager layout = ((JPanel) comp).getLayout();
+                    if (layout instanceof CardLayout) {
+                        CardLayout cardLayout = (CardLayout) layout;
+                        cardLayout.show((JPanel) comp, "PLOT");
+                        break;
+                    }
+                }
+            }
+        }
+        
+        convergenceLogPanel.revalidate();
+        convergenceLogPanel.repaint();
     }
     
     private void updateInputDataPanelForMode(String mode) {
@@ -504,6 +635,12 @@ public class HypocenterLocationPanel extends JPanel {
             if (selected != null) {
                 if ("Select from file...".equals(selected)) {
                     selectTaupFile();
+                    // Reset selection to prevent re-triggering on focus
+                    if (selectedTaupFile != null) {
+                        // Keep the selected file, already set in selectTaupFile()
+                    } else {
+                        taupModelCombo.setSelectedItem("prem");
+                    }
                 } else {
                     com.treloc.xtreloc.app.gui.util.SharedFileManager.getInstance().setTaupFile(selected);
                 }
@@ -665,8 +802,11 @@ public class HypocenterLocationPanel extends JPanel {
         modeCombo.addActionListener(e -> {
             String displayName = (String) modeCombo.getSelectedItem();
             String mode = ModeNameMapper.getAbbreviation(displayName);
+            saveCurrentModeStateToCache(lastSelectedMode);
             updateParameterFields();
             updateLayoutForMode(mode);
+            restoreModeStateFromCache(mode);
+            lastSelectedMode = mode;
             if (residualPlotPanel != null) {
                 residualPlotPanel.setMode(mode);
             }
@@ -680,17 +820,47 @@ public class HypocenterLocationPanel extends JPanel {
         parameterPanel = new JPanel(new BorderLayout());
         Color bgColor = UIManager.getColor("Panel.background");
         parameterPanel.setBackground(bgColor != null ? bgColor : Color.WHITE);
-        parameterPanel.setBorder(BorderFactory.createCompoundBorder(
-            BorderFactory.createLineBorder(new Color(220, 220, 200), 1),
-            BorderFactory.createTitledBorder(
-                BorderFactory.createEmptyBorder(5, 5, 5, 5),
-                "📊 Parameters",
-                javax.swing.border.TitledBorder.LEFT,
-                javax.swing.border.TitledBorder.TOP,
-                new Font(Font.SANS_SERIF, Font.BOLD, 13),
-                new Color(80, 80, 60)
-            )
-        ));
+        
+        // Create title panel with help button
+        JPanel titlePanel = new JPanel(new BorderLayout());
+        titlePanel.setOpaque(false);
+        JLabel titleLabel = new JLabel("📊 Parameters");
+        titleLabel.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 13));
+        titleLabel.setForeground(new Color(80, 80, 60));
+        titlePanel.add(titleLabel, BorderLayout.WEST);
+        
+        // Create help button with icon
+        try {
+            java.net.URL helpImageUrl = HypocenterLocationPanel.class.getResource("/images/help.png");
+            if (helpImageUrl != null) {
+                ImageIcon helpIcon = new ImageIcon(helpImageUrl);
+                // Scale icon to small size
+                Image scaledImage = helpIcon.getImage().getScaledInstance(16, 16, Image.SCALE_SMOOTH);
+                parameterHelpButton = new JButton(new ImageIcon(scaledImage));
+                parameterHelpButton.setPreferredSize(new Dimension(24, 24));
+                parameterHelpButton.setBorderPainted(false);
+                parameterHelpButton.setFocusPainted(false);
+                parameterHelpButton.setOpaque(false);
+                parameterHelpButton.setContentAreaFilled(false);
+                parameterHelpButton.setCursor(new Cursor(Cursor.HAND_CURSOR));
+                parameterHelpButton.addActionListener(e -> showParameterHelpDialog());
+                titlePanel.add(parameterHelpButton, BorderLayout.EAST);
+            }
+        } catch (Exception e) {
+            logger.warning("Failed to load help icon: " + e.getMessage());
+        }
+        
+        // Create border with custom title component
+        javax.swing.border.Border lineBorder = BorderFactory.createLineBorder(new Color(220, 220, 200), 1);
+        javax.swing.border.Border emptyBorder = BorderFactory.createEmptyBorder(5, 5, 5, 5);
+        parameterPanel.setBorder(BorderFactory.createCompoundBorder(lineBorder, emptyBorder));
+        
+        // Add title panel at top
+        JPanel topPanel = new JPanel(new BorderLayout());
+        topPanel.setOpaque(false);
+        topPanel.add(titlePanel, BorderLayout.CENTER);
+        topPanel.setBorder(BorderFactory.createEmptyBorder(3, 5, 3, 5));
+        parameterPanel.add(topPanel, BorderLayout.NORTH);
         
         String[] columnNames = {"Parameter", "Value", "Unit"};
         parameterTableModel = new javax.swing.table.DefaultTableModel(columnNames, 0) {
@@ -818,6 +988,17 @@ public class HypocenterLocationPanel extends JPanel {
         cancelButton.addActionListener(e -> cancelExecution());
         panel.add(cancelButton);
         
+        exportJsonButton = new JButton("Export (Json)");
+        exportJsonButton.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 14));
+        exportJsonButton.setPreferredSize(new Dimension(120, 35));
+        exportJsonButton.setBackground(new Color(70, 130, 180));
+        exportJsonButton.setForeground(Color.WHITE);
+        exportJsonButton.setFocusPainted(false);
+        exportJsonButton.setBorderPainted(false);
+        exportJsonButton.setOpaque(true);
+        exportJsonButton.addActionListener(e -> exportConfigToJson());
+        panel.add(exportJsonButton);
+        
         return panel;
     }
     
@@ -915,6 +1096,7 @@ public class HypocenterLocationPanel extends JPanel {
             "This panel will be displayed when 'Show Convergence Log' is enabled for specific modes (LMO, MCMC, DE, TRD)." +
             "</div></html>"
         );
+        convergenceLogCommentLabel.setName("convergenceLogCommentLabel"); // For easy access
         convergenceLogCommentLabel.setHorizontalAlignment(SwingConstants.CENTER);
         convergenceLogCommentLabel.setVerticalAlignment(SwingConstants.CENTER);
         convergenceLogCommentLabel.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 12));
@@ -1175,8 +1357,14 @@ public class HypocenterLocationPanel extends JPanel {
         fileChooser.setDialogTitle("Select TauP Model File");
         fileChooser.setFileSelectionMode(JFileChooser.FILES_ONLY);
         fileChooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter(
-            "TauP model files (*.taup, *.tvel)", "taup", "tvel"));
+            "TauP model files (*.taup, *.nd)", "taup", "nd"));
         fileChooser.setAcceptAllFileFilterUsed(true);
+        
+        // Set initial directory to $HOME if not already set
+        String homeDir = System.getProperty("user.home");
+        if (homeDir != null && !homeDir.isEmpty()) {
+            fileChooser.setCurrentDirectory(new File(homeDir));
+        }
         
         int result = fileChooser.showOpenDialog(this);
         if (result == JFileChooser.APPROVE_OPTION) {
@@ -1184,14 +1372,25 @@ public class HypocenterLocationPanel extends JPanel {
             String filePath = selectedTaupFile.getAbsolutePath();
             
             DefaultComboBoxModel<String> model = (DefaultComboBoxModel<String>) taupModelCombo.getModel();
-            model.removeElement("Select from file...");
-            model.addElement(filePath);
+            
+            // Check if this file is already in the list
+            boolean alreadyExists = false;
+            for (int i = 0; i < model.getSize(); i++) {
+                if (model.getElementAt(i).equals(filePath)) {
+                    alreadyExists = true;
+                    break;
+                }
+            }
+            
+            // Add the file to the model if it doesn't already exist
+            if (!alreadyExists) {
+                model.addElement(filePath);
+            }
+            
             taupModelCombo.setSelectedItem(filePath);
             
             com.treloc.xtreloc.app.gui.util.SharedFileManager.getInstance().setTaupFile(filePath);
             appendLog("TauP model file selected: " + filePath);
-        } else {
-            taupModelCombo.setSelectedItem("prem");
         }
     }
     
@@ -1319,6 +1518,128 @@ public class HypocenterLocationPanel extends JPanel {
             }
         }
         return "";
+    }
+    
+    /**
+     * Saves the current parameter table, shared fields, and input paths into the per-mode cache for the given mode.
+     */
+    private void saveCurrentModeStateToCache(String mode) {
+        if (mode == null) {
+            return;
+        }
+        Map<String, String> cache = modeParameterCache.computeIfAbsent(mode, k -> new HashMap<>());
+        cache.clear();
+        if (parameterTableModel != null) {
+            for (int i = 0; i < parameterTableModel.getRowCount(); i++) {
+                String name = (String) parameterTableModel.getValueAt(i, 0);
+                if (name == null) continue;
+                int start = name.indexOf('(');
+                int end = name.indexOf(')', start);
+                String key = (start >= 0 && end > start) ? name.substring(start + 1, end).trim() : null;
+                if (key != null && !key.isEmpty()) {
+                    Object value = parameterTableModel.getValueAt(i, 1);
+                    cache.put(key, value != null ? value.toString() : "");
+                }
+            }
+        }
+        if (targetDirField != null) cache.put("targetDir", targetDirField.getText() != null ? targetDirField.getText() : "");
+        if (outputDirField != null) cache.put("outputDir", outputDirField.getText() != null ? outputDirField.getText() : "");
+        if (stationFileField != null) cache.put("stationFile", stationFileField.getText() != null ? stationFileField.getText() : "");
+        if (catalogFileField != null) cache.put("catalogFile", catalogFileField.getText() != null ? catalogFileField.getText() : "");
+    }
+    
+    /**
+     * Restores parameter values and input paths for the given mode from the cache into fields and refreshes the table.
+     */
+    private void restoreModeStateFromCache(String mode) {
+        Map<String, String> cache = modeParameterCache.get(mode);
+        if (cache == null || cache.isEmpty()) {
+            return;
+        }
+        for (Map.Entry<String, String> e : cache.entrySet()) {
+            String k = e.getKey();
+            if ("targetDir".equals(k) || "outputDir".equals(k) || "stationFile".equals(k) || "catalogFile".equals(k)) {
+                continue;
+            }
+            setParameterValue(k, e.getValue());
+        }
+        String v;
+        if ((v = cache.get("targetDir")) != null && targetDirField != null) {
+            targetDirField.setText(v);
+            if (!v.isEmpty()) {
+                File f = new File(v);
+                if (f.exists()) selectedTargetDir = f.isDirectory() ? f : f.getParentFile();
+            }
+        }
+        if ((v = cache.get("outputDir")) != null && outputDirField != null) {
+            outputDirField.setText(v);
+            if (!v.isEmpty()) {
+                File f = new File(v);
+                if (f.exists() && f.isDirectory()) selectedOutputDir = f;
+            }
+        }
+        if ((v = cache.get("stationFile")) != null && stationFileField != null) {
+            stationFileField.setText(v);
+            if (!v.isEmpty()) {
+                File f = new File(v);
+                if (f.exists() && f.isFile()) selectedStationFile = f;
+            }
+        }
+        if ((v = cache.get("catalogFile")) != null && catalogFileField != null) {
+            catalogFileField.setText(v);
+        }
+        updateParameterFields();
+    }
+    
+    /**
+     * Sets a parameter value by key (updates the corresponding field). Used when restoring cached mode state.
+     */
+    private void setParameterValue(String key, String value) {
+        if (key == null || value == null) return;
+        switch (key) {
+            case "numJobs": if (numJobsField != null) numJobsField.setText(value); break;
+            case "threshold": if (thresholdField != null) thresholdField.setText(value); break;
+            case "hypBottom": if (hypBottomField != null) hypBottomField.setText(value); break;
+            case "totalGrids": if (totalGridsField != null) totalGridsField.setText(value); break;
+            case "numFocus": if (numFocusField != null) numFocusField.setText(value); break;
+            case "initialStepBoundFactor": if (lmInitialStepBoundField != null) lmInitialStepBoundField.setText(value); break;
+            case "costRelativeTolerance": if (lmCostRelativeToleranceField != null) lmCostRelativeToleranceField.setText(value); break;
+            case "parRelativeTolerance": if (lmParRelativeToleranceField != null) lmParRelativeToleranceField.setText(value); break;
+            case "orthoTolerance": if (lmOrthoToleranceField != null) lmOrthoToleranceField.setText(value); break;
+            case "maxEvaluations": if (lmMaxEvaluationsField != null) lmMaxEvaluationsField.setText(value); break;
+            case "maxIterations": if (lmMaxIterationsField != null) lmMaxIterationsField.setText(value); break;
+            case "showConvergenceLog": if (showConvergenceLogCheckBox != null) showConvergenceLogCheckBox.setSelected("true".equalsIgnoreCase(value.trim()) || "1".equals(value.trim())); break;
+            case "iterNum": if (trdIterNumField != null) trdIterNumField.setText(value); break;
+            case "distKm": if (trdDistKmField != null) trdDistKmField.setText(value); break;
+            case "dampFact": if (trdDampFactField != null) trdDampFactField.setText(value); break;
+            case "atol": if (lsqrAtolField != null) lsqrAtolField.setText(value); break;
+            case "btol": if (lsqrBtolField != null) lsqrBtolField.setText(value); break;
+            case "conlim": if (lsqrConlimField != null) lsqrConlimField.setText(value); break;
+            case "iter_lim": if (lsqrIterLimField != null) lsqrIterLimField.setText(value); break;
+            case "showLSQR": if (lsqrShowLogCheckBox != null) lsqrShowLogCheckBox.setSelected("true".equalsIgnoreCase(value.trim()) || "1".equals(value.trim())); break;
+            case "calcVar": if (lsqrCalcVarCheckBox != null) lsqrCalcVarCheckBox.setSelected("true".equalsIgnoreCase(value.trim()) || "1".equals(value.trim())); break;
+            case "nSamples": if (nSamplesField != null) nSamplesField.setText(value); break;
+            case "burnIn": if (burnInField != null) burnInField.setText(value); break;
+            case "stepSize": if (stepSizeField != null) stepSizeField.setText(value); break;
+            case "stepSizeDepth": if (stepSizeDepthField != null) stepSizeDepthField.setText(value); break;
+            case "temperature": if (temperatureField != null) temperatureField.setText(value); break;
+            case "populationSize": if (dePopulationSizeField != null) dePopulationSizeField.setText(value); break;
+            case "maxGenerations": if (deMaxGenerationsField != null) deMaxGenerationsField.setText(value); break;
+            case "scalingFactor": if (deScalingFactorField != null) deScalingFactorField.setText(value); break;
+            case "crossoverRate": if (deCrossoverRateField != null) deCrossoverRateField.setText(value); break;
+            case "minPts": if (minPtsField != null) minPtsField.setText(value); break;
+            case "eps": if (epsField != null) epsField.setText(value); break;
+            case "epsPercentile": if (epsPercentileField != null) epsPercentileField.setText(value); break;
+            case "rmsThreshold": if (rmsThresholdField != null) rmsThresholdField.setText(value); break;
+            case "locErrThreshold": if (locErrThresholdField != null) locErrThresholdField.setText(value); break;
+            case "randomSeed": if (randomSeedField != null) randomSeedField.setText(value); break;
+            case "phsErr": if (phsErrField != null) phsErrField.setText(value); break;
+            case "locErr": if (locErrField != null) locErrField.setText(value); break;
+            case "minSelectRate": if (minSelectRateField != null) minSelectRateField.setText(value); break;
+            case "maxSelectRate": if (maxSelectRateField != null) maxSelectRateField.setText(value); break;
+            default:
+                break;
+        }
     }
     
     private void updateExecuteButtonState() {
@@ -1495,57 +1816,43 @@ public class HypocenterLocationPanel extends JPanel {
         }
     }
     
-    private void executeLocation() {
-        if (config == null) {
-            config = new AppConfig();
-        }
+    /**
+     * Builds AppConfig from current UI state (common + current mode solver/modes).
+     * Used by executeLocation() and exportConfigToJson().
+     */
+    private AppConfig buildConfigFromUI() {
+        AppConfig cfg = new AppConfig();
         
         String selectedModel = (String) taupModelCombo.getSelectedItem();
         if (selectedModel != null && !"Select from file...".equals(selectedModel)) {
-            config.taupFile = selectedModel;
+            cfg.taupFile = selectedModel;
         }
-        config.stationFile = selectedStationFile.getAbsolutePath();
+        if (selectedStationFile != null) {
+            cfg.stationFile = selectedStationFile.getAbsolutePath();
+        }
         
         String numJobsStr = getParameterValue("numJobs");
         String thresholdStr = getParameterValue("threshold");
         String hypBottomStr = getParameterValue("hypBottom");
         if (!numJobsStr.isEmpty()) {
-            config.numJobs = Integer.parseInt(numJobsStr);
+            cfg.numJobs = Integer.parseInt(numJobsStr);
         }
         if (!thresholdStr.isEmpty()) {
-            config.threshold = Double.parseDouble(thresholdStr);
+            cfg.threshold = Double.parseDouble(thresholdStr);
         }
         if (!hypBottomStr.isEmpty()) {
-            config.hypBottom = Double.parseDouble(hypBottomStr);
+            cfg.hypBottom = Double.parseDouble(hypBottomStr);
         }
         
         String selectedMode = getSelectedModeAbbreviation();
-        
-        if (residualPlotPanel != null) {
-            residualPlotPanel.setMode(selectedMode);
-            residualPlotPanel.clearData();
-        }
-        
-        if ("SYN".equals(selectedMode)) {
-            executeSyntheticTest();
-            return;
-        }
-        
-        if ("CLS".equals(selectedMode)) {
-            executeClustering();
-            return;
-        }
-        
-        if (config.solver == null) {
-            config.solver = new java.util.HashMap<>();
-        }
-        
-        if (config.modes == null) {
-            config.modes = new java.util.HashMap<>();
-        }
+        cfg.solver = new java.util.HashMap<>();
+        cfg.modes = new java.util.HashMap<>();
         
         if ("GRD".equals(selectedMode)) {
-            var grdSolver = config.solver.computeIfAbsent("GRD", k -> 
+            var grdMode = cfg.modes.computeIfAbsent("GRD", k -> new AppConfig.ModeConfig());
+            if (selectedTargetDir != null) grdMode.datDirectory = selectedTargetDir.toPath();
+            if (selectedOutputDir != null) grdMode.outDirectory = selectedOutputDir.toPath();
+            var grdSolver = cfg.solver.computeIfAbsent("GRD", k -> 
                 new com.fasterxml.jackson.databind.node.ObjectNode(
                     com.fasterxml.jackson.databind.node.JsonNodeFactory.instance));
             if (grdSolver instanceof com.fasterxml.jackson.databind.node.ObjectNode) {
@@ -1561,7 +1868,10 @@ public class HypocenterLocationPanel extends JPanel {
                 }
             }
         } else if ("LMO".equals(selectedMode)) {
-            var lmoSolver = config.solver.computeIfAbsent("LMO", k -> 
+            var lmoMode = cfg.modes.computeIfAbsent("LMO", k -> new AppConfig.ModeConfig());
+            if (selectedTargetDir != null) lmoMode.datDirectory = selectedTargetDir.toPath();
+            if (selectedOutputDir != null) lmoMode.outDirectory = selectedOutputDir.toPath();
+            var lmoSolver = cfg.solver.computeIfAbsent("LMO", k -> 
                 new com.fasterxml.jackson.databind.node.ObjectNode(
                     com.fasterxml.jackson.databind.node.JsonNodeFactory.instance));
             if (lmoSolver instanceof com.fasterxml.jackson.databind.node.ObjectNode) {
@@ -1629,7 +1939,7 @@ public class HypocenterLocationPanel extends JPanel {
                 }
             }
         } else if ("TRD".equals(selectedMode)) {
-            var trdMode = config.modes.computeIfAbsent("TRD", k -> new AppConfig.ModeConfig());
+            var trdMode = cfg.modes.computeIfAbsent("TRD", k -> new AppConfig.ModeConfig());
             
             File catalogFile = getCatalogFileFromField();
             if (catalogFile != null && catalogFile.exists()) {
@@ -1644,7 +1954,7 @@ public class HypocenterLocationPanel extends JPanel {
                 trdMode.outDirectory = selectedOutputDir.toPath();
             }
             
-            var trdSolver = config.solver.computeIfAbsent("TRD", k -> 
+            var trdSolver = cfg.solver.computeIfAbsent("TRD", k -> 
                 new com.fasterxml.jackson.databind.node.ObjectNode(
                     com.fasterxml.jackson.databind.node.JsonNodeFactory.instance));
             if (trdSolver instanceof com.fasterxml.jackson.databind.node.ObjectNode) {
@@ -1739,7 +2049,10 @@ public class HypocenterLocationPanel extends JPanel {
                 }
             }
         } else if ("MCMC".equals(selectedMode)) {
-            var mcmcSolver = config.solver.computeIfAbsent("MCMC", k -> 
+            var mcmcMode = cfg.modes.computeIfAbsent("MCMC", k -> new AppConfig.ModeConfig());
+            if (selectedTargetDir != null) mcmcMode.datDirectory = selectedTargetDir.toPath();
+            if (selectedOutputDir != null) mcmcMode.outDirectory = selectedOutputDir.toPath();
+            var mcmcSolver = cfg.solver.computeIfAbsent("MCMC", k -> 
                 new com.fasterxml.jackson.databind.node.ObjectNode(
                     com.fasterxml.jackson.databind.node.JsonNodeFactory.instance));
             if (mcmcSolver instanceof com.fasterxml.jackson.databind.node.ObjectNode) {
@@ -1781,7 +2094,10 @@ public class HypocenterLocationPanel extends JPanel {
                 }
             }
         } else if ("DE".equals(selectedMode)) {
-            var deSolver = config.solver.computeIfAbsent("DE", k ->
+            var deMode = cfg.modes.computeIfAbsent("DE", k -> new AppConfig.ModeConfig());
+            if (selectedTargetDir != null) deMode.datDirectory = selectedTargetDir.toPath();
+            if (selectedOutputDir != null) deMode.outDirectory = selectedOutputDir.toPath();
+            var deSolver = cfg.solver.computeIfAbsent("DE", k ->
                 new com.fasterxml.jackson.databind.node.ObjectNode(
                     com.fasterxml.jackson.databind.node.JsonNodeFactory.instance));
             if (deSolver instanceof com.fasterxml.jackson.databind.node.ObjectNode) {
@@ -1817,6 +2133,28 @@ public class HypocenterLocationPanel extends JPanel {
                     showConvergenceLogCheckBox.setSelected(showConvergenceLog);
                 }
             }
+        }
+        
+        return cfg;
+    }
+    
+    private void executeLocation() {
+        config = buildConfigFromUI();
+        String selectedMode = getSelectedModeAbbreviation();
+        
+        if (residualPlotPanel != null) {
+            residualPlotPanel.setMode(selectedMode);
+            residualPlotPanel.clearData();
+        }
+        
+        if ("SYN".equals(selectedMode)) {
+            executeSyntheticTest();
+            return;
+        }
+        
+        if ("CLS".equals(selectedMode)) {
+            executeClustering();
+            return;
         }
         
         if (selectedOutputDir == null) {
@@ -2781,6 +3119,50 @@ public class HypocenterLocationPanel extends JPanel {
     }
     
     /**
+     * Exports current solver settings to a JSON file.
+     */
+    private void exportConfigToJson() {
+        try {
+            AppConfig cfg = buildConfigFromUI();
+            
+            JFileChooser chooser = new JFileChooser();
+            chooser.setDialogTitle("Export Configuration (JSON)");
+            chooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter("JSON files (*.json)", "json"));
+            chooser.setSelectedFile(new File("config.json"));
+            
+            if (chooser.showSaveDialog(this) != JFileChooser.APPROVE_OPTION) {
+                return;
+            }
+            
+            File file = chooser.getSelectedFile();
+            if (file == null) return;
+            String path = file.getAbsolutePath();
+            if (!path.endsWith(".json")) {
+                path = path + ".json";
+                file = new File(path);
+            }
+            
+            ObjectMapper mapper = new ObjectMapper();
+            mapper.enable(SerializationFeature.INDENT_OUTPUT);
+            com.fasterxml.jackson.databind.module.SimpleModule module = new com.fasterxml.jackson.databind.module.SimpleModule();
+            module.addSerializer(Path.class, new PathSerializer());
+            mapper.registerModule(module);
+            
+            mapper.writeValue(file, cfg);
+            appendLog("Configuration exported to: " + path);
+            JOptionPane.showMessageDialog(this,
+                "Configuration exported successfully to:\n" + path,
+                "Export (Json)", JOptionPane.INFORMATION_MESSAGE);
+        } catch (Exception e) {
+            logger.warning("Failed to export config: " + e.getMessage());
+            appendLog("ERROR: Failed to export configuration: " + e.getMessage());
+            JOptionPane.showMessageDialog(this,
+                "Failed to export configuration:\n" + e.getMessage(),
+                "Export Error", JOptionPane.ERROR_MESSAGE);
+        }
+    }
+    
+    /**
      * Loads hypocenter data from a dat file.
      * 
      * <p>The dat file format consists of two lines:
@@ -2870,7 +3252,7 @@ public class HypocenterLocationPanel extends JPanel {
     public void setConfig(AppConfig config) {
         this.config = config;
         if (config != null) {
-            // 共通パラメータ
+            // Common parameters
             thresholdField.setText(String.valueOf(config.threshold));
             hypBottomField.setText(String.valueOf(config.hypBottom));
             
@@ -2881,7 +3263,7 @@ public class HypocenterLocationPanel extends JPanel {
                 com.treloc.xtreloc.app.gui.util.SharedFileManager.getInstance().setTaupFile(config.taupFile);
             }
             
-            // モード固有パラメータ
+            // Mode-specific parameters
             if (config.solver != null) {
                 if (config.solver.containsKey("GRD")) {
                     var grdSolver = config.solver.get("GRD");
@@ -3024,6 +3406,219 @@ public class HypocenterLocationPanel extends JPanel {
                     }
                 }
             }
+        }
+    }
+    
+    /**
+     * Show parameter help dialog for the selected mode
+     */
+    private void showParameterHelpDialog() {
+        String mode = getSelectedModeAbbreviation();
+        String title = "Parameter Help - " + mode + " Mode";
+        String helpText = getParameterHelpText(mode);
+        
+        JDialog helpDialog = new JDialog((Frame) SwingUtilities.getWindowAncestor(this), title, true);
+        helpDialog.setDefaultCloseOperation(JDialog.DISPOSE_ON_CLOSE);
+        helpDialog.setSize(600, 500);
+        helpDialog.setLocationRelativeTo(this);
+        
+        JPanel contentPanel = new JPanel(new BorderLayout());
+        contentPanel.setBorder(BorderFactory.createEmptyBorder(10, 10, 10, 10));
+        
+        JTextArea textArea = new JTextArea();
+        textArea.setText(helpText);
+        textArea.setEditable(false);
+        textArea.setLineWrap(true);
+        textArea.setWrapStyleWord(true);
+        textArea.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 12));
+        textArea.setMargin(new Insets(10, 10, 10, 10));
+        
+        JScrollPane scrollPane = new JScrollPane(textArea);
+        contentPanel.add(scrollPane, BorderLayout.CENTER);
+        
+        JButton closeButton = new JButton("Close");
+        closeButton.addActionListener(e -> helpDialog.dispose());
+        JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.CENTER));
+        buttonPanel.add(closeButton);
+        contentPanel.add(buttonPanel, BorderLayout.SOUTH);
+        
+        helpDialog.setContentPane(contentPanel);
+        helpDialog.setVisible(true);
+    }
+    
+    /**
+     * Get parameter help text for the specified mode
+     */
+    private String getParameterHelpText(String mode) {
+        switch (mode.toUpperCase()) {
+            case "GRD":
+                return "Grid Search Location (GRD) Parameters\n" +
+                    "=========================================\n\n" +
+                    "Common Parameters:\n" +
+                    "- numJobs: Number of parallel jobs (threads) for processing.\n" +
+                    "  Default: 4. Increase for faster processing on multi-core systems.\n\n" +
+                    "- threshold: Weight threshold for filtering data.\n" +
+                    "  Default: 0.0 (no filtering). Use to exclude low-weight data.\n\n" +
+                    "- hypBottom: Maximum depth for hypocenter location (km).\n" +
+                    "  Default: 100.0 km.\n\n" +
+                    "GRD-Specific Parameters:\n" +
+                    "- totalGrids: Total number of grid points to search.\n" +
+                    "  Default: 300. More grids = finer resolution but slower.\n\n" +
+                    "- numFocus: Number of focus iterations.\n" +
+                    "  Default: 3. Higher values = more iterations, better convergence.\n\n" +
+                    "Algorithm Description:\n" +
+                    "Grid search exhaustively evaluates all grid points and iteratively\n" +
+                    "refines the search area around the best solution.";
+                    
+            case "LMO":
+                return "Levenberg-Marquardt Optimization (LMO) Parameters\n" +
+                    "=====================================================\n\n" +
+                    "Common Parameters:\n" +
+                    "- numJobs: Number of parallel jobs (threads) for processing.\n" +
+                    "  Default: 4.\n\n" +
+                    "- threshold: Weight threshold for filtering data.\n" +
+                    "  Default: 0.0 (no filtering).\n\n" +
+                    "- hypBottom: Maximum depth for hypocenter location (km).\n" +
+                    "  Default: 100.0 km.\n\n" +
+                    "LMO-Specific Parameters:\n" +
+                    "- initialStepBoundFactor: Initial step bound multiplier.\n" +
+                    "  Default: 100. Controls initial step size in optimization.\n\n" +
+                    "- costRelativeTolerance: Relative tolerance for cost function.\n" +
+                    "  Default: 1e-6. Smaller values = higher precision, slower.\n\n" +
+                    "- parRelativeTolerance: Relative tolerance for parameters.\n" +
+                    "  Default: 1e-6.\n\n" +
+                    "Algorithm Description:\n" +
+                    "Levenberg-Marquardt is a hybrid method combining gradient descent\n" +
+                    "and Gauss-Newton approaches for efficient non-linear optimization.";
+                    
+            case "MCMC":
+                return "Markov Chain Monte Carlo (MCMC) Parameters\n" +
+                    "============================================\n\n" +
+                    "Common Parameters:\n" +
+                    "- numJobs: Number of parallel jobs (threads) for processing.\n" +
+                    "  Default: 4.\n\n" +
+                    "- threshold: Weight threshold for filtering data.\n" +
+                    "  Default: 0.0 (no filtering).\n\n" +
+                    "- hypBottom: Maximum depth for hypocenter location (km).\n" +
+                    "  Default: 100.0 km.\n\n" +
+                    "MCMC-Specific Parameters:\n" +
+                    "- nSamples: Number of MCMC samples to generate.\n" +
+                    "  Default: 10000. More samples = better statistics, slower.\n\n" +
+                    "- burnIn: Number of burn-in samples to discard.\n" +
+                    "  Default: 2000. Typically ~20% of nSamples.\n\n" +
+                    "- stepSize: Step size for lateral parameter perturbation.\n" +
+                    "  Default: 0.1. Larger = faster exploration, lower acceptance.\n\n" +
+                    "- stepSizeDepth: Step size for depth parameter perturbation.\n" +
+                    "  Default: 1.0 km.\n\n" +
+                    "- temperature: Temperature parameter for acceptance probability.\n" +
+                    "  Default: 1.0. Lower values = stricter acceptance.\n\n" +
+                    "Algorithm Description:\n" +
+                    "MCMC provides probabilistic uncertainty estimates for hypocenter\n" +
+                    "location through Bayesian sampling.";
+                    
+            case "DE":
+                return "Differential Evolution (DE) Parameters\n" +
+                    "=====================================\n\n" +
+                    "Common Parameters:\n" +
+                    "- numJobs: Number of parallel jobs (threads) for processing.\n" +
+                    "  Default: 4.\n\n" +
+                    "- threshold: Weight threshold for filtering data.\n" +
+                    "  Default: 0.0 (no filtering).\n\n" +
+                    "- hypBottom: Maximum depth for hypocenter location (km).\n" +
+                    "  Default: 100.0 km.\n\n" +
+                    "DE-Specific Parameters:\n" +
+                    "- populationSize: Size of the population in each generation.\n" +
+                    "  Default: 20. Larger population = better exploration, slower.\n\n" +
+                    "- iterationNumber: Maximum number of iterations.\n" +
+                    "  Default: 100. More iterations = better convergence, slower.\n\n" +
+                    "- mutationFactor: Mutation scaling factor (F parameter).\n" +
+                    "  Default: 0.8. Range: [0.0, 2.0]. Controls mutation strength.\n\n" +
+                    "- crossoverProbability: Crossover probability (CR parameter).\n" +
+                    "  Default: 0.9. Range: [0.0, 1.0]. Higher = more mixing.\n\n" +
+                    "Algorithm Description:\n" +
+                    "Differential Evolution is a population-based stochastic optimization\n" +
+                    "algorithm that evolves a population of candidate solutions through\n" +
+                    "mutation, crossover, and selection operations. It is effective for\n" +
+                    "non-linear optimization with multiple local minima.\n\n" +
+                    "Key Features:\n" +
+                    "- Global search capability\n" +
+                    "- Population-based (explores multiple solutions in parallel)\n" +
+                    "- Few tunable parameters\n" +
+                    "- Good for hypocenter location without gradient information";
+
+                    
+            case "TRD":
+                return "Triple Difference Relocation (TRD) Parameters\n" +
+                    "==============================================\n\n" +
+                    "Common Parameters:\n" +
+                    "- threshold: Weight threshold for filtering data.\n" +
+                    "  Default: 0.0 (no filtering).\n\n" +
+                    "TRD-Specific Parameters:\n" +
+                    "- iterNum: Number of iterations (comma-separated for stages).\n" +
+                    "  Default: 10,10. Format: stage1,stage2,...\n\n" +
+                    "- distKm: Distance thresholds in km (comma-separated).\n" +
+                    "  Default: 50,20. Defines event pair distance criteria.\n\n" +
+                    "- dampFact: Damping factors (comma-separated).\n" +
+                    "  Default: 0,1. Controls smoothing in iterative inversion.\n\n" +
+                    "LSQR Parameters (Linear Least Squares Solver):\n" +
+                    "- atol: Absolute tolerance.\n" +
+                    "  Default: 1e-6.\n\n" +
+                    "- btol: Tolerance for Ax=b consistency.\n" +
+                    "  Default: 1e-6.\n\n" +
+                    "- conlim: Condition limit for matrix conditioning.\n" +
+                    "  Default: 1e8.\n\n" +
+                    "Algorithm Description:\n" +
+                    "Triple difference relocation improves relative earthquake locations\n" +
+                    "by using differential measurements between event pairs.";
+                    
+            case "CLS":
+                return "Spatial Clustering (CLS) Parameters\n" +
+                    "====================================\n\n" +
+                    "CLS-Specific Parameters:\n" +
+                    "- minPts: Minimum number of points for core cluster.\n" +
+                    "  Default: 4. Affects cluster formation threshold.\n\n" +
+                    "- eps: Neighborhood distance threshold (km).\n" +
+                    "  Default: -1.0. Use negative value for automatic calculation.\n\n" +
+                    "- epsPercentile: Percentile for automatic eps calculation.\n" +
+                    "  Default: empty (auto).\n\n" +
+                    "- rmsThreshold: RMS threshold for cluster quality.\n" +
+                    "  Default: empty (no filtering).\n\n" +
+                    "- locErrThreshold: Location error threshold for filtering.\n" +
+                    "  Default: empty (no filtering).\n\n" +
+                    "Algorithm Description:\n" +
+                    "Clustering groups earthquakes based on spatial proximity.\n" +
+                    "Uses DBSCAN-like algorithm for density-based clustering.\n" +
+                    "Useful for identifying earthquake families and mainshock-aftershock\n" +
+                    "sequences.";
+                    
+            case "SYN":
+                return "Synthetic Test Generation (SYN) Parameters\n" +
+                    "==========================================\n\n" +
+                    "SYN-Specific Parameters:\n" +
+                    "- randomSeed: Random seed for reproducibility.\n" +
+                    "  Default: 100. Same seed = same synthetic data.\n\n" +
+                    "- phsErr: Phase pick error (seconds).\n" +
+                    "  Default: 0.1 sec. Simulates measurement uncertainty.\n\n" +
+                    "- locErr: Location error (degrees).\n" +
+                    "  Default: 0.03 deg. Initial hypocenter perturbation.\n\n" +
+                    "- minSelectRate: Minimum rate of station selection.\n" +
+                    "  Default: 0.2 (20%). Percentage of stations to use.\n\n" +
+                    "- maxSelectRate: Maximum rate of station selection.\n" +
+                    "  Default: 0.4 (40%).\n\n" +
+                    "Algorithm Description:\n" +
+                    "Generates synthetic earthquake data for testing location algorithms.\n" +
+                    "Creates perturbed catalogs to evaluate algorithm robustness and\n" +
+                    "accuracy under known conditions.\n\n" +
+                    "Workflow:\n" +
+                    "1. Load catalog with known hypocenters\n" +
+                    "2. Add random noise to simulate picking errors\n" +
+                    "3. Randomly select subset of stations\n" +
+                    "4. Output as synthetic test data";
+                    
+            default:
+                return "Parameter Help\n" +
+                    "===============\n\n" +
+                    "Select a location mode to view mode-specific parameter information.";
         }
     }
 }

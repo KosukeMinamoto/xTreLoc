@@ -11,6 +11,7 @@ import java.util.stream.IntStream;
 import com.treloc.xtreloc.app.gui.model.Hypocenter;
 import com.treloc.xtreloc.app.gui.service.CatalogLoader;
 import com.treloc.xtreloc.io.AppConfig;
+import com.treloc.xtreloc.util.SolverLogger;
 
 import edu.sc.seis.TauP.TauModelException;
 
@@ -115,16 +116,15 @@ public class SyntheticTest extends SolverBase {
         List<Point> points = loadPointsFromCatalog(catalogFile);
         int total = points.size();
         logger.info(String.format("Generating synthetic data for %d events", total));
-        System.out.println(String.format("Generating synthetic data for %d events...", total));
+        SolverLogger.fine(String.format("Generating synthetic data for %d events...", total));
         
         for (int i = 0; i < points.size(); i++) {
             Point point = points.get(i);
             generateData(point, minSelectRate, maxSelectRate);
             printProgressBar(i + 1, total, point.getTime());
         }
-        System.out.println();
         logger.info(String.format("Synthetic data generation completed: %d events", total));
-        System.out.println(String.format("Synthetic data generation completed: %d events", total));
+        SolverLogger.fine(String.format("Synthetic data generation completed: %d events", total));
     }
     
     private void printProgressBar(int current, int total, String eventTime) {
@@ -146,7 +146,7 @@ public class SyntheticTest extends SolverBase {
         String progressMsg = String.format("%s %d/%d (%d%%) - %s", 
             bar.toString(), current, total, percent, eventTime);
         logger.info(progressMsg);
-        System.out.print("\r" + progressMsg);
+        SolverLogger.fine(progressMsg);
     }
 
     /**

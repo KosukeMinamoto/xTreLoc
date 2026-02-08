@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.util.logging.Logger;
 
 import com.treloc.xtreloc.io.AppConfig;
+import com.treloc.xtreloc.util.SolverLogger;
 import com.fasterxml.jackson.databind.JsonNode;
 import edu.sc.seis.TauP.TauModelException;
 
@@ -78,7 +79,7 @@ public class HypoMCMC extends SolverBase {
     public void start(String datFile, String outFile) throws TauModelException {
         String fileName = new java.io.File(datFile).getName();
         logger.info("Starting MCMC location for: " + fileName);
-        System.out.println("Starting MCMC location for: " + fileName);
+        SolverLogger.fine("Starting MCMC location for: " + fileName);
         
         Point point;
         try {
@@ -157,8 +158,11 @@ public class HypoMCMC extends SolverBase {
             
             // Report convergence information
             if (convergenceCallback != null) {
-                // Calculate residual from likelihood (simplified)
-                double residual = Math.sqrt(-currentLikelihood);
+                // Residual from likelihood (may be negative in principle; only sanitize NaN/Infinite)
+                double residual = currentLikelihood <= 0 ? Math.sqrt(-currentLikelihood) : Double.NaN;
+                if (!Double.isFinite(residual)) {
+                    residual = 0.0;
+                }
                 convergenceCallback.onResidualUpdate(i, residual);
                 convergenceCallback.onLikelihoodUpdate(i, currentLikelihood);
             }
@@ -247,7 +251,7 @@ public class HypoMCMC extends SolverBase {
         try {
             pointsHandler.writeDatFile(outFile, codeStrings);
             logger.info("MCMC location completed for: " + fileName);
-            System.out.println("MCMC location completed for: " + fileName);
+            SolverLogger.fine("MCMC location completed for: " + fileName);
         } catch (IOException e) {
             StringBuilder errorMsg = new StringBuilder("Failed to write output file in MCMC mode:\n");
             errorMsg.append("  Output file: ").append(outFile).append("\n");

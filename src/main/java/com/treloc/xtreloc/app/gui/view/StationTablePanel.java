@@ -14,112 +14,193 @@ import java.util.List;
 import java.util.Scanner;
 
 public class StationTablePanel extends JPanel {
-    private JTable table;
-    private DefaultTableModel tableModel;
+    private JTable stationListTable;
+    private DefaultTableModel stationListModel;
+    
+    private JTable dataTable;
+    private DefaultTableModel dataTableModel;
+    
     private JLabel statusLabel;
     private StationRepository stationRepository;
-    private List<Station> stations;
     private MapView mapView;
+    
+    private java.util.List<StationFileInfo> stationFileInfos = new java.util.ArrayList<>();
+    private java.util.Map<StationFileInfo, File> stationFiles = new java.util.HashMap<>();
+    private java.util.Map<StationFileInfo, List<Station>> stationData = new java.util.HashMap<>();
+    
+    private JButton removeButton;
+    
+    // Debounce timer for row selection to prevent UI freezing
+    private javax.swing.Timer selectionDebounceTimer;
+    
+    /**
+     * Station file information holder
+     */
+    private static class StationFileInfo {
+        String fileName;
+        int stationCount;
+        
+        StationFileInfo(String fileName, int stationCount) {
+            this.fileName = fileName;
+            this.stationCount = stationCount;
+        }
+    }
 
     public StationTablePanel(MapView mapView) {
         this.mapView = mapView;
         setLayout(new BorderLayout());
         setBorder(BorderFactory.createTitledBorder("Station Data"));
 
-        String[] columnNames = {"Code", "Latitude", "Longitude", "Depth (km)", "P Correction", "S Correction"};
-        tableModel = new DefaultTableModel(columnNames, 0) {
+        JSplitPane splitPane = new JSplitPane(JSplitPane.VERTICAL_SPLIT);
+        splitPane.setResizeWeight(0.3);
+        
+        // Top: Station file list
+        String[] stationListColumnNames = {"Name", "Count", "File"};
+        stationListModel = new DefaultTableModel(stationListColumnNames, 0) {
             @Override
             public boolean isCellEditable(int row, int column) {
-                return false; // 読み取り専用
+                return false;
             }
         };
-        table = new JTable(tableModel);
-        table.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
-        table.setColumnSelectionAllowed(true); // 列選択を有効化
-        table.setCellSelectionEnabled(true); // セル選択を有効化
-        table.setAutoResizeMode(JTable.AUTO_RESIZE_ALL_COLUMNS);
-        table.setFillsViewportHeight(true);
+        stationListTable = new JTable(stationListModel);
+        stationListTable.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+        stationListTable.setRowHeight(20);
+        stationListTable.getTableHeader().setReorderingAllowed(false);
         
-        // テーブルの見た目を改善
-        table.setRowHeight(20);
-        table.getTableHeader().setReorderingAllowed(false);
+        stationListTable.getSelectionModel().addListSelectionListener(e -> {
+            if (!e.getValueIsAdjusting()) {
+                int selectedRow = stationListTable.getSelectedRow();
+                if (selectedRow >= 0 && selectedRow < stationFileInfos.size()) {
+                    StationFileInfo selectedFile = stationFileInfos.get(selectedRow);
+                    displayStationData(selectedFile);
+                }
+            }
+        });
         
-        // 列ヘッダークリックイベントリスナーを追加
-        table.getTableHeader().addMouseListener(new java.awt.event.MouseAdapter() {
+        JScrollPane stationListScrollPane = new JScrollPane(stationListTable);
+        stationListScrollPane.setPreferredSize(new Dimension(500, 100));
+        splitPane.setTopComponent(stationListScrollPane);
+        
+        // Bottom: Data display table
+        String[] dataColumnNames = {"Code", "Latitude", "Longitude", "Depth (km)", "P Correction", "S Correction"};
+        dataTableModel = new DefaultTableModel(dataColumnNames, 0) {
+            @Override
+            public boolean isCellEditable(int row, int column) {
+                return false;
+            }
+        };
+        dataTable = new JTable(dataTableModel);
+        dataTable.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+        dataTable.setColumnSelectionAllowed(true);
+        dataTable.setCellSelectionEnabled(true);
+        dataTable.setAutoResizeMode(JTable.AUTO_RESIZE_ALL_COLUMNS);
+        dataTable.setFillsViewportHeight(true);
+        dataTable.setRowHeight(20);
+        dataTable.getTableHeader().setReorderingAllowed(false);
+        
+        dataTable.getTableHeader().addMouseListener(new java.awt.event.MouseAdapter() {
             @Override
             public void mouseClicked(java.awt.event.MouseEvent e) {
-                int columnIndex = table.columnAtPoint(e.getPoint());
+                int columnIndex = dataTable.columnAtPoint(e.getPoint());
                 if (columnIndex >= 0) {
-                    // 列全体を選択
-                    table.clearSelection();
-                    table.setColumnSelectionInterval(columnIndex, columnIndex);
-                    // 列選択処理を実行
-                    if (stations != null && !stations.isEmpty()) {
-                        handleColumnSelection(columnIndex);
-                    }
+                    dataTable.clearSelection();
+                    dataTable.setColumnSelectionInterval(columnIndex, columnIndex);
+                    handleColumnSelection(columnIndex);
                 }
             }
         });
         
-        // 行選択イベントリスナーを追加
-        table.getSelectionModel().addListSelectionListener(new ListSelectionListener() {
+        // Initialize debounce timer for row selection
+        selectionDebounceTimer = new javax.swing.Timer(100, e -> {
+            // This will be set in the listener
+        });
+        selectionDebounceTimer.setRepeats(false);
+        
+        dataTable.getSelectionModel().addListSelectionListener(new ListSelectionListener() {
             @Override
             public void valueChanged(ListSelectionEvent e) {
                 if (!e.getValueIsAdjusting()) {
-                    int selectedRow = table.getSelectedRow();
+                    // Cancel previous timer
+                    selectionDebounceTimer.stop();
                     
-                    // 行選択の場合
-                    if (selectedRow >= 0 && selectedRow < stations.size() && mapView != null) {
-                        Station s = stations.get(selectedRow);
-                        try {
-                            mapView.highlightPoint(s.getLon(), s.getLat(), "station", null, null);
-                        } catch (Exception ex) {
+                    // Get selected rows
+                    final int selectedRow = dataTable.getSelectedRow();
+                    final int listRow = stationListTable.getSelectedRow();
+                    
+                    // Set up debounced action
+                    selectionDebounceTimer = new javax.swing.Timer(50, evt -> {
+                        // Execute map update asynchronously to prevent UI freezing
+                        SwingUtilities.invokeLater(() -> {
+                            if (selectedRow >= 0 && listRow >= 0 && listRow < stationFileInfos.size() && mapView != null) {
+                                StationFileInfo selectedFile = stationFileInfos.get(listRow);
+                                List<Station> stationList = stationData.get(selectedFile);
+                                
+                                if (stationList != null && selectedRow < stationList.size()) {
+                                    Station s = stationList.get(selectedRow);
+                                    try {
+                                        mapView.highlightPoint(s.getLon(), s.getLat(), "station", null, null);
+                                    } catch (Exception ex) {
+                                    }
+                                }
+                            } else if (mapView != null) {
+                                mapView.clearHighlight();
+                            }
+                        });
+                    });
+                    selectionDebounceTimer.setRepeats(false);
+                    selectionDebounceTimer.start();
+                }
+            }
+        });
+        
+        dataTable.getColumnModel().getSelectionModel().addListSelectionListener(new ListSelectionListener() {
+            @Override
+            public void valueChanged(ListSelectionEvent e) {
+                if (!e.getValueIsAdjusting()) {
+                    int selectedColumn = dataTable.getSelectedColumn();
+                    int listRow = stationListTable.getSelectedRow();
+                    
+                    if (selectedColumn >= 0 && listRow >= 0 && listRow < stationFileInfos.size()) {
+                        StationFileInfo selectedFile = stationFileInfos.get(listRow);
+                        List<Station> stationList = stationData.get(selectedFile);
+                        if (stationList != null && !stationList.isEmpty()) {
+                            handleColumnSelection(selectedColumn);
                         }
-                    } else if (mapView != null) {
-                        mapView.clearHighlight();
                     }
                 }
             }
         });
         
-        // 列選択イベントリスナーを追加
-        table.getColumnModel().getSelectionModel().addListSelectionListener(new ListSelectionListener() {
-            @Override
-            public void valueChanged(ListSelectionEvent e) {
-                if (!e.getValueIsAdjusting()) {
-                    int selectedColumn = table.getSelectedColumn();
-                    
-                    // 列選択の場合（数値列のみ）
-                    if (selectedColumn >= 0 && stations != null && !stations.isEmpty()) {
-                        handleColumnSelection(selectedColumn);
-                    }
-                }
-            }
-        });
+        JScrollPane dataScrollPane = new JScrollPane(dataTable);
+        dataScrollPane.setPreferredSize(new Dimension(500, 300));
+        splitPane.setBottomComponent(dataScrollPane);
         
-        // スクロールペインに追加
-        JScrollPane scrollPane = new JScrollPane(table);
-        scrollPane.setPreferredSize(new Dimension(500, 300));
-        add(scrollPane, BorderLayout.CENTER);
+        add(splitPane, BorderLayout.CENTER);
 
-        statusLabel = new JLabel("Station data not loaded");
+        statusLabel = new JLabel("No station files loaded");
         add(statusLabel, BorderLayout.SOUTH);
 
-        JButton selectButton = new JButton("Select Station File");
-        selectButton.addActionListener(e -> selectStationFile());
-        
         JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
-        buttonPanel.add(selectButton);
+        
+        JButton addButton = new JButton("Add Station File");
+        addButton.addActionListener(e -> selectStationFile());
+        buttonPanel.add(addButton);
+        
+        removeButton = new JButton("Remove Selected");
+        removeButton.setEnabled(false);
+        removeButton.addActionListener(e -> removeSelectedStationFile());
+        buttonPanel.add(removeButton);
+        
         add(buttonPanel, BorderLayout.NORTH);
         
-        // 共有ファイルマネージャーのリスナーを登録
+        // Register shared file manager listener
         com.treloc.xtreloc.app.gui.util.SharedFileManager.getInstance().addStationFileListener(file -> {
             if (file != null) {
                 loadStationFile(file);
             }
         });
         
-        // 既に設定されている観測点ファイルがあれば読み込む
+        // Load station file if already set
         File existingFile = com.treloc.xtreloc.app.gui.util.SharedFileManager.getInstance().getStationFile();
         if (existingFile != null && existingFile.exists()) {
             loadStationFile(existingFile);
@@ -137,19 +218,16 @@ public class StationTablePanel extends JPanel {
         int result = fileChooser.showOpenDialog(this);
         if (result == JFileChooser.APPROVE_OPTION) {
             File selectedFile = fileChooser.getSelectedFile();
-            loadStationFile(selectedFile);
+            addStationFile(selectedFile);
             
             // 共有ファイルマネージャーに通知
             com.treloc.xtreloc.app.gui.util.SharedFileManager.getInstance().setStationFile(selectedFile);
         }
     }
-
-    /**
-     * 観測点ファイルを読み込む
-     */
-    public void loadStationFile(File file) {
+    
+    private void addStationFile(File file) {
         try {
-            stations = new ArrayList<>();
+            List<Station> stationList = new ArrayList<>();
             try (Scanner sc = new Scanner(file)) {
                 while (sc.hasNextLine()) {
                     String line = sc.nextLine().trim();
@@ -165,38 +243,46 @@ public class StationTablePanel extends JPanel {
                             Double.parseDouble(parts[4]),
                             Double.parseDouble(parts[5])
                         );
-                        stations.add(station);
+                        stationList.add(station);
                     }
                 }
             }
             
-            // StationRepositoryを作成
-            stationRepository = StationRepository.fromList(stations);
-            
-            // テーブルにデータを表示
-            tableModel.setRowCount(0);
-            for (Station station : stations) {
-                // 深度をメートルからキロメートルに変換
-                // 入力: -m (メートル、負の値) → 出力: km (キロメートル、正の値、地下の深度)
-                // 1000で割って符号を反転
-                double depKm = -station.getDep() / 1000.0;
-                Object[] row = {
-                    station.getCode(),
-                    String.format("%.3f", station.getLat()),
-                    String.format("%.3f", station.getLon()),
-                    String.format("%.3f", depKm),
-                    String.format("%.3f", station.getPc()),
-                    String.format("%.3f", station.getSc())
-                };
-                tableModel.addRow(row);
+            if (stationList.isEmpty()) {
+                JOptionPane.showMessageDialog(this,
+                    "No valid station data found in the file.",
+                    "Warning", JOptionPane.WARNING_MESSAGE);
+                return;
             }
             
-            statusLabel.setText(String.format("Number of stations: %d", stations.size()));
+            // Create StationFileInfo and add to list
+            String fileName = file.getName();
+            StationFileInfo fileInfo = new StationFileInfo(fileName, stationList.size());
+            stationFileInfos.add(fileInfo);
+            stationFiles.put(fileInfo, file);
+            stationData.put(fileInfo, stationList);
             
-            // マップにプロット
-            if (mapView != null && stations != null && !stations.isEmpty()) {
+            // Update station list table
+            stationListModel.addRow(new Object[]{
+                fileName,
+                stationList.size(),
+                file.getAbsolutePath()
+            });
+            
+            removeButton.setEnabled(true);
+            
+            updateStatusLabel();
+            
+            // Display first file automatically
+            if (stationFileInfos.size() == 1) {
+                stationListTable.setRowSelectionInterval(0, 0);
+                displayStationData(fileInfo);
+            }
+            
+            // Plot stations on map
+            if (mapView != null && !stationList.isEmpty()) {
                 try {
-                    mapView.showStations(stations);
+                    mapView.showStations(stationList);
                 } catch (Exception ex) {
                     JOptionPane.showMessageDialog(this,
                         "Failed to display on map: " + ex.getMessage(),
@@ -208,14 +294,80 @@ public class StationTablePanel extends JPanel {
             JOptionPane.showMessageDialog(this,
                 "Failed to load station file: " + e.getMessage(),
                 "Error", JOptionPane.ERROR_MESSAGE);
-            statusLabel.setText("Load error: " + e.getMessage());
         }
+    }
+    
+    private void displayStationData(StationFileInfo fileInfo) {
+        List<Station> stationList = stationData.get(fileInfo);
+        if (stationList == null) {
+            dataTableModel.setRowCount(0);
+            return;
+        }
+        
+        dataTableModel.setRowCount(0);
+        for (Station station : stationList) {
+            double depKm = -station.getDep() / 1000.0;
+            Object[] row = {
+                station.getCode(),
+                String.format("%.3f", station.getLat()),
+                String.format("%.3f", station.getLon()),
+                String.format("%.3f", depKm),
+                String.format("%.3f", station.getPc()),
+                String.format("%.3f", station.getSc())
+            };
+            dataTableModel.addRow(row);
+        }
+        
+        updateStatusLabel();
+    }
+    
+    private void removeSelectedStationFile() {
+        int selectedRow = stationListTable.getSelectedRow();
+        if (selectedRow < 0) {
+            return;
+        }
+        
+        StationFileInfo fileInfo = stationFileInfos.get(selectedRow);
+        stationFileInfos.remove(selectedRow);
+        stationFiles.remove(fileInfo);
+        stationData.remove(fileInfo);
+        stationListModel.removeRow(selectedRow);
+        
+        dataTableModel.setRowCount(0);
+        
+        removeButton.setEnabled(!stationFileInfos.isEmpty());
+        updateStatusLabel();
+    }
+    
+    private void updateStatusLabel() {
+        if (stationFileInfos.isEmpty()) {
+            statusLabel.setText("No station files loaded");
+        } else {
+            int totalStations = stationData.values().stream().mapToInt(List::size).sum();
+            statusLabel.setText(String.format("Files: %d, Total Stations: %d", 
+                stationFileInfos.size(), totalStations));
+        }
+    }
+
+    /**
+     * 観測点ファイルを読み込む
+     */
+    public void loadStationFile(File file) {
+        addStationFile(file);
     }
 
     /**
      * StationRepositoryを取得
      */
     public StationRepository getStationRepository() {
+        // Return the repository from first station file if available
+        if (!stationFileInfos.isEmpty()) {
+            StationFileInfo firstFile = stationFileInfos.get(0);
+            List<Station> firstStations = stationData.get(firstFile);
+            if (firstStations != null && !firstStations.isEmpty()) {
+                return StationRepository.fromList(firstStations);
+            }
+        }
         return stationRepository;
     }
 
@@ -223,30 +375,35 @@ public class StationTablePanel extends JPanel {
      * 観測点ファイルのパスを取得
      */
     public String getStationFilePath() {
-        // 現在の実装では、ファイルパスを保持していないため、
-        // 必要に応じて追加する
+        // Current implementation does not keep file path,
+        // add if needed
         return null;
     }
     
     /**
-     * 列選択を処理（数値列の場合、色付けを適用）
+     * Handle column selection (apply coloring for numeric columns)
      */
     private void handleColumnSelection(int columnIndex) {
-        if (stations == null || stations.isEmpty() || mapView == null) {
+        int listRow = stationListTable.getSelectedRow();
+        if (listRow < 0 || listRow >= stationFileInfos.size() || mapView == null) {
             return;
         }
         
-        // 列名を取得
-        String columnName = tableModel.getColumnName(columnIndex);
+        StationFileInfo selectedFile = stationFileInfos.get(listRow);
+        List<Station> stationList = stationData.get(selectedFile);
+        
+        if (stationList == null || stationList.isEmpty()) {
+            return;
+        }
         
         // 数値列かどうかを判定（緯度、経度、深度、P波補正、S波補正）
         // 0:コード, 1:緯度, 2:経度, 3:深度, 4:P波補正, 5:S波補正
         boolean isNumeric = columnIndex >= 1 && columnIndex <= 5;
         
         if (isNumeric) {
-            double[] values = new double[stations.size()];
-            for (int i = 0; i < stations.size(); i++) {
-                Station s = stations.get(i);
+            double[] values = new double[stationList.size()];
+            for (int i = 0; i < stationList.size(); i++) {
+                Station s = stationList.get(i);
                 switch (columnIndex) {
                     case 1: // 緯度
                         values[i] = s.getLat();
@@ -255,7 +412,7 @@ public class StationTablePanel extends JPanel {
                         values[i] = s.getLon();
                         break;
                     case 3: // 深度
-                        // 表示はkmだが、元のデータはmなので注意
+                        // Display is in km, but original data is in m, so be careful
                         values[i] = -s.getDep() / 1000.0;
                         break;
                     case 4: // P波補正
@@ -271,14 +428,15 @@ public class StationTablePanel extends JPanel {
             
             // マップに色付けを適用
             try {
-                mapView.showStations(stations, columnName, values);
+                String columnName = dataTableModel.getColumnName(columnIndex);
+                mapView.showStations(stationList, columnName, values);
             } catch (Exception e) {
                 System.err.println("Failed to apply coloring: " + e.getMessage());
             }
         } else {
-            // 数値列でない場合は通常の表示
+            // Normal display for non-numeric columns
             try {
-                mapView.showStations(stations);
+                mapView.showStations(stationList);
             } catch (Exception e) {
                 System.err.println("Failed to update display: " + e.getMessage());
             }
