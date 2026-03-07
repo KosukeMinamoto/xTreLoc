@@ -1,0 +1,89 @@
+{
+  "logLevel": "INFO",
+  "numJobs": 4,
+  "stationFile": "station.tbl",
+  "taupFile": "prem",
+  "hypBottom": 100,
+  "threshold": 0,
+  "io": {
+    "GRD": {
+      "datDirectory": "dat",
+      "outDirectory": "dat-grd"
+    },
+    "LMO": {
+      "datDirectory": "dat",
+      "outDirectory": "dat-lmo"
+    },
+    "MCMC": {
+      "datDirectory": "dat",
+      "outDirectory": "dat-mcmc"
+    },
+    "DE": {
+      "datDirectory": "dat",
+      "outDirectory": "dat-de"
+    },
+    "TRD": {
+      "catalogFile": "dat-cls/catalog_syn_cls.csv",
+      "datDirectory": "dat-cls",
+      "outDirectory": "dat-trd"
+    },
+    "CLS": {
+      "catalogFile": "dat/catalog_syn.csv",
+      "outDirectory": "dat-cls"
+    },
+    "SYN": {
+      "catalogFile": "catalog_ground_truth.csv",
+      "outDirectory": "dat"
+    }
+  },
+  "params": {
+    "GRD": {
+      "totalGrids": 300,
+      "numFocus": 3
+    },
+    "LMO": {
+      "initialStepBoundFactor": 100,
+      "costRelativeTolerance": 0.000001,
+      "parRelativeTolerance": 0.000001,
+      "orthoTolerance": 0.000001,
+      "maxEvaluations": 1000,
+      "maxIterations": 1000
+    },
+    "MCMC": {
+      "nSamples": 500,
+      "burnIn": 100,
+      "stepSize": 0.1,
+      "stepSizeDepth": 1,
+      "temperature": 1
+    },
+    "DE": {
+      "populationSize": 50,
+      "maxGenerations": 100,
+      "scalingFactor": 0.8,
+      "crossoverRate": 0.9
+    },
+    "TRD": {
+      "iterNum": [10, 10],
+      "distKm": [50, 20],
+      "dampFact": [0, 1],
+      "lsqrAtol": 0.000001,
+      "lsqrBtol": 0.000001,
+      "lsqrConlim": 100000000,
+      "lsqrIterLim": 1000
+    },
+    "CLS": {
+      "minPts": 4,
+      "eps": -1,
+      "useBinaryFormat": true,
+      "doClustering": true,
+      "calcTripleDiff": true
+    },
+    "SYN": {
+      "randomSeed": 100,
+      "phsErr": 0.1,
+      "locErr": 0.03,
+      "minSelectRate": 0.2,
+      "maxSelectRate": 0.4
+    }
+  }
+}
