@@ -2118,6 +2118,9 @@ public class HypocenterLocationPanel extends JPanel {
     
     /**
      * Chooses text color for Execution log based on message content (Warning, Severe, Error).
+     * Also recognizes Java log format in history (e.g. "2026-03-10 22:44:07 WARNING ...").
+     * Only log-level ERROR/SEVERE are red; exception continuation lines (e.g. "java.io.IOException...")
+     * are not colored red so they stay part of the same warning block.
      */
     private static Color colorForLogMessage(String message) {
         if (message == null) return new Color(180, 255, 180);
@@ -2128,10 +2131,20 @@ public class HypocenterLocationPanel extends JPanel {
         if (m.startsWith("Warning:") || m.startsWith("WARNING:")) {
             return new Color(255, 220, 100);   // yellow for warnings
         }
-        if (m.startsWith("Severe") || m.startsWith("SEVERE") || m.contains("SEVERE")) {
+        if (m.startsWith("Severe") || m.startsWith("SEVERE") || m.contains(" SEVERE ")) {
             return new Color(255, 165, 80);    // orange for severe
         }
-        return new Color(180, 255, 180);       // default light green
+        // Log file format: "yyyy-MM-dd HH:mm:ss LEVEL ..." (only level keyword, not "Exception" in message text)
+        if (m.contains(" WARNING ") || m.contains("\tWARNING ")) {
+            return new Color(255, 220, 100);   // yellow
+        }
+        if (m.contains(" SEVERE ") || m.contains("\tSEVERE ")) {
+            return new Color(255, 165, 80);    // orange
+        }
+        if (m.contains(" ERROR ") || m.contains("\tERROR ")) {
+            return new Color(255, 100, 100);   // red (log level only)
+        }
+        return new Color(180, 255, 180);       // default light green (incl. exception continuation lines)
     }
     
     /**
@@ -2153,6 +2166,55 @@ public class HypocenterLocationPanel extends JPanel {
         } catch (javax.swing.text.BadLocationException e) {
             logger.warning("Execution log append failed: " + e.getMessage());
         }
+    }
+
+    /**
+     * Sets the entire log content (e.g. previous session history) with per-line color.
+     * A line is treated as a new log record if it starts with a timestamp (yyyy-MM-dd or [HH:mm:ss]);
+     * otherwise it is a continuation of the previous message and gets the same color.
+     */
+    private void setLogContentWithColors(String fullText) {
+        if (logArea == null) return;
+        try {
+            StyledDocument doc = logArea.getStyledDocument();
+            doc.remove(0, doc.getLength());
+            if (fullText == null || fullText.isEmpty()) return;
+            String[] lines = fullText.split("\n", -1);
+            Color lastColor = new Color(180, 255, 180);
+            for (String line : lines) {
+                String lineWithNewline = line + "\n";
+                Color color;
+                if (isNewLogRecord(line)) {
+                    color = colorForLogMessage(line);
+                    lastColor = color;
+                } else {
+                    color = lastColor;  // continuation of previous message
+                }
+                SimpleAttributeSet attr = new SimpleAttributeSet();
+                StyleConstants.setForeground(attr, color);
+                doc.insertString(doc.getLength(), lineWithNewline, attr);
+            }
+            logArea.setCaretPosition(doc.getLength());
+            if (logScrollPane != null) {
+                JScrollBar bar = logScrollPane.getVerticalScrollBar();
+                if (bar != null) bar.setValue(bar.getMaximum());
+            }
+        } catch (Exception e) {
+            logger.warning("Failed to set log content with colors: " + e.getMessage());
+        }
+    }
+
+    /** True if the line looks like the start of a new log record (timestamp at start), not a continuation. */
+    private static boolean isNewLogRecord(String line) {
+        if (line == null || line.isEmpty()) return false;
+        String t = line.trim();
+        // Java log format: "2026-03-10 22:44:07 LEVEL ..."
+        if (t.length() >= 10 && t.charAt(0) >= '0' && t.charAt(0) <= '9' && t.charAt(4) == '-' && t.charAt(7) == '-') {
+            return true;
+        }
+        // Our appendLog format: "[HH:mm:ss] message"
+        if (t.startsWith("[")) return true;
+        return false;
     }
     
     private void appendConvergenceLog(String message) {
@@ -2192,20 +2254,14 @@ public class HypocenterLocationPanel extends JPanel {
             + "───────────────────────────────────────────────────────────────\n"
         );
         SwingUtilities.invokeLater(() -> {
-            if (logArea != null) {
-                logArea.setText(toShow);
-                logArea.setCaretPosition(logArea.getDocument().getLength());
-            }
+            setLogContentWithColors(toShow);
         });
         if (hadNoHistory) {
             javax.swing.Timer retryTimer = new javax.swing.Timer(500, e -> {
                 String retryHistory = loadLogHistoryImpl(linesToLoad);
                 if (retryHistory != null && retryHistory.contains("lines)\n") && !retryHistory.contains("(0 lines)")) {
                     SwingUtilities.invokeLater(() -> {
-                        if (logArea != null) {
-                            logArea.setText(retryHistory);
-                            logArea.setCaretPosition(logArea.getDocument().getLength());
-                        }
+                        setLogContentWithColors(retryHistory);
                     });
                 }
             });
@@ -3059,10 +3115,12 @@ public class HypocenterLocationPanel extends JPanel {
                         if (solverResultCatalogPanel != null) {
                             final java.util.List<com.treloc.xtreloc.app.gui.model.Hypocenter> hyposToAdd =
                                 new java.util.ArrayList<>(allHypocenters);
-                            final String modeName = currentMode;
+                            final String displayName = exportedCatalogFile != null
+                                ? exportedCatalogFile.getName()
+                                : "Solver result (" + currentMode + ")";
                             SwingUtilities.invokeLater(() -> {
                                 solverResultCatalogPanel.addCatalogFromHypocenters(
-                                    hyposToAdd, "Solver result (" + modeName + ")", exportedCatalogFile);
+                                    hyposToAdd, displayName, exportedCatalogFile);
                             });
                         } else if (mapView != null) {
                             SwingUtilities.invokeLater(() -> {

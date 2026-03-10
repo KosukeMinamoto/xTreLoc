@@ -1165,7 +1165,7 @@ public class CatalogTablePanel extends JPanel {
      * Updates the list table, map, and selects the new row. Call on EDT.
      *
      * @param hypocenters list of hypocenters (not null, may be empty)
-     * @param catalogName display name for the catalog (e.g. "Solver result (LMO)")
+     * @param catalogName display name for the catalog (e.g. output filename "catalog_lmo.csv" or "Solver result (LMO)")
      * @param file optional file (e.g. exported catalog path); may be null
      */
     public void addCatalogFromHypocenters(List<Hypocenter> hypocenters, String catalogName, File file) {

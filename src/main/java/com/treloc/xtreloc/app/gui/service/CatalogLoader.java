@@ -5,8 +5,19 @@ import com.treloc.xtreloc.app.gui.model.Hypocenter;
 import java.io.*;
 import java.util.*;
 
+/**
+ * Loads hypocenter catalogs from CSV or whitespace-separated text for the GUI.
+ * CSV may include a header line (time, latitude, ...); supports optional columns for errors and mode.
+ */
 public class CatalogLoader {
 
+    /**
+     * Loads hypocenters from a file. Format is detected by extension (.csv vs other).
+     *
+     * @param file CSV or space/tab-separated catalog file
+     * @return list of hypocenters (may be empty)
+     * @throws IOException if the file cannot be read
+     */
     public static List<Hypocenter> load(File file) throws IOException {
         List<Hypocenter> list = new ArrayList<>();
         String fileName = file.getName().toLowerCase();
@@ -35,7 +46,6 @@ public class CatalogLoader {
                 
                 if (p.length >= 4) {
                     if (isCsv && p.length >= 8) {
-                        // CSV format with error information included
                         double xerr = p.length > 4 ? Double.parseDouble(p[4].trim()) : 0.0;
                         double yerr = p.length > 5 ? Double.parseDouble(p[5].trim()) : 0.0;
                         double zerr = p.length > 6 ? Double.parseDouble(p[6].trim()) : 0.0;

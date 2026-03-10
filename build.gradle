@@ -313,8 +313,8 @@ task createMacApp(type: Exec) {
             existingApp.deleteDir()
         }
         
-        // Generate valid version number for jpackage (remove -SNAPSHOT and convert to three-digit format)
-        def appVersion = project.version.toString().replace('-SNAPSHOT', '')
+        // Generate valid version number for jpackage (remove -SNAPSHOT, -alpha, etc.; dots only)
+        def appVersion = project.version.toString().split('-')[0].split('_')[0]
         // Add third digit if version has only two digits
         if (appVersion.split('\\.').length == 2) {
             appVersion = "${appVersion}.0"
@@ -391,13 +391,13 @@ task createDmg(type: Exec) {
             throw new GradleException("JAR file not found: ${jarFile}. Please run 'gradle jar' first.")
         }
         
-        def existingDmg = new File("${project.buildDir}/dist/${appName}-${project.version.toString().replace('-SNAPSHOT', '')}.dmg")
+        def existingDmg = new File("${project.buildDir}/dist/${appName}-${project.version.toString().split('-')[0].split('_')[0]}.dmg")
         if (existingDmg.exists()) {
             existingDmg.delete()
         }
         
-        // Generate valid version number for jpackage (remove -SNAPSHOT and convert to three-digit format)
-        def appVersion = project.version.toString().replace('-SNAPSHOT', '')
+        // Generate valid version number for jpackage (remove -SNAPSHOT, -alpha, etc.; dots only)
+        def appVersion = project.version.toString().split('-')[0].split('_')[0]
         // Add third digit if version has only two digits
         if (appVersion.split('\\.').length == 2) {
             appVersion = "${appVersion}.0"
@@ -466,7 +466,7 @@ task createLinuxApp(type: Exec) {
         def existingApp = new File(distDir, appName)
         if (existingApp.exists()) existingApp.deleteDir()
 
-        def appVersion = project.version.toString().replace('-SNAPSHOT', '')
+        def appVersion = project.version.toString().split('-')[0].split('_')[0]
         if (appVersion.split('\\.').length == 2) appVersion = "${appVersion}.0"
 
         def cmd = [
@@ -499,7 +499,7 @@ task createLinuxTarball(type: Tar) {
     onlyIf { System.getProperty('os.name').toLowerCase().contains('linux') }
 
     def appName = 'xTreLoc'
-    def appVersion = project.version.toString().replace('-SNAPSHOT', '')
+    def appVersion = project.version.toString().split('-')[0].split('_')[0]
     if (appVersion.split('\\.').length == 2) appVersion = "${appVersion}.0"
     def tarballDirName = "${appName}-${appVersion}-linux-x64"
 
@@ -548,7 +548,7 @@ task createWindowsApp(type: Exec) {
         def existingApp = new File(distDir, appName)
         if (existingApp.exists()) existingApp.deleteDir()
 
-        def appVersion = project.version.toString().replace('-SNAPSHOT', '')
+        def appVersion = project.version.toString().split('-')[0].split('_')[0]
         if (appVersion.split('\\.').length == 2) appVersion = "${appVersion}.0"
 
         def cmd = [
@@ -596,7 +596,7 @@ task createWindowsExe(type: Exec) {
         def outDir = new File(distDir)
         if (!outDir.exists()) outDir.mkdirs()
 
-        def appVersion = project.version.toString().replace('-SNAPSHOT', '')
+        def appVersion = project.version.toString().split('-')[0].split('_')[0]
         if (appVersion.split('\\.').length == 2) appVersion = "${appVersion}.0"
 
         def cmd = [

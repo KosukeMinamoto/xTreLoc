@@ -9,15 +9,17 @@ import java.io.IOException;
 import java.util.List;
 
 /**
- * CSV export functionality
+ * Exports hypocenter lists to CSV for the GUI (Execution Log result catalog, Report panel).
+ * Column order: time, latitude, longitude, depth, xerr, yerr, zerr, rms, file, mode, cid.
  */
 public class CsvExporter {
-    
+
     /**
-     * Exports hypocenter data to CSV file
-     * @param hypocenters list of hypocenter data
-     * @param outputFile output file
-     * @throws IOException file output error
+     * Writes hypocenters to a CSV file with header.
+     *
+     * @param hypocenters list to export (may be empty)
+     * @param outputFile destination file (overwritten)
+     * @throws IOException if the file cannot be written
      */
     public static void exportHypocenters(List<Hypocenter> hypocenters, java.io.File outputFile) 
             throws IOException {
@@ -26,8 +28,6 @@ public class CsvExporter {
             
             for (Hypocenter h : hypocenters) {
                 String timeISO8601 = TimeFormatConverter.toISO8601(h.time);
-                
-                // Normalize mode name to abbreviation for catalog output
                 String modeAbbrev = "";
                 if (h.type != null && !h.type.isEmpty()) {
                     modeAbbrev = ModeNameMapper.normalizeToAbbreviation(h.type);

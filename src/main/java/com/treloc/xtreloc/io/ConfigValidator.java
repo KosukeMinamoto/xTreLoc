@@ -91,7 +91,10 @@ public final class ConfigValidator {
     }
 
     /**
-     * Formats a short summary of path-related config values for inclusion in error messages.
+     * Formats a short summary of path-related config values for log/debug output.
+     *
+     * @param config the config to summarize (may be null)
+     * @return a multi-line string with stationFile, taupFile, and io.* paths
      */
     public static String formatConfigSummary(AppConfig config) {
         if (config == null) return "(config is null)";

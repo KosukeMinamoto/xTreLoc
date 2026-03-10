@@ -4,71 +4,51 @@ import java.util.Scanner;
 import com.treloc.xtreloc.app.util.ModeAvailabilityChecker;
 
 /**
- * Main entry point for xTreLoc application.
- * Allows users to choose between GUI, TUI, and CLI modes.
+ * Main entry point for xTreLoc.
+ * <p>
+ * With no arguments and a TTY, shows interactive mode selection (GUI / TUI / CLI).
+ * With {@code --gui}, {@code --tui}, or {@code --cli} launches the corresponding mode.
+ * With a solver mode name (e.g. GRD) and optional config path, runs CLI directly.
+ * From an macOS app bundle, launches GUI directly (no stdin).
  *
  * @author K.Minamoto
  */
 public class XTreLoc {
-    
-    /**
-     * Checks if the application is running from a macOS app bundle.
-     * App bundles don't have access to standard input, so TUI mode won't work.
-     * 
-     * @return true if running from an app bundle
-     */
+
     private static boolean isRunningFromAppBundle() {
-        // Check if standard input is available
         try {
             if (System.in.available() == 0 && System.console() == null) {
-                // Try to read from stdin - if it fails, we're likely in an app bundle
                 return true;
             }
         } catch (Exception e) {
-            // If we can't check stdin, assume we're in an app bundle
             return true;
         }
-        
-        // Check classpath for .app bundle indicators
         String classpath = System.getProperty("java.class.path", "");
         if (classpath.contains(".app/Contents")) {
             return true;
         }
-        
-        // Check if we're on macOS and console is null (typical for app bundles)
         String osName = System.getProperty("os.name", "").toLowerCase();
         if (osName.contains("mac") && System.console() == null) {
             return true;
         }
-        
         return false;
     }
-    
+
     /**
-     * Checks if standard input is available for interactive use.
-     * 
-     * @return true if stdin is available
+     * Returns whether standard input is available for interactive mode selection.
      */
     private static boolean isStandardInputAvailable() {
         try {
-            // Try to check if stdin is available
-            if (System.console() != null) {
-                return true;
-            }
-            // For app bundles, System.console() is typically null
-            // and System.in may not be properly connected
+            if (System.console() != null) return true;
             return !isRunningFromAppBundle();
         } catch (Exception e) {
             return false;
         }
     }
-    
+
     public static void main(String[] args) {
-        // If arguments are provided, check for mode switching or CLI mode
         if (args.length > 0) {
             String firstArg = args[0];
-            
-            // Check for mode switching commands
             if ("--gui".equals(firstArg) || "-g".equals(firstArg)) {
                 launchGUI(args);
                 return;
@@ -86,27 +66,18 @@ public class XTreLoc {
                 return;
             }
             
-            // If first argument is a mode name (GRD, LMO, etc.), launch CLI directly
             if (isModeName(firstArg)) {
                 launchCLI(args);
                 return;
             }
         }
-        
-        // Check if running from app bundle (no stdin available)
         boolean fromAppBundle = isRunningFromAppBundle();
         boolean stdinAvailable = isStandardInputAvailable();
-        
-        // If running from app bundle, launch GUI directly (most common use case)
-        // TUI/CLI can be launched from command line: java -jar xTreLoc.jar --tui or --cli
         if (fromAppBundle) {
             launchGUI(new String[0]);
             return;
         }
-        
-        // No arguments - show interactive mode selection
         if (stdinAvailable) {
-            // Show text-based mode selection
             showModeSelection();
         } else {
             // No stdin available - try GUI
@@ -119,7 +90,8 @@ public class XTreLoc {
             }
         }
     }
-    
+
+    /** Returns true if the argument is a known solver mode name (GRD, LMO, MCMC, DE, TRD, CLS, SYN). */
     private static boolean isModeName(String arg) {
         String upper = arg.toUpperCase();
         return upper.equals("GRD") || upper.equals("LMO") || upper.equals("MCMC") || upper.equals("DE") ||
@@ -127,7 +99,6 @@ public class XTreLoc {
     }
     
     private static void showModeSelection() {
-        // Check if stdin is available before trying to use Scanner
         if (!isStandardInputAvailable()) {
             System.err.println("Standard input is not available. Cannot show interactive mode selection.");
             if (ModeAvailabilityChecker.isGUIAvailable()) {
@@ -138,7 +109,6 @@ public class XTreLoc {
         }
         
         Scanner scanner = new Scanner(System.in);
-        
         try {
             boolean guiAvailable = ModeAvailabilityChecker.isGUIAvailable();
             boolean tuiAvailable = ModeAvailabilityChecker.isTUIAvailable();
@@ -149,68 +119,29 @@ public class XTreLoc {
                 System.err.println("Please ensure the application is properly built.");
                 return;
             }
-            
+
+            boolean tuiAvailableForSelection = tuiAvailable && isStandardInputAvailable();
+            boolean showLogo = true;
+
             while (true) {
-                System.out.println("");
-                System.out.println("╔──────────────────────────────────────────────────────────────────────────────╗");
-                System.out.println("│              MMP\"\"MM\"\"YMM                   `7MMF'                           │");
-                System.out.println("│              P'   MM   `7                     MM                             │");
-                System.out.println("│   `7M'   `MF'     MM      `7Mb,od8  .gP\"Ya    MM         ,pW\"Wq.   ,p6\"bo    │");
-                System.out.println("│     `VA ,V'       MM        MM' \"' ,M'   Yb   MM        6W'   `Wb 6M'  OO    │");
-                System.out.println("│       XMX         MM        MM     8M\"\"\"\"\"\"   MM      , 8M     M8 8M         │");
-                System.out.println("│     ,V' VA.       MM        MM     YM.    ,   MM     ,M YA.   ,A9 YM.    ,   │");
-                System.out.println("│   .AM.   .MA.   .JMML.    .JMML.    `Mbmmd' .JMMmmmmMMM  `Ybmd9'   YMbmd'    │");
-                System.out.println("╚──────────────────────────────────────────────────────────────────────────────╝");
-                // Slant
-                // System.out.println("          ______                __");
-                // System.out.println("   _  __ /_  __/ _____  ___    / /   ____   _____");
-                // System.out.println("  | |/_/  / /   / ___/ / _ \\  / /   / __ \\ / ___/");
-                // System.out.println(" _>  <   / /   / /    /  __/ / /___/ /_/ // /__");
-                // System.out.println("/_/|_|  /_/   /_/     \\___/ /_____/\\____/ \\___/");
-                // Cyberlarge
-                // System.out.println("╔────────────────────────────────────────────────────────────╗");
-                // System.out.println("│   _     _ _______  ______ _______         _____  _______   │");
-                // System.out.println("│    \\___/     |    |_____/ |______ |      |     | |         │");
-                // System.out.println("│   _/   \\_    |    |    \\_ |______ |_____ |_____| |_____    │");
-                // System.out.println("╚────────────────────────────────────────────────────────────╝");
-                System.out.println("");
-                String version = com.treloc.xtreloc.util.VersionInfo.getVersionString();
-                System.out.println(version);
-                System.out.println("");
-                // final int boxWidth = 51;
-                // String border = "╔" + "═".repeat(boxWidth) + "╗";
-                // String titleContent = " xTreLoc v" + version + " - Mode Selection ";
-                // if (titleContent.length() > boxWidth) {
-                //     titleContent = titleContent.substring(0, boxWidth);
-                // } else {
-                //     titleContent = String.format("%-" + boxWidth + "s", titleContent);
-                // }
-                // System.out.println(border);
-                // System.out.println("║" + titleContent + "║");
-                // System.out.println("╚" + "═".repeat(boxWidth) + "╝");
-                // System.out.println();
-                System.out.println("Select interface mode:");
-                
-                int optionNumber = 1;
-                boolean tuiAvailableForSelection = tuiAvailable && isStandardInputAvailable();
-                
-                if (guiAvailable) {
-                    System.out.println("  " + optionNumber + ". GUI - Graphical User Interface (recommended)");
-                    optionNumber++;
+                if (showLogo) {
+                    System.out.println("");
+                    System.out.println("╔──────────────────────────────────────────────────────────────────────────────╗");
+                    System.out.println("│              MMP\"\"MM\"\"YMM                   `7MMF'                           │");
+                    System.out.println("│              P'   MM   `7                     MM                             │");
+                    System.out.println("│   `7M'   `MF'     MM      `7Mb,od8  .gP\"Ya    MM         ,pW\"Wq.   ,p6\"bo    │");
+                    System.out.println("│     `VA ,V'       MM        MM' \"' ,M'   Yb   MM        6W'   `Wb 6M'  OO    │");
+                    System.out.println("│       XMX         MM        MM     8M\"\"\"\"\"\"   MM      , 8M     M8 8M         │");
+                    System.out.println("│     ,V' VA.       MM        MM     YM.    ,   MM     ,M YA.   ,A9 YM.    ,   │");
+                    System.out.println("│   .AM.   .MA.   .JMML.    .JMML.    `Mbmmd' .JMMmmmmMMM  `Ybmd9'   YMbmd'    │");
+                    System.out.println("╚──────────────────────────────────────────────────────────────────────────────╝");
+                    System.out.println("");
+                    String version = com.treloc.xtreloc.util.VersionInfo.getVersionString();
+                    System.out.println(version);
+                    System.out.println("");
+                    showLogo = false;
                 }
-                if (tuiAvailableForSelection) {
-                    System.out.println("  " + optionNumber + ". TUI - Text User Interface (interactive menu)");
-                    optionNumber++;
-                }
-                if (cliAvailable) {
-                    System.out.println("  " + optionNumber + ". CLI - Command Line Interface (batch processing)");
-                    optionNumber++;
-                }
-                
-                System.out.println();
-                System.out.println("  0 or q. Exit");
-                System.out.println();
-                System.out.print("Enter your choice: ");
+                printModeSelection(guiAvailable, tuiAvailableForSelection, cliAvailable);
                 
                 String line = scanner.hasNextLine() ? scanner.nextLine().trim() : "";
                 if (line.isEmpty() && scanner.hasNext()) {
@@ -248,6 +179,7 @@ public class XTreLoc {
                 }
                 
                 System.out.println("\nInvalid choice. Enter 1, 2, 3, 0, or q.");
+                continue;
             }
         } catch (Exception e) {
             System.err.println("Error: " + e.getMessage());
@@ -262,46 +194,80 @@ public class XTreLoc {
             }
         }
     }
-    
+
+    /**
+     * Prints the interface mode menu (no logo). Used after invalid choice or when returning from CLI.
+     *
+     * @param guiAvailable whether GUI mode is available
+     * @param tuiAvailableForSelection whether TUI is available and stdin is usable
+     * @param cliAvailable whether CLI mode is available
+     */
+    private static void printModeSelection(boolean guiAvailable, boolean tuiAvailableForSelection, boolean cliAvailable) {
+        System.out.println("Select interface mode:");
+        int optionNumber = 1;
+        if (guiAvailable) {
+            System.out.println("  " + optionNumber + ". GUI - Graphical User Interface (recommended)");
+            optionNumber++;
+        }
+        if (tuiAvailableForSelection) {
+            System.out.println("  " + optionNumber + ". TUI - Text User Interface (interactive menu)");
+            optionNumber++;
+        }
+        if (cliAvailable) {
+            System.out.println("  " + optionNumber + ". CLI - Command Line Interface (batch processing)");
+            optionNumber++;
+        }
+        System.out.println();
+        System.out.println("  0 or q. Exit");
+        System.out.println();
+        System.out.print("Enter your choice: ");
+    }
+    /**
+     * Runs CLI in a loop: prompts for solver mode and config path, runs once, then prompts again.
+     * Typing q at either prompt exits back to the interface mode menu.
+     */
     private static void runCLIInteractive(Scanner scanner) {
         System.out.println("\n--- CLI - Run from config file ---");
-        System.out.print("Solver mode (GRD/LMO/MCMC/DE/TRD/CLS/SYN) [GRD]: ");
-        String modeLine = scanner.hasNextLine() ? scanner.nextLine().trim() : "";
-        if (modeLine.isEmpty() && scanner.hasNext()) {
-            modeLine = scanner.next().trim();
-            if (scanner.hasNextLine()) scanner.nextLine();
+        System.out.println("Enter solver mode or config; use q + Enter to exit CLI and return to menu.");
+        while (true) {
+            System.out.println("");
+            System.out.print("Solver mode (GRD/LMO/MCMC/DE/TRD/CLS/SYN) [GRD]: ");
+            String modeLine = scanner.hasNextLine() ? scanner.nextLine().trim() : "";
+            if (modeLine.isEmpty() && scanner.hasNext()) {
+                modeLine = scanner.next().trim();
+                if (scanner.hasNextLine()) scanner.nextLine();
+            }
+            if ("q".equalsIgnoreCase(modeLine)) {
+                System.out.println("Exiting CLI.");
+                return;
+            }
+            String mode = modeLine.isEmpty() ? "GRD" : modeLine.toUpperCase();
+
+            System.out.print("Config path [config.json]: ");
+            String configLine = scanner.hasNextLine() ? scanner.nextLine().trim() : "";
+            if (configLine.isEmpty() && scanner.hasNext()) {
+                configLine = scanner.next().trim();
+                if (scanner.hasNextLine()) scanner.nextLine();
+            }
+            if ("q".equalsIgnoreCase(configLine)) {
+                System.out.println("Exiting CLI.");
+                return;
+            }
+            String configPath = configLine.isEmpty() ? "config.json" : configLine;
+
+            System.out.println("\nRunning: mode=" + mode + ", config=" + configPath);
+            try {
+                com.treloc.xtreloc.app.cli.XTreLocCLI.runWithoutLogo(mode, configPath);
+                System.out.println("\nCLI completed successfully.");
+            } catch (Exception e) {
+                System.err.println("\nCLI failed: " + e.getMessage());
+            }
+            System.out.println("");
         }
-        if ("q".equalsIgnoreCase(modeLine)) {
-            System.out.println("Cancelled.");
-            return;
-        }
-        String mode = modeLine.isEmpty() ? "GRD" : modeLine.toUpperCase();
-        
-        System.out.print("Config path [config.json]: ");
-        String configLine = scanner.hasNextLine() ? scanner.nextLine().trim() : "";
-        if (configLine.isEmpty() && scanner.hasNext()) {
-            configLine = scanner.next().trim();
-            if (scanner.hasNextLine()) scanner.nextLine();
-        }
-        if ("q".equalsIgnoreCase(configLine)) {
-            System.out.println("Cancelled.");
-            return;
-        }
-        String configPath = configLine.isEmpty() ? "config.json" : configLine;
-        
-        System.out.println("\nRunning: mode=" + mode + ", config=" + configPath);
-        try {
-            com.treloc.xtreloc.app.cli.XTreLocCLI.runWithoutLogo(mode, configPath);
-            System.out.println("\nCLI completed successfully.");
-        } catch (Exception e) {
-            System.err.println("\nCLI failed: " + e.getMessage());
-        }
-        System.out.println("");
     }
     
     private static void launchGUI(String[] args) {
         try {
-            // Remove mode flag if present
             String[] guiArgs = removeModeFlag(args, "--gui", "-g");
             com.treloc.xtreloc.app.gui.XTreLocGUI.main(guiArgs);
         } catch (Exception e) {
@@ -312,7 +278,6 @@ public class XTreLoc {
     
     private static void launchTUI(String[] args) {
         try {
-            // Remove mode flag if present
             String[] tuiArgs = removeModeFlag(args, "--tui", "-t");
             com.treloc.xtreloc.app.tui.XTreLocTUI.main(tuiArgs);
         } catch (Exception e) {
@@ -323,7 +288,6 @@ public class XTreLoc {
     
     private static void launchCLI(String[] args) {
         try {
-            // Remove mode flag if present
             String[] cliArgs = removeModeFlag(args, "--cli", "-c");
             com.treloc.xtreloc.app.cli.XTreLocCLI.main(cliArgs);
         } catch (Exception e) {
@@ -331,7 +295,8 @@ public class XTreLoc {
             e.printStackTrace();
         }
     }
-    
+
+    /** Removes the given mode flag (and its value if present) from args. */
     private static String[] removeModeFlag(String[] args, String... flags) {
         if (args.length == 0) {
             return args;
@@ -343,9 +308,8 @@ public class XTreLoc {
             for (String flag : flags) {
                 if (flag.equals(args[i])) {
                     isFlag = true;
-                    // If flag is followed by a value (like --config path), skip the value too
                     if (i + 1 < args.length && !args[i + 1].startsWith("-")) {
-                        i++; // skip the value
+                        i++;
                     }
                     break;
                 }
@@ -356,7 +320,8 @@ public class XTreLoc {
         }
         return result.toArray(new String[0]);
     }
-    
+
+    /** Prints command-line help to stdout. */
     private static void showHelp() {
         System.out.println("");
         System.out.println("xTreLoc - Multi-method hypocenter location software");
@@ -387,7 +352,8 @@ public class XTreLoc {
         System.out.println("  java -jar xTreLoc.jar GRD config.json    # Run GRD mode via CLI");
         System.out.println("");
     }
-    
+
+    /** Prints version string to stdout. */
     private static void showVersion() {
         String version = com.treloc.xtreloc.util.VersionInfo.getVersionString();
         System.out.println(version);
