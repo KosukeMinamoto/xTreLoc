@@ -3,10 +3,14 @@ package com.treloc.xtreloc.app.gui.view;
 import com.treloc.xtreloc.app.gui.util.AppPanelStyle;
 import com.treloc.xtreloc.app.gui.util.AppSettings;
 import com.treloc.xtreloc.app.gui.util.GuiExecutionLog;
+import com.treloc.xtreloc.app.gui.util.MainWindowSizePresets;
+import com.treloc.xtreloc.app.gui.util.UiFonts;
 import com.treloc.xtreloc.app.gui.util.VersionInfo;
 
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
+import javax.swing.event.ChangeEvent;
+import javax.swing.event.ChangeListener;
 import java.awt.*;
 import java.io.File;
 import java.util.logging.Level;
@@ -22,6 +26,7 @@ public class SettingsPanel extends JPanel {
     private static final String CARD_GENERAL = "General";
     private static final String CARD_CHART = "Chart";
     private static final String CARD_PICKING = "Picking";
+    private static final String CARD_SOLVER = "Solver";
     private static final String CARD_ABOUT = "About";
 
     private JComboBox<String> fontCombo;
@@ -37,6 +42,7 @@ public class SettingsPanel extends JPanel {
     private JSpinner chartAxisLabelFontSizeSpinner;
     private JSpinner chartTickLabelFontSizeSpinner;
     private JSpinner chartLineWidthSpinner;
+    private JSpinner chartConvergenceRepaintThrottleSpinner;
     private JTextField backgroundColorField;
     private JTextField gridlineColorField;
     private JSpinner gridlineWidthSpinner;
@@ -44,6 +50,15 @@ public class SettingsPanel extends JPanel {
     private JTextField defaultSymbolColorField;
     private JCheckBox confirmBeforeOverwriteCheckBox;
     private JSpinner recentFilesCountSpinner;
+    private JComboBox<String> mainWindowPresetCombo;
+    private JSpinner mainWindowWidthSpinner;
+    private JSpinner mainWindowHeightSpinner;
+    private JLabel mainWindowWidthLabel;
+    private JLabel mainWindowHeightLabel;
+    private JLabel mainWindowSizeSummaryLabel;
+    private JButton mainWindowFitScreenButton;
+    /** Avoid preset ↔ spinner feedback loops. */
+    private boolean mainWindowSizeUiSync;
     private JCheckBox autoUpdateCheckBox;
     private JSpinner logLimitMbSpinner;
     private JSpinner logCountSpinner;
@@ -52,16 +67,16 @@ public class SettingsPanel extends JPanel {
     private JComboBox<String> pickingMouseContextCombo;
     private JComboBox<String> pickingKeyPCombo;
     private JComboBox<String> pickingKeySCombo;
+    /** Index 0 = layered 1D, 1 = TauP — labels only; values saved via {@link AppSettings#setRaytraceMethod}. */
+    private JComboBox<String> raytraceMethodCombo;
     private JButton applyButton;
     private MapView mapView;
-    private Window parentWindow;
     private AppSettings currentSettings;
     private CardLayout cardLayout;
     private JPanel detailCardsPanel;
 
-    public SettingsPanel(MapView mapView, Window parentWindow) {
+    public SettingsPanel(MapView mapView) {
         this.mapView = mapView;
-        this.parentWindow = parentWindow;
         this.currentSettings = AppSettings.load();
         setLayout(new BorderLayout(10, 10));
         setBorder(new EmptyBorder(10, 10, 10, 10));
@@ -74,6 +89,7 @@ public class SettingsPanel extends JPanel {
         String[] categories = {
             CARD_LOGGING,
             CARD_GENERAL,
+            CARD_SOLVER,
             CARD_CHART,
             CARD_PICKING,
             CARD_ABOUT
@@ -82,7 +98,7 @@ public class SettingsPanel extends JPanel {
         JList<String> categoryList = new JList<>(categories);
         categoryList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
         categoryList.setSelectedIndex(0);
-        categoryList.setFont(categoryList.getFont().deriveFont(Font.PLAIN, 13f));
+        categoryList.setFont(UiFonts.uiPlain(13f));
         categoryList.setFixedCellHeight(28);
         AppPanelStyle.styleList(categoryList);
         JScrollPane leftScroll = new JScrollPane(categoryList);
@@ -99,6 +115,7 @@ public class SettingsPanel extends JPanel {
 
         detailCardsPanel.add(wrapCardTopLeft(buildLoggingPanel()), CARD_LOGGING);
         detailCardsPanel.add(wrapCardTopLeft(buildGeneralPanel()), CARD_GENERAL);
+        detailCardsPanel.add(wrapCardTopLeft(buildSolverPanel()), CARD_SOLVER);
         detailCardsPanel.add(wrapCardTopLeft(buildChartPanel()), CARD_CHART);
         detailCardsPanel.add(wrapCardTopLeft(buildPickingPanel()), CARD_PICKING);
         detailCardsPanel.add(wrapCardTopLeft(buildAboutPanel()), CARD_ABOUT);
@@ -111,7 +128,8 @@ public class SettingsPanel extends JPanel {
         applyButton = new JButton("Apply");
         applyButton.addActionListener(e -> applySettings());
         AppPanelStyle.stylePrimaryButton(applyButton);
-        JPanel bottomPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
+        JPanel bottomPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
+        AppPanelStyle.setPanelBackground(bottomPanel);
         bottomPanel.add(applyButton);
         rightPanel.add(bottomPanel, BorderLayout.SOUTH);
 
@@ -170,17 +188,34 @@ public class SettingsPanel extends JPanel {
         }
     }
 
+    /**
+     * Keeps settings form at the top-left of the card (avoids vertical centering when the details area is tall).
+     */
     private static JPanel wrapCardTopLeft(JPanel content) {
-        JPanel wrapper = new JPanel(new BorderLayout());
-        wrapper.add(content, BorderLayout.NORTH);
+        JPanel wrapper = new JPanel(new GridBagLayout());
+        AppPanelStyle.setPanelBackground(wrapper);
+        content.setAlignmentX(Component.LEFT_ALIGNMENT);
+        GridBagConstraints c = new GridBagConstraints();
+        c.gridx = 0;
+        c.gridy = 0;
+        c.anchor = GridBagConstraints.NORTHWEST;
+        c.weightx = 1.0;
+        c.weighty = 0.0;
+        c.fill = GridBagConstraints.NONE;
+        c.insets = new Insets(0, 0, 0, 0);
+        wrapper.add(content, c);
+        c.gridy = 1;
+        c.weighty = 1.0;
+        wrapper.add(Box.createVerticalGlue(), c);
         return wrapper;
     }
 
     private JPanel buildLoggingPanel() {
         JPanel p = new JPanel(new GridBagLayout());
+        AppPanelStyle.setPanelBackground(p);
         GridBagConstraints gbc = new GridBagConstraints();
         gbc.insets = new Insets(5, 5, 5, 5);
-        gbc.anchor = GridBagConstraints.WEST;
+        gbc.anchor = GridBagConstraints.NORTHWEST;
 
         gbc.gridx = 0; gbc.gridy = 0;
         p.add(new JLabel("Log Level:"), gbc);
@@ -216,9 +251,10 @@ public class SettingsPanel extends JPanel {
 
     private JPanel buildGeneralPanel() {
         JPanel p = new JPanel(new GridBagLayout());
+        AppPanelStyle.setPanelBackground(p);
         GridBagConstraints gbc = new GridBagConstraints();
         gbc.insets = new Insets(5, 5, 5, 5);
-        gbc.anchor = GridBagConstraints.WEST;
+        gbc.anchor = GridBagConstraints.NORTHWEST;
         gbc.fill = GridBagConstraints.HORIZONTAL;
         gbc.weightx = 1.0;
 
@@ -238,26 +274,193 @@ public class SettingsPanel extends JPanel {
         themeCombo = new JComboBox<>(getAvailableThemes());
         p.add(themeCombo, gbc);
 
-        gbc.gridx = 0; gbc.gridy = 2;
+        gbc.gridx = 0; gbc.gridy = 2; gbc.gridwidth = 3;
+        p.add(new JLabel("Main window size:"), gbc);
+        gbc.gridy = 3;
+        mainWindowPresetCombo = new JComboBox<>(MainWindowSizePresets.comboLabels());
+        mainWindowPresetCombo.addActionListener(e -> onMainWindowPresetSelected());
+        p.add(mainWindowPresetCombo, gbc);
+        gbc.gridwidth = 1;
+
+        gbc.gridx = 0; gbc.gridy = 4; gbc.gridwidth = 4;
+        mainWindowSizeSummaryLabel = new JLabel(" ");
+        mainWindowSizeSummaryLabel.setFont(UiFonts.uiPlain(12f));
+        p.add(mainWindowSizeSummaryLabel, gbc);
+
+        gbc.gridx = 0; gbc.gridy = 5;
+        gbc.gridwidth = 1;
+        gbc.weightx = 0;
+        mainWindowWidthLabel = new JLabel("Width (px):");
+        p.add(mainWindowWidthLabel, gbc);
+        gbc.gridx = 1;
+        gbc.gridwidth = 3;
+        gbc.weightx = 1.0;
+        mainWindowWidthSpinner = new JSpinner(new SpinnerNumberModel(1800,
+            MainWindowSizePresets.WIDTH_MIN, MainWindowSizePresets.WIDTH_MAX, 10));
+        p.add(mainWindowWidthSpinner, gbc);
+
+        gbc.gridx = 0; gbc.gridy = 6;
+        gbc.gridwidth = 1;
+        gbc.weightx = 0;
+        mainWindowHeightLabel = new JLabel("Height (px):");
+        p.add(mainWindowHeightLabel, gbc);
+        gbc.gridx = 1;
+        gbc.gridwidth = 3;
+        gbc.weightx = 1.0;
+        mainWindowHeightSpinner = new JSpinner(new SpinnerNumberModel(850,
+            MainWindowSizePresets.HEIGHT_MIN, MainWindowSizePresets.HEIGHT_MAX, 10));
+        p.add(mainWindowHeightSpinner, gbc);
+
+        int spinH = Math.max(mainWindowWidthSpinner.getPreferredSize().height,
+            mainWindowHeightSpinner.getPreferredSize().height);
+        Dimension spinSize = new Dimension(96, spinH);
+        mainWindowWidthSpinner.setPreferredSize(spinSize);
+        mainWindowHeightSpinner.setPreferredSize(spinSize);
+
+        ChangeListener mainWinDimListener = this::onMainWindowDimensionSpinnerChanged;
+        mainWindowWidthSpinner.addChangeListener(mainWinDimListener);
+        mainWindowHeightSpinner.addChangeListener(mainWinDimListener);
+
+        gbc.gridx = 0; gbc.gridy = 7;
+        gbc.gridwidth = 4;
+        gbc.weightx = 1.0;
+        mainWindowFitScreenButton = new JButton("Use primary screen work area");
+        mainWindowFitScreenButton.addActionListener(e -> applyPrimaryScreenWorkAreaToSpinners());
+        p.add(mainWindowFitScreenButton, gbc);
+        gbc.gridwidth = 1;
+
+        gbc.gridx = 0; gbc.gridy = 8;
+        gbc.gridwidth = 4;
+        p.add(new JLabel("<html><i>Choose a preset or <b>Custom</b> to edit width/height. \"Use primary screen work area\" switches to Custom. Takes effect after restart.</i></html>"), gbc);
+
+        gbc.gridx = 0; gbc.gridy = 9;
+        gbc.gridwidth = 1;
+        gbc.weightx = 0;
         p.add(new JLabel("Confirm before overwrite:"), gbc);
         gbc.gridx = 1;
+        gbc.gridwidth = 1;
+        gbc.weightx = 1.0;
         confirmBeforeOverwriteCheckBox = new JCheckBox("Ask before overwriting files", true);
         p.add(confirmBeforeOverwriteCheckBox, gbc);
 
-        gbc.gridx = 0; gbc.gridy = 3;
+        gbc.gridx = 0; gbc.gridy = 10;
+        gbc.weightx = 0;
         p.add(new JLabel("Recent files count:"), gbc);
         gbc.gridx = 1;
         recentFilesCountSpinner = new JSpinner(new SpinnerNumberModel(10, 1, 50, 1));
         p.add(recentFilesCountSpinner, gbc);
 
+        refreshMainWindowSizeUi();
+
         return p;
+    }
+
+    private JPanel buildSolverPanel() {
+        JPanel p = new JPanel(new GridBagLayout());
+        AppPanelStyle.setPanelBackground(p);
+        GridBagConstraints gbc = new GridBagConstraints();
+        gbc.insets = new Insets(5, 5, 5, 5);
+        gbc.anchor = GridBagConstraints.NORTHWEST;
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+        gbc.weightx = 1.0;
+        gbc.gridx = 0;
+        gbc.gridy = 0;
+        p.add(new JLabel("Travel-time engine:"), gbc);
+        gbc.gridx = 1;
+        raytraceMethodCombo = new JComboBox<>(new String[] {
+            "Layered 1D — fastest S (default)",
+            "TauP — spherical, fastest S (tts,S)"
+        });
+        AppPanelStyle.styleComboBox(raytraceMethodCombo);
+        p.add(raytraceMethodCombo, gbc);
+        gbc.gridx = 0;
+        gbc.gridy = 1;
+        gbc.gridwidth = 2;
+        p.add(new JLabel(
+            "<html><i>Same velocity file as the main window (e.g. prem.nd). "
+                + "TauP mode uses finite differences for location derivatives (slower).</i></html>"), gbc);
+        return p;
+    }
+
+    private void onMainWindowPresetSelected() {
+        if (mainWindowSizeUiSync || mainWindowPresetCombo == null) {
+            return;
+        }
+        int idx = mainWindowPresetCombo.getSelectedIndex();
+        if (MainWindowSizePresets.isCustomComboIndex(idx)) {
+            refreshMainWindowSizeUi();
+            return;
+        }
+        mainWindowSizeUiSync = true;
+        try {
+            mainWindowWidthSpinner.setValue(MainWindowSizePresets.presetWidth(idx));
+            mainWindowHeightSpinner.setValue(MainWindowSizePresets.presetHeight(idx));
+        } finally {
+            mainWindowSizeUiSync = false;
+        }
+        refreshMainWindowSizeUi();
+    }
+
+    private void onMainWindowDimensionSpinnerChanged(ChangeEvent e) {
+        if (mainWindowSizeUiSync || mainWindowPresetCombo == null) {
+            return;
+        }
+        mainWindowSizeUiSync = true;
+        try {
+            int w = ((Number) mainWindowWidthSpinner.getValue()).intValue();
+            int h = ((Number) mainWindowHeightSpinner.getValue()).intValue();
+            mainWindowPresetCombo.setSelectedIndex(MainWindowSizePresets.presetIndexForDimensions(w, h));
+        } finally {
+            mainWindowSizeUiSync = false;
+        }
+        refreshMainWindowSizeUi();
+    }
+
+    private void refreshMainWindowSizeUi() {
+        if (mainWindowPresetCombo == null) {
+            return;
+        }
+        int idx = mainWindowPresetCombo.getSelectedIndex();
+        boolean custom = MainWindowSizePresets.isCustomComboIndex(idx);
+        if (mainWindowWidthSpinner != null) {
+            mainWindowWidthSpinner.setEnabled(custom);
+            mainWindowHeightSpinner.setEnabled(custom);
+        }
+        if (mainWindowSizeSummaryLabel == null) {
+            return;
+        }
+        if (custom) {
+            int w = ((Number) mainWindowWidthSpinner.getValue()).intValue();
+            int h = ((Number) mainWindowHeightSpinner.getValue()).intValue();
+            mainWindowSizeSummaryLabel.setText(
+                "Selected: Custom — " + w + " × " + h + " px (width/height below are editable).");
+        } else {
+            mainWindowSizeSummaryLabel.setText("Selected: " + MainWindowSizePresets.presetSummary(idx));
+        }
+    }
+
+    private void applyPrimaryScreenWorkAreaToSpinners() {
+        Rectangle r = MainWindowSizePresets.primaryScreenWorkArea();
+        if (r.width < MainWindowSizePresets.WIDTH_MIN || r.height < MainWindowSizePresets.HEIGHT_MIN) {
+            return;
+        }
+        mainWindowSizeUiSync = true;
+        try {
+            mainWindowWidthSpinner.setValue(MainWindowSizePresets.clampWidth(r.width));
+            mainWindowHeightSpinner.setValue(MainWindowSizePresets.clampHeight(r.height));
+            mainWindowPresetCombo.setSelectedIndex(MainWindowSizePresets.CUSTOM_COMBO_INDEX);
+        } finally {
+            mainWindowSizeUiSync = false;
+        }
+        refreshMainWindowSizeUi();
     }
 
     private JPanel buildChartPanel() {
         JPanel p = new JPanel(new GridBagLayout());
+        AppPanelStyle.setPanelBackground(p);
         GridBagConstraints gbc = new GridBagConstraints();
         gbc.insets = new Insets(5, 5, 5, 5);
-        gbc.anchor = GridBagConstraints.WEST;
+        gbc.anchor = GridBagConstraints.NORTHWEST;
 
         gbc.gridx = 0; gbc.gridy = 0;
         p.add(new JLabel("Font:"), gbc);
@@ -331,6 +534,13 @@ public class SettingsPanel extends JPanel {
         gbc.gridx = 1;
         chartLineWidthSpinner = new JSpinner(new SpinnerNumberModel(2.0, 0.5, 5.0, 0.5));
         p.add(chartLineWidthSpinner, gbc);
+        gbc.gridx = 0; gbc.gridy = 13;
+        p.add(new JLabel("Convergence plot repaint min interval (ms, 0=off):"), gbc);
+        gbc.gridx = 1;
+        chartConvergenceRepaintThrottleSpinner = new JSpinner(new SpinnerNumberModel(350, 0, 10000, 50));
+        chartConvergenceRepaintThrottleSpinner.setToolTipText(
+            "Solver residual / likelihood chart: minimum milliseconds between repaints. Higher = lighter GUI.");
+        p.add(chartConvergenceRepaintThrottleSpinner, gbc);
         return p;
     }
 
@@ -339,9 +549,10 @@ public class SettingsPanel extends JPanel {
 
     private JPanel buildPickingPanel() {
         JPanel p = new JPanel(new GridBagLayout());
+        AppPanelStyle.setPanelBackground(p);
         GridBagConstraints gbc = new GridBagConstraints();
         gbc.insets = new Insets(5, 5, 5, 5);
-        gbc.anchor = GridBagConstraints.WEST;
+        gbc.anchor = GridBagConstraints.NORTHWEST;
 
         gbc.gridx = 0; gbc.gridy = 0;
         p.add(new JLabel("Zoom Window (seconds):"), gbc);
@@ -389,13 +600,14 @@ public class SettingsPanel extends JPanel {
 
     private JPanel buildAboutPanel() {
         JPanel p = new JPanel(new GridBagLayout());
+        AppPanelStyle.setPanelBackground(p);
         GridBagConstraints gbc = new GridBagConstraints();
         gbc.insets = new Insets(5, 5, 5, 5);
         gbc.anchor = GridBagConstraints.NORTHWEST;
 
         gbc.gridx = 0; gbc.gridy = 0; gbc.gridwidth = 2;
         JLabel titleLabel = new JLabel(VersionInfo.getApplicationName());
-        titleLabel.setFont(titleLabel.getFont().deriveFont(Font.BOLD, 14f));
+        titleLabel.setFont(UiFonts.uiBold(14f));
         p.add(titleLabel, gbc);
         gbc.gridy = 1;
         p.add(new JLabel("Version " + VersionInfo.getVersion()), gbc);
@@ -407,7 +619,7 @@ public class SettingsPanel extends JPanel {
         );
         infoArea.setEditable(false);
         infoArea.setOpaque(false);
-        infoArea.setFont(infoArea.getFont().deriveFont(Font.PLAIN, 11f));
+        infoArea.setFont(UiFonts.uiPlain(11f));
         infoArea.setRows(5);
         p.add(infoArea, gbc);
         gbc.gridy = 3; gbc.gridwidth = 1;
@@ -430,6 +642,18 @@ public class SettingsPanel extends JPanel {
         if (zoomWindowSpinner != null) zoomWindowSpinner.setValue(currentSettings.getZoomWindowSeconds());
         if (confirmBeforeOverwriteCheckBox != null) confirmBeforeOverwriteCheckBox.setSelected(currentSettings.isConfirmBeforeOverwrite());
         if (recentFilesCountSpinner != null) recentFilesCountSpinner.setValue(currentSettings.getRecentFilesCount());
+        if (mainWindowWidthSpinner != null && mainWindowHeightSpinner != null && mainWindowPresetCombo != null) {
+            mainWindowSizeUiSync = true;
+            try {
+                mainWindowWidthSpinner.setValue(currentSettings.getMainWindowWidth());
+                mainWindowHeightSpinner.setValue(currentSettings.getMainWindowHeight());
+                mainWindowPresetCombo.setSelectedIndex(MainWindowSizePresets.presetIndexForDimensions(
+                    currentSettings.getMainWindowWidth(), currentSettings.getMainWindowHeight()));
+            } finally {
+                mainWindowSizeUiSync = false;
+            }
+            refreshMainWindowSizeUi();
+        }
         if (autoUpdateCheckBox != null) autoUpdateCheckBox.setSelected(currentSettings.isAutoUpdateEnabled());
         if (logLimitMbSpinner != null) logLimitMbSpinner.setValue(currentSettings.getLogLimitBytes() / (1024 * 1024));
         if (logCountSpinner != null) logCountSpinner.setValue(currentSettings.getLogCount());
@@ -438,11 +662,17 @@ public class SettingsPanel extends JPanel {
         if (pickingMouseContextCombo != null) pickingMouseContextCombo.setSelectedItem(currentSettings.getPickingMouseContext());
         if (pickingKeyPCombo != null) pickingKeyPCombo.setSelectedItem(currentSettings.getPickingKeyP());
         if (pickingKeySCombo != null) pickingKeySCombo.setSelectedItem(currentSettings.getPickingKeyS());
+        if (raytraceMethodCombo != null) {
+            raytraceMethodCombo.setSelectedIndex("taup".equalsIgnoreCase(currentSettings.getRaytraceMethod()) ? 1 : 0);
+        }
         com.treloc.xtreloc.app.gui.util.ChartAppearanceSettings chart = currentSettings.getChartAppearance();
         if (chartTitleFontSizeSpinner != null) chartTitleFontSizeSpinner.setValue(chart.getTitleFontSize());
         if (chartAxisLabelFontSizeSpinner != null) chartAxisLabelFontSizeSpinner.setValue(chart.getAxisLabelFontSize());
         if (chartTickLabelFontSizeSpinner != null) chartTickLabelFontSizeSpinner.setValue(chart.getTickLabelFontSize());
         if (chartLineWidthSpinner != null) chartLineWidthSpinner.setValue((double) chart.getLineWidth());
+        if (chartConvergenceRepaintThrottleSpinner != null) {
+            chartConvergenceRepaintThrottleSpinner.setValue(chart.getConvergenceRepaintThrottleMs());
+        }
         if (backgroundColorField != null) backgroundColorField.setText(chart.getBackgroundColor());
         if (gridlineColorField != null) gridlineColorField.setText(chart.getGridlineColor());
         if (gridlineWidthSpinner != null) gridlineWidthSpinner.setValue((double) chart.getGridlineWidth());
@@ -473,6 +703,10 @@ public class SettingsPanel extends JPanel {
         currentSettings.setZoomWindowSeconds(((Number) zoomWindowSpinner.getValue()).doubleValue());
         currentSettings.setConfirmBeforeOverwrite(confirmBeforeOverwriteCheckBox.isSelected());
         currentSettings.setRecentFilesCount((Integer) recentFilesCountSpinner.getValue());
+        if (mainWindowWidthSpinner != null && mainWindowHeightSpinner != null) {
+            currentSettings.setMainWindowWidth(((Number) mainWindowWidthSpinner.getValue()).intValue());
+            currentSettings.setMainWindowHeight(((Number) mainWindowHeightSpinner.getValue()).intValue());
+        }
         currentSettings.setAutoUpdateEnabled(autoUpdateCheckBox.isSelected());
         currentSettings.setLogLimitBytes((Integer) logLimitMbSpinner.getValue() * 1024 * 1024);
         currentSettings.setLogCount((Integer) logCountSpinner.getValue());
@@ -481,11 +715,17 @@ public class SettingsPanel extends JPanel {
         currentSettings.setPickingMouseContext((String) pickingMouseContextCombo.getSelectedItem());
         currentSettings.setPickingKeyP((String) pickingKeyPCombo.getSelectedItem());
         currentSettings.setPickingKeyS((String) pickingKeySCombo.getSelectedItem());
+        if (raytraceMethodCombo != null) {
+            currentSettings.setRaytraceMethod(raytraceMethodCombo.getSelectedIndex() == 1 ? "taup" : "layered");
+        }
         com.treloc.xtreloc.app.gui.util.ChartAppearanceSettings chart = currentSettings.getChartAppearance();
         chart.setTitleFontSize(((Number) chartTitleFontSizeSpinner.getValue()).intValue());
         chart.setAxisLabelFontSize(((Number) chartAxisLabelFontSizeSpinner.getValue()).intValue());
         chart.setTickLabelFontSize(((Number) chartTickLabelFontSizeSpinner.getValue()).intValue());
         chart.setLineWidth(((Number) chartLineWidthSpinner.getValue()).floatValue());
+        if (chartConvergenceRepaintThrottleSpinner != null) {
+            chart.setConvergenceRepaintThrottleMs(((Number) chartConvergenceRepaintThrottleSpinner.getValue()).intValue());
+        }
         chart.setBackgroundColor(backgroundColorField.getText().trim().isEmpty() ? "#FFFFFF" : backgroundColorField.getText().trim());
         chart.setGridlineColor(gridlineColorField.getText().trim().isEmpty() ? "#E0E0E0" : gridlineColorField.getText().trim());
         chart.setGridlineWidth(((Number) gridlineWidthSpinner.getValue()).floatValue());
@@ -495,229 +735,17 @@ public class SettingsPanel extends JPanel {
         currentSettings.save();
         GuiExecutionLog.info("Settings: values saved to disk.");
 
-        // Apply only settings that do not replace the UI tree (avoids breaking tab switching).
         applyFont(currentSettings.getFont());
         applySymbolSize(currentSettings.getSymbolSize());
         applyDefaultPalette(currentSettings.getDefaultPalette());
         applyLogLevel(currentSettings.getLogLevel());
-        // Theme and other L&F changes are NOT applied here; they take effect after restart.
 
-        int choice = JOptionPane.showConfirmDialog(this,
-            "Settings saved.\nTheme and some UI settings require a restart to take effect.\nRestart the application now?",
-            "Settings",
-            JOptionPane.YES_NO_OPTION,
-            JOptionPane.QUESTION_MESSAGE);
-        if (choice == JOptionPane.YES_OPTION) {
-            GuiExecutionLog.info("Settings: user chose to restart the application.");
-            restartApplication();
-        }
-    }
-
-    /**
-     * Restarts the application by starting a new JVM process and exiting the current one.
-     * When running from a packaged app (jar or app bundle), builds classpath from the
-     * application jar(s) only to avoid "lib/runtime" or other launcher paths that may not exist.
-     */
-    private void restartApplication() {
-        if (parentWindow != null) {
-            parentWindow.dispose();
-        }
-        try {
-            String launcherPath = findRestartLauncher();
-            if (launcherPath != null) {
-                new ProcessBuilder(launcherPath).inheritIO().start();
-                System.exit(0);
-                return;
-            }
-            File javaBin = findJavaExecutable();
-            if (javaBin == null) {
-                throw new IllegalStateException("Could not find java executable for restart.");
-            }
-            String mainClass = "com.treloc.xtreloc.app.gui.XTreLocGUI";
-            File appJarOrDir = applicationJarOrDirectory();
-            String classPath;
-            File workDir;
-            if (appJarOrDir != null && appJarOrDir.exists()) {
-                if (appJarOrDir.isFile() && appJarOrDir.getName().toLowerCase().endsWith(".jar")) {
-                    workDir = appJarOrDir.getParentFile();
-                    classPath = buildClasspathFromJarDirectory(workDir, appJarOrDir);
-                } else if (appJarOrDir.isDirectory()) {
-                    workDir = appJarOrDir;
-                    classPath = System.getProperty("java.class.path");
-                } else {
-                    workDir = applicationBaseDirectory();
-                    classPath = System.getProperty("java.class.path");
-                }
-            } else {
-                workDir = applicationBaseDirectory();
-                classPath = System.getProperty("java.class.path");
-            }
-            if (classPath == null || classPath.isEmpty()) {
-                JOptionPane.showMessageDialog(null,
-                    "Could not restart automatically. Please restart the application manually.",
-                    "Restart", JOptionPane.WARNING_MESSAGE);
-                System.exit(0);
-                return;
-            }
-            ProcessBuilder pb = new ProcessBuilder(
-                javaBin.getAbsolutePath(), "-cp", classPath, mainClass);
-            if (workDir != null && workDir.isDirectory()) {
-                pb.directory(workDir);
-            }
-            pb.inheritIO();
-            pb.start();
-        } catch (Exception e) {
-            logger.log(Level.WARNING, "Restart failed: " + e.getMessage(), e);
-            GuiExecutionLog.warning("Settings: restart failed — " + e.getMessage());
-            JOptionPane.showMessageDialog(null,
-                "Could not restart automatically: " + e.getMessage() + "\nPlease restart the application manually.",
-                "Restart", JOptionPane.WARNING_MESSAGE);
-        }
-        System.exit(0);
-    }
-
-    /**
-     * If the current process is the native launcher of an app bundle (e.g. .app/Contents/MacOS/xTreLoc),
-     * returns its path so we can restart by re-executing it. Otherwise returns null.
-     */
-    private static String findRestartLauncher() {
-        try {
-            java.util.Optional<String> cmd = ProcessHandle.current().info().command();
-            if (cmd.isPresent()) {
-                String path = cmd.get();
-                if (path != null && path.contains(".app") && path.contains("Contents" + File.separator + "MacOS")) {
-                    File f = new File(path);
-                    if (f.exists()) return path;
-                }
-            }
-        } catch (Exception e) {
-            // ignore
-        }
-        return null;
-    }
-
-    /**
-     * Finds the java executable to use for restart. Prefers the current process's executable
-     * (so restart works from .app or any launch context), then .app bundle runtime, then java.home.
-     */
-    private static File findJavaExecutable() {
-        try {
-            java.util.Optional<String> currentCommand = ProcessHandle.current().info().command();
-            if (currentCommand.isPresent()) {
-                File fromProcess = new File(currentCommand.get());
-                if (fromProcess.exists()) {
-                    return fromProcess;
-                }
-            }
-        } catch (Exception e) {
-            // ignore, try next method
-        }
-        File fromAppBundle = findJavaInAppBundle();
-        if (fromAppBundle != null) return fromAppBundle;
-        String javaHome = System.getProperty("java.home");
-        if (javaHome == null || javaHome.isEmpty()) return null;
-        File javaHomeFile = new File(javaHome);
-        if (!javaHomeFile.isAbsolute()) {
-            String userDir = System.getProperty("user.dir");
-            javaHomeFile = new File(userDir != null ? userDir : ".", javaHome);
-        }
-        String base = javaHomeFile.getAbsolutePath();
-        File[] candidates = {
-            new File(base, "bin" + File.separator + "java"),
-            new File(base, "jre" + File.separator + "bin" + File.separator + "java"),
-            new File(base, "java")
-        };
-        for (File c : candidates) {
-            if (c.exists()) return c;
-        }
-        return null;
-    }
-
-    /**
-     * Returns the application jar file or the directory containing the main class (for development).
-     */
-    private static File applicationJarOrDirectory() {
-        try {
-            java.net.URL location = com.treloc.xtreloc.app.gui.XTreLocGUI.class.getProtectionDomain()
-                .getCodeSource().getLocation();
-            if (location == null) return null;
-            return new File(location.toURI());
-        } catch (Exception e) {
-            return null;
-        }
-    }
-
-    /**
-     * Finds java executable inside the current app bundle (macOS .app). Used when java.home
-     * points to a missing or moved path (e.g. build/dist after copying the .app).
-     */
-    private static File findJavaInAppBundle() {
-        try {
-            File codeSource = applicationJarOrDirectory();
-            if (codeSource == null) return null;
-            File dir = codeSource.isDirectory() ? codeSource : codeSource.getParentFile();
-            while (dir != null) {
-                if (dir.getName().endsWith(".app")) {
-                    File runtimeHome = new File(dir, "Contents" + File.separator + "runtime" + File.separator + "Contents" + File.separator + "Home");
-                    File javaBin = new File(runtimeHome, "bin" + File.separator + "java");
-                    if (javaBin.exists()) return javaBin;
-                    return null;
-                }
-                dir = dir.getParentFile();
-            }
-        } catch (Exception e) {
-            return null;
-        }
-        return null;
-    }
-
-    /**
-     * Builds a classpath string from the given directory: the given main jar plus all other jars in the same directory.
-     * Used when restarting from a packaged app so we do not pass launcher-specific paths like "lib/runtime".
-     */
-    private static String buildClasspathFromJarDirectory(File directory, File mainJar) {
-        if (directory == null || !directory.isDirectory() || mainJar == null) return "";
-        java.util.List<String> paths = new java.util.ArrayList<>();
-        paths.add(mainJar.getAbsolutePath());
-        File[] files = directory.listFiles();
-        if (files != null) {
-            for (File f : files) {
-                if (f.isFile() && f.getName().toLowerCase().endsWith(".jar") && !f.equals(mainJar)) {
-                    paths.add(f.getAbsolutePath());
-                }
-            }
-        }
-        return String.join(File.pathSeparator, paths);
-    }
-
-    /**
-     * Returns the application base directory (jar parent or class output parent) so that
-     * relative classpath entries resolve correctly when restarting from an app bundle.
-     */
-    private static File applicationBaseDirectory() {
-        try {
-            java.net.URL location = com.treloc.xtreloc.app.gui.XTreLocGUI.class.getProtectionDomain()
-                .getCodeSource().getLocation();
-            if (location == null) return null;
-            File file = new File(location.toURI());
-            return file.isDirectory() ? file : file.getParentFile();
-        } catch (Exception e) {
-            return null;
-        }
+        GuiExecutionLog.info("Settings saved. If you changed theme, main window size, or similar, restart the application manually for those to apply.");
+        logger.info("Settings saved to disk (restart manually if theme or window size changed).");
     }
 
     private void applyFont(String font) {
-        Font selectedFont;
-        switch (font) {
-            case "Sans Serif": selectedFont = new Font(Font.SANS_SERIF, Font.PLAIN, 12); break;
-            case "Serif": selectedFont = new Font(Font.SERIF, Font.PLAIN, 12); break;
-            case "Monospaced": selectedFont = new Font(Font.MONOSPACED, Font.PLAIN, 12); break;
-            default: selectedFont = UIManager.getFont("Label.font");
-        }
-        UIManager.put("Label.font", selectedFont);
-        UIManager.put("Button.font", selectedFont);
-        UIManager.put("TextField.font", selectedFont);
-        UIManager.put("ComboBox.font", selectedFont);
+        UiFonts.applyToUIManager(font);
     }
 
     private void applySymbolSize(int size) {

@@ -163,7 +163,7 @@ public class CatalogTablePanel extends JPanel {
         return scatterYColumnModelIndex;
     }
 
-    /** Map color column model index (for histogram when in 2..8). */
+    /** Map color column model index (for histogram when in 2..9, excluding non-numeric columns). */
     public int getColorColumnModelIndex() {
         return colorColumnIndex;
     }
@@ -420,7 +420,7 @@ public class CatalogTablePanel extends JPanel {
         buttonPanel.add(removeButton);
         
         JButton refreshCatalogButton = new JButton();
-        java.net.URL refreshUrl = CatalogTablePanel.class.getResource("/images/refresh.png");
+        java.net.URL refreshUrl = CatalogTablePanel.class.getResource("/images/Refresh.png");
         if (refreshUrl != null) {
             ImageIcon refreshIcon = new ImageIcon(refreshUrl);
             Image refreshImg = refreshIcon.getImage().getScaledInstance(16, 16, Image.SCALE_SMOOTH);
@@ -1282,7 +1282,6 @@ public class CatalogTablePanel extends JPanel {
                     GuiExecutionLog.info(String.format("Viewer: reloaded catalog \"%s\" (%d events)",
                         f.getName(), result.hypocenters.size()));
                 } catch (java.util.concurrent.CancellationException e) {
-                    // ignore
                 } catch (Exception e) {
                     logger.log(Level.SEVERE, "Catalog reload error: " + f.getAbsolutePath() + " - " + e.getMessage(), e);
                     GuiExecutionLog.severe("Viewer: catalog reload failed — " + f.getName() + ": " + e.getMessage());
@@ -1325,7 +1324,6 @@ public class CatalogTablePanel extends JPanel {
                     addLoadedCatalogToUI(f, result);
                     updateStatusLabel();
                 } catch (java.util.concurrent.CancellationException e) {
-                    // ignore
                 } catch (Exception e) {
                     logger.log(Level.SEVERE, "Catalog load error: " + f.getAbsolutePath() + " - " + e.getMessage(), e);
                     GuiExecutionLog.severe("Viewer: catalog load failed — " + f.getName() + ": " + e.getMessage());

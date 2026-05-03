@@ -19,15 +19,15 @@
   - [Station File Format (station.tbl)](#station-file-format-stationtbl)
   - [Catalog CSV Format](#catalog-csv-format)
   - [Travel Time Difference Data File Format](#travel-time-difference-data-file-format)
+- [Configuration (config.json)](#configuration-configjson)
 - [GUI Mode](#gui-mode)
+  - [Solver Tab and Settings Tab](#solver-tab-and-settings-tab)
   - [Automatic Update Feature](#automatic-update-feature)
   - [Log Files and Settings Files](#log-files-and-settings-files)
   - [Viewer Tab Features](#viewer-tab-features)
   - [Picking Tab](#picking-tab)
 - [CLI Mode](#cli-mode)
-  - [Starting CLI Mode](#starting-cli-mode)
-  - [Command Syntax](#command-syntax)
-  - [Available Modes](#available-modes)
+  - [Starting the CLI](#starting-the-cli)
   - [Help](#help)
 - [TUI Mode](#tui-mode)
   - [Building and Running TUI](#building-and-running-tui)
@@ -38,7 +38,6 @@
   - [Step 1: Synthetic Data Generation](#step-1-synthetic-data-generation)
   - [Step 2: Hypocenter Location](#step-2-hypocenter-location)
   - [Step 3: Hypocenter Relocation](#step-3-hypocenter-relocation)
-  - [Reference Events (REF)](#reference-events-ref)
   - [Step 4: Result Visualization](#step-4-result-visualization)
   - [Output Results](#output-results)
 - [Citation of .shp file](#citation-of-shp-file)
@@ -67,10 +66,7 @@ The software can be used with three interfaces:
 - **CLI Mode**: Command-line interface for batch processing
 - **TUI Mode**: Text-based interactive interface (CUI using Lanterna). Run from the terminal by selecting mode and parameters from menus.
 
-**Quick reference (implementation)**  
-- **Config**: Use top-level `io` (per-mode I/O) and `params` (per-mode parameters) in `config.json`. See `demo/locating_example/config.json`.  
-- **CLI**: `java -jar …/xTreLoc-CLI-1.0-SNAPSHOT.jar <MODE> [config.json]` — config path optional, default `config.json`.  
-- **Demo**: Sample data and config are in `demo/locating_example/`. Run CLI from that directory with `config.json`.
+**Quick reference:** [Configuration (config.json)](#configuration-configjson) · [CLI Mode](#cli-mode) · [Demo Dataset Tutorial](#demo-dataset-tutorial) (`demo/locating_example/`).
 
 ---
 
@@ -117,18 +113,17 @@ Built JAR files are placed in `build/libs/`:
 git clone https://github.com/KosukeMinamoto/xTreLoc.git
 cd xTreLoc
 
-# Build both GUI and CLI versions
+# Build fat JARs (launcher, GUI, CLI, TUI)
 mvn clean package
 ```
 
-Built JAR files are placed in `target/`:
-- `xTreLoc-GUI-1.0-SNAPSHOT.jar` (GUI version)
-- `xTreLoc-CLI-1.0-SNAPSHOT.jar` (CLI version)
+Built JAR files are placed in `target/` (Maven Shade plugin, one `package` run):
+- `xTreLoc-1.0-SNAPSHOT.jar` (launcher: choose GUI / TUI / CLI at startup)
+- `xTreLoc-GUI-1.0-SNAPSHOT.jar` (GUI)
+- `xTreLoc-CLI-1.0-SNAPSHOT.jar` (CLI)
+- `xTreLoc-TUI-1.0-SNAPSHOT.jar` (TUI)
 
-**Build options:**
-- Build GUI-only JAR: `mvn clean package -Pgui`
-- Build CLI-only JAR: `mvn clean package -Pcli`  
-- No separate TUI profile; the default `mvn clean package` produces GUI, CLI, and TUI JARs in `target/`.
+**Note:** There are no Maven profiles such as `-Pgui` or `-Pcli` in `pom.xml`. Use Gradle tasks `guiJar`, `cliJar`, or `tuiJar` if you need to build a single variant without invoking the full shade set.
 
 #### Platform-specific build (Linux / Windows / macOS)
 
@@ -142,7 +137,7 @@ JARs are built the same on all platforms. To create **native app-images or insta
 
 On Windows use `gradlew.bat` instead of `./gradlew` (e.g. `gradlew.bat createWindowsApp`).
 
-With Maven, use `mvn clean package -Plinux`, `-Pwindows`, or `-Pmacos` on the target OS to build JARs; for native bundles use the Gradle tasks above or run `jpackage` manually.
+With Maven, `mvn clean package` produces the same JAR set on any OS. Optional profiles `-Plinux`, `-Pwindows`, and `-Pmacos` in `pom.xml` are placeholders and do not change JAR packaging. For native bundles use the Gradle tasks above, or Maven profiles such as `-PcreateApp` / `-PcreateDmg` (see `pom.xml`), or run `jpackage` manually.
 
 ### Verifying the Build
 
@@ -187,10 +182,11 @@ java -jar target/xTreLoc-CLI-1.0-SNAPSHOT.jar <MODE> [config.json]
 
 ### Station File Format (station.tbl)
 
-Space-separated format:
+Space-separated format (six columns; same order as in code: `StationRepository`):
 ```
-station,latitude,longitude,depth,Pc,Sc
+code latitude longitude H Pc Sc
 ```
+(`H` is station elevation in **meters**: positive downward, negative above sea level—the value stored internally as station depth and converted to hypocenter depth in km.)
 
 Example:
 ```
@@ -199,12 +195,12 @@ ST02 39.50 142.20 -1670 0.88 1.50
 ```
 
 **Field Descriptions**:
-- **Station name**: Station identifier
-- **Latitude**: Latitude in decimal notation (positive for north)
-- **Longitude**: Longitude in decimal notation (positive for east)
+- **code**: Station identifier
+- **latitude**: Latitude in decimal notation (positive for north)
+- **longitude**: Longitude in decimal notation (positive for east)
 - **H**: Elevation in meters (positive downward, negative above sea level)
-- **Sc**: Station correction value added to theoretical travel time difference for S-wave (seconds)
-- **Pc**: Station correction value added to theoretical travel time difference for P-wave (seconds)
+- **Pc**: Station correction added to theoretical travel-time difference for P-wave (seconds); **5th column** (after `code lat lon H`)
+- **Sc**: Station correction added to theoretical travel-time difference for S-wave (seconds); **6th column**
 
 ### Catalog CSV Format
 
@@ -271,11 +267,22 @@ ST02 ST09 12.280 1.000
 **Field Descriptions**:
 - **Travel time difference**: Travel time difference for S-wave. Corresponds to the value T_st2 - T_st1, where T_st1 and T_st2 are arrival times at stations st1 and st2, respectively.
 - **Weight**: Data quality weight. Compared with `threshold` in `config.json` to determine whether to use the detection value. For example, by inputting the maximum value of the cross-correlation function, when `threshold: 0.6`, only detections with CC>0.6 are used for location.
-In SYN mode, all values are set to 1.0. In GRD, LMO, and MCMC modes, the absolute value of the inverse of the travel time difference residual is written. For example, a detection with a residual of -2 seconds has a weight of `0.5`, and the acceptable residual in the next location step (LMO, MCMC, CLS, TRD) can be controlled with `threshold`. Note that in LMO mode, since it solves an overdetermined problem, an error is output if there are fewer than 4 detections exceeding `threshold`.
+In SYN mode, all weights are set to `1.0`. After **GRD**, **LMO**, **MCMC**, or **DE** runs, weights are updated from travel-time residuals using `|1 / (residual + ε)|` (see `HypoUtils.residual2weight` in the source). For example, a residual of −2 s gives a weight of `0.5`. The `threshold` in `config.json` filters detections by weight on read (`PointsHandler`). For later steps (LMO, MCMC, DE, CLS, TRD), use `threshold` to control which pairs are kept; the implementation does **not** emit a dedicated error for “fewer than four” observations above threshold—very few usable pairs can still cause numerical or optimization failures.
 
 #### Error estimates in .dat (Line 2)
 
 Same meaning as xerr/yerr/zerr in the catalog CSV: LMO (covariance), MCMC (posterior s.d.), DE (population s.d.), TRD (LSQR), GRD (0). Interpret accordingly.
+
+---
+
+## Configuration (config.json)
+
+The JSON file read by GUI / CLI / TUI uses a top-level layout aligned with the Java `AppConfig` model:
+
+- **`io`**: Per-mode keys (`GRD`, `LMO`, …) with paths such as `datDirectory`, `outDirectory`, and `catalogFile`.
+- **`params`**: Solver parameters per mode (e.g. CLS flags `doClustering`, `calcTripleDiff`, `useBinaryFormat` under `params.CLS`).
+
+All paths are relative to the **current working directory** of the process. Do not use a legacy `modes` / `solver`-only layout; follow **`demo/locating_example/config.json`** as the canonical example.
 
 ---
 
@@ -298,6 +305,11 @@ Or using Gradle:
 ```bash
 ./gradlew run
 ```
+
+### Solver Tab and Settings Tab
+
+- **Solver**: Select the location mode, station file, I/O directories, thresholds, and run batch jobs. Uses the same logical `config.json` structure as the CLI (`io` / `params`).
+- **Settings**: Application preferences (fonts, colors, log level, auto-update, etc.) stored under `~/.xtreloc/settings.json`.
 
 ### Automatic Update Feature
 
@@ -368,8 +380,8 @@ Real-time residual convergence plots during Solver tab execution:
 The report panel on the left side of the Viewer tab provides the following features:
 
 - **Catalog table display**: Display loaded catalog data in table format
-- **Catalog export**: Export catalog data to CSV format
-- **Report export**: Export text reports with statistical information
+- **Catalog export**: Export catalog rows to CSV (`CsvExporter`).
+- **Report export**: Export a `.txt` summary with per-column descriptive statistics (min, max, mean, median, std. dev., quartiles, IQR; numeric columns only—see `ReportPanel.writeReport`).
 - **Histogram image export**: Save histograms as image files
 - **Directory scan**: Scan directories containing `.dat` files to automatically generate catalogs
 
@@ -389,7 +401,7 @@ The Picking tab allows you to load SAC format waveform files, pick P/S wave arri
 
 - **SAC file loading**: Select and load SAC files from a directory tree
 - **Waveform display**: Display waveforms from multiple stations simultaneously
-- **Filtering**: Apply bandpass filters to process waveforms (default: 1-16 Hz)
+- **Filtering**: Apply bandpass filters to process waveforms. On waveform load, the code uses **1–16 Hz** by default (`WaveformPickingPanel`). The high-cut text field may show a different initial value; click **Update Filter** so the displayed range matches the frequencies applied to the data.
 - **Picking operations**: 
   - Left click: Pick P-wave arrival time
   - Right click: Pick S-wave arrival time
@@ -422,88 +434,33 @@ These `.obs` files can be used with external hypocenter location software (e.g.,
 
 ## CLI Mode
 
-### Starting CLI Mode
+Batch driver: one process per invocation, mode name required, optional path to the JSON config (default `config.json` in the current directory). I/O paths and solver knobs come from [Configuration (config.json)](#configuration-configjson). Mode roles and workflow are in [Introduction](#introduction) and [Demo Dataset Tutorial](#demo-dataset-tutorial).
+
+### Starting the CLI
 
 ```bash
-java -jar xTreLoc-CLI-1.0-SNAPSHOT.jar <MODE> [config.json]
+java -jar build/libs/xTreLoc-CLI-1.0-SNAPSHOT.jar <MODE> [config.json]
 ```
 
-Or using Gradle:
+With Maven, use `target/xTreLoc-CLI-1.0-SNAPSHOT.jar` instead of `build/libs/…`.
+
+**Gradle:**
 
 ```bash
 ./gradlew runCLI -PcliArgs="<MODE> [config.json]"
 ```
 
-### Command Syntax
+Example: `./gradlew runCLI -PcliArgs="GRD demo/locating_example/config.json"`
 
-```
-java -jar xTreLoc-CLI-1.0-SNAPSHOT.jar <MODE> [config.json]
-```
-
-- `<MODE>`: One of GRD, LMO, MCMC, DE, TRD, CLS, or SYN.
-- `[config.json]`: Path to configuration file (Default: `config.json`)
-
-### Available Modes
-
-#### GRD Mode (Grid Search)
-
-```bash
-java -jar xTreLoc-CLI-1.0-SNAPSHOT.jar GRD config.json
-```
-
-Executes grid search hypocenter location using focused random search for all `.dat` files in the specified directory.
-
-#### LMO Mode
-
-```bash
-java -jar xTreLoc-CLI-1.0-SNAPSHOT.jar LMO config.json
-```
-
-Applies Levenberg-Marquardt optimization to all `.dat` files.
-
-#### MCMC Mode
-
-```bash
-java -jar xTreLoc-CLI-1.0-SNAPSHOT.jar MCMC config.json
-```
-
-Executes hypocenter location using MCMC for all `.dat` files.
-
-#### CLS Mode (Spatial Clustering)
-
-```bash
-java -jar xTreLoc-CLI-1.0-SNAPSHOT.jar CLS config.json
-```
-
-Performs spatial clustering on a catalog file using the DBSCAN algorithm and creates triple difference data in binary format. Equivalent to the functionality of `ph2dt` in `hypoDD`.
-
-#### TRD Mode
-
-```bash
-java -jar xTreLoc-CLI-1.0-SNAPSHOT.jar TRD config.json
-```
-
-Executes the Triple-Difference method on a catalog file using the method by Guo & Zhang (2016). Requires binary files from CLS mode.
-
-#### SYN Mode (Synthetic Test Data Generation)
-
-```bash
-java -jar xTreLoc-CLI-1.0-SNAPSHOT.jar SYN config.json
-```
-
-Generates synthetic data in dat format from a ground truth catalog.
+- `<MODE>`: `GRD`, `LMO`, `MCMC`, `DE`, `CLS`, `TRD`, or `SYN`.
 
 ### Help
 
 ```bash
-java -jar xTreLoc-CLI-1.0-SNAPSHOT.jar --help
+java -jar build/libs/xTreLoc-CLI-1.0-SNAPSHOT.jar --help
 ```
 
-Or
-
-```bash
-java -jar xTreLoc-CLI-1.0-SNAPSHOT.jar
-```
+`-h` / `--help` prints usage and exits. With **no arguments**, behavior depends on whether stdin looks interactive (see `XTreLocCLI`): either an interactive prompt or usage text.
 
 ---
 
@@ -547,17 +504,12 @@ This tutorial explains how to use xTreLoc with the sample data in **`demo/locati
 
 ### Preparation
 
-- Java 20 or higher installed
-- xTreLoc JAR files built (GUI and/or CLI)
-- **Current directory**: For CLI, run from **`demo/locating_example/`** with `config.json` in that directory (paths in config are relative to CWD).
-- Sample data in `demo/locating_example/`:
-  - `catalog_ground_truth.csv`: Ground truth catalog
-  - `station.tbl`: Station file
-- Gnuplot (optional, for visualization scripts)
+- Java 20 or higher and built JARs ([Installation and Build](#installation-and-build))
+- **Working directory**: For the CLI examples below, use **`demo/locating_example/`** as the current directory and pass `config.json` so relative paths in the config resolve as intended (see the note at the start of this section).
+- Sample inputs there: `catalog_ground_truth.csv`, `station.tbl`
+- Optional: Gnuplot, MATLAB, Python, or GMT for [Step 4: Result Visualization](#step-4-result-visualization)
 
-- Gnuplot (optional, for visualization scripts)
-
-- **Configuration file (implementation)**: Use top-level **`io`** (per-mode I/O: `datDirectory`, `outDirectory`, `catalogFile`) and **`params`** (per-mode solver parameters). See **`demo/locating_example/config.json`** for a working example. Do not use the legacy `modes` / `solver` structure; CLS options such as `doClustering`, `calcTripleDiff`, `useBinaryFormat` go under `params.CLS`.
+See [Configuration (config.json)](#configuration-configjson); **`demo/locating_example/config.json`** is the reference layout.
 
 ### Demo Dataset Structure
 
@@ -583,22 +535,16 @@ demo/locating_example/
 ### Workflow Overview
 
 ```
-Step 1: SYN → Generate .dat files
+Step 1: SYN → .dat files
   ↓
-Step 2: Execute location methods GRD+LMO or MCMC → Output catalog.csv
+Step 2: GRD+LMO or MCMC → catalog.csv
   ↓
-Step 3: Visualization → Gnuplot/Matlab/Python/GMT or GUI
+Step 3: CLS → clustered catalog + triple_diff_*.bin, then TRD → relocated catalog
   ↓
-Step 4: CLS → Clustered catalog.csv, triple difference data (triple_diff_*.bin)
-  ↓
-Step 5: TRD
+Step 4: Visualization (Gnuplot / MATLAB / Python / GMT or GUI)
 ```
 
-Each location mode has roughly the following characteristics:
-- **GRD Mode**: Suitable for rough distribution estimation and initial hypocenter location
-- **LMO Mode**: Fast with good accuracy, but significantly affected by outliers in detection values, so it is recommended to execute after GRD mode.
-- **MCMC Mode**: Moderate speed but good location accuracy.
-- **TRD Mode**: However, for events with few detection data, some data may diverge, often resulting in reduced data. Also, the location accuracy of input data significantly affects results. Computationally intensive, so bootstrap-based error estimation is not currently implemented.
+Mode summaries and caveats (e.g. TRD input quality, bootstrap not implemented) are in [Introduction](#introduction).
 
 ### Step 1: Synthetic Data Generation
 
@@ -741,23 +687,13 @@ CLS mode outputs files corresponding to `dt.ct` in `hypoDD`, which are `triple_d
    - **Parameters**:
      - Parallelization (numJobs): Number of jobs in parallel computation (>1)
      - Weight Threshold (threshold): Weight value screening (0 means all travel time data are used)
-     - Maximum Depth: Depth limit to be explored. On the other hand, the shallow limit is the depth of the deepest station. <u>Unlike GRD, LMO, and MCMC modes, if updated beyond this depth (or shallower than stations), it is judged as a location failure and an Err tag is assigned.</u>
+     - Maximum Depth: Depth limit to be explored. On the other hand, the shallow limit is the depth of the deepest station. <u>Unlike GRD, LMO, MCMC, and DE modes, if updated beyond this depth (or shallower than stations), it is judged as a location failure and an Err tag is assigned.</u>
      - Iteration Count (iterNum): Number of iterations in each step (e.g., 10,10)
      - Distance Threshold (distKm): Distance limit between events in each step (e.g., 50,20)
      - Damping Factor (dampFact): Damping coefficient in each step (e.g., 0,1)
      Iteration Count, Distance Threshold, and Damping Factor must be given as lists. In the above example, in the first step, a network is constructed with events within 50 km, and 10 iterations are performed with Damping Factor of 0. In the next step, similarly, 10 iterations are performed with Damping Factor=1 for events within 20 km. Therefore, the number of elements in these lists must be the same.
-     - **Reference Events (REF)**: In the catalog file, events labeled as "REF" serve as fixed reference points during relocation. These events are not updated during TRD relocation and provide absolute positioning anchors. REF events are particularly useful when:
-       - Well-located events from independent methods (e.g., well-constrained earthquakes) are available
-       - Absolute positioning is needed while maintaining relative accuracy
-       - Testing relocation accuracy against known ground truth positions
-       To use REF events, simply set the `mode` column to "REF" in the input catalog CSV file before running TRD mode. REF events can be created manually in the catalog, or generated in SYN mode by setting the event type to "REF" in the ground truth catalog.
-     - **LSQR Parameters** (Parameters for the LSQR solver used internally in the Triple Difference method):
-       - LSQR ATOL (atol): Stopping tolerance. Based on the norm of Ax - b (Default: 1e-6)
-       - LSQR BTOL (btol): Stopping tolerance. Based on the norm of b (Default: 1e-6)
-       - LSQR CONLIM (conlim): Condition number limit. Stops if exceeded (Default: 1e8)
-       - LSQR Iteration Limit (iter_lim): Maximum number of iterations (Default: 1000)
-       - LSQR Show Log (showLSQR): Whether to display LSQR iteration log (Default: true)
-     These parameters are used for convergence criteria and iteration control of the LSQR algorithm. The default values are usually sufficient, but can be adjusted when convergence is slow or when fine-tuning accuracy is needed.
+     - **Reference events (REF)**: Optional fixed anchors in TRD—see [Reference Events (REF)](#reference-events-ref).
+     - **LSQR** (`atol`, `btol`, `conlim`, `iter_lim`, `showLSQR`): Internal triple-difference solver controls (defaults typically `1e-6` / `1e-6` / `1e8` / `1000` / `true`). Change only if you need to tune convergence.
 
 3. Click "▶ Execute"
 
@@ -767,11 +703,11 @@ mkdir -p demo/dat-trd
 java -jar build/libs/xTreLoc-CLI-1.0-SNAPSHOT.jar TRD config.json
 ```
 
-### Reference Events (REF)
+#### Reference Events (REF)
 
 Reference events (REF) are fixed anchor points used during TRD relocation. They provide absolute positioning while maintaining relative accuracy between target events.
 
-#### When to Use REF Events
+##### When to Use REF Events
 
 REF events are useful in the following scenarios:
 
@@ -779,7 +715,7 @@ REF events are useful in the following scenarios:
 2. **Absolute positioning needed**: When you need to maintain absolute geographic positions while improving relative locations
 3. **Accuracy validation**: When testing relocation accuracy against known ground truth positions
 
-#### How to Create REF Events
+##### How to Create REF Events
 
 **Method 1: Manual creation in catalog CSV**
 
@@ -799,7 +735,7 @@ time,latitude,longitude,depth,xerr,yerr,zerr,rms,file,mode,cid
 2000-01-01T00:00:00,39.5000,142.4000,15.0000,0.0000,0.0000,0.0000,0.0000,dat/ref_event.dat,REF,1
 ```
 
-#### Behavior in TRD Mode
+##### Behavior in TRD Mode
 
 - REF events are **excluded from relocation** - their positions remain fixed
 - REF events **participate in triple difference calculations** - they help constrain the relative positions of target events
@@ -1014,5 +950,5 @@ demo/locating_example/
 ---
 
 **Version**: 1.0-SNAPSHOT  
-**Last Updated**: 2024
+**Last Updated**: 2026
 

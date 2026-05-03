@@ -3,6 +3,7 @@ package com.treloc.xtreloc.app.gui.view;
 import com.treloc.xtreloc.app.gui.model.*;
 import com.treloc.xtreloc.app.gui.service.StyleFactory;
 import com.treloc.xtreloc.app.gui.util.ColorScaleUtils;
+import com.treloc.xtreloc.app.gui.util.UiFonts;
 import com.treloc.xtreloc.io.Station;
 import org.geotools.styling.StyleBuilder;
 
@@ -63,6 +64,18 @@ public class MapView {
 	private static final Color MAP_COLOR_VALUE_MISSING = new Color(0, 0, 0, 0);
 	
 	private JPanel legendPanel;
+
+	/** Opens the catalog symbol/color editor when the legend panel (any part) is clicked. */
+	private final MouseAdapter legendCatalogAppearanceOpener = new MouseAdapter() {
+		@Override
+		public void mouseClicked(MouseEvent e) {
+			if (!SwingUtilities.isLeftMouseButton(e)) {
+				return;
+			}
+			Window w = SwingUtilities.getWindowAncestor(legendPanel);
+			LegendCatalogStyleDialog.showDialog(w, new java.util.ArrayList<>(catalogInfos), MapView.this);
+		}
+	};
 	
 	private JPanel stationSymbolLegendPanel;
 	
@@ -951,7 +964,7 @@ public class MapView {
 			itemPanel.add(symbolLabel);
 			
 			JLabel nameLabel = new JLabel("Station");
-			nameLabel.setFont(nameLabel.getFont().deriveFont(Font.PLAIN, 11f));
+			nameLabel.setFont(UiFonts.uiPlain(11f));
 			itemPanel.add(nameLabel);
 			
 			stationSymbolLegendPanel.add(itemPanel);
@@ -1006,7 +1019,7 @@ public class MapView {
 			itemPanel.add(symbolLabel);
 			
 			JLabel nameLabel = new JLabel("Station");
-			nameLabel.setFont(nameLabel.getFont().deriveFont(Font.PLAIN, 11f));
+			nameLabel.setFont(UiFonts.uiPlain(11f));
 			itemPanel.add(nameLabel);
 			
 			legendPanel.add(itemPanel);
@@ -1081,7 +1094,7 @@ public class MapView {
 				itemPanel.add(symbolLabel);
 				
 				JLabel nameLabel = new JLabel(catalogInfo.getName());
-				nameLabel.setFont(nameLabel.getFont().deriveFont(Font.PLAIN, 11f));
+				nameLabel.setFont(UiFonts.uiPlain(11f));
 				itemPanel.add(nameLabel);
 				
 				legendPanel.add(itemPanel);
@@ -1117,7 +1130,7 @@ public class MapView {
 				connectionPanel.add(connectionSymbol);
 				
 				JLabel connectionLabel = new JLabel("Connections");
-				connectionLabel.setFont(connectionLabel.getFont().deriveFont(Font.PLAIN, 11f));
+				connectionLabel.setFont(UiFonts.uiPlain(11f));
 				connectionPanel.add(connectionLabel);
 				
 				legendPanel.add(connectionPanel);
@@ -1125,9 +1138,25 @@ public class MapView {
 		}
 		
 		legendPanel.setVisible(hasStations || hasVisibleCatalogs);
+		if (hasStations || hasVisibleCatalogs) {
+			attachLegendCatalogAppearanceListeners(legendPanel);
+		}
 		legendPanel.revalidate();
 		legendPanel.repaint();
 		updateOverlayPositions();
+	}
+
+	private void attachLegendCatalogAppearanceListeners(Component c) {
+		c.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+		if (c instanceof JComponent) {
+			((JComponent) c).setToolTipText("Click to edit catalog symbol appearance");
+		}
+		c.addMouseListener(legendCatalogAppearanceOpener);
+		if (c instanceof Container) {
+			for (Component ch : ((Container) c).getComponents()) {
+				attachLegendCatalogAppearanceListeners(ch);
+			}
+		}
 	}
 	
 	/**
@@ -1856,7 +1885,7 @@ public class MapView {
 				}
 
 				// Save figure button
-				javax.swing.ImageIcon saveBundled = com.treloc.xtreloc.app.gui.util.BundledImageLoader.loadImageIcon("save.png");
+				javax.swing.ImageIcon saveBundled = com.treloc.xtreloc.app.gui.util.BundledImageLoader.loadImageIcon("Save.png");
 				if (saveBundled != null && saveBundled.getImage() != null) {
 					Image img = saveBundled.getImage();
 					Image scaledImg = img.getScaledInstance(20, 20, Image.SCALE_SMOOTH);
@@ -2226,13 +2255,11 @@ public class MapView {
 				File savedFile = exportMapImageToFile(outputFile);
 				String msg = "Map exported as image: " + savedFile.getAbsolutePath();
 				if (!savedFile.equals(outputFile)) {
-					msg += "\n(Saved as PNG because JPEG is not available on this system.)";
+					msg += " (Saved as PNG because JPEG is not available on this system.)";
 				}
-				JOptionPane.showMessageDialog(frame, msg, "Information", JOptionPane.INFORMATION_MESSAGE);
+				logger.info(msg);
 			} catch (Exception e) {
-				JOptionPane.showMessageDialog(frame,
-					"Failed to export image: " + e.getMessage(),
-					"Error", JOptionPane.ERROR_MESSAGE);
+				logger.log(Level.WARNING, "Map image export failed: " + e.getMessage(), e);
 			}
 		}
 	}
@@ -2244,14 +2271,14 @@ public class MapView {
 	 * @return the file that was actually written (may differ from outputFile if JPEG fallback to PNG occurred)
 	 */
 	public File exportMapImageToFile(File outputFile) throws Exception {
-		Component mapPane = frame.getMapPane();
-		BufferedImage image = new BufferedImage(
-			mapPane.getWidth(), 
-			mapPane.getHeight(), 
-			BufferedImage.TYPE_INT_RGB);
-		Graphics2D g2d = image.createGraphics();
-		mapPane.paint(g2d);
-		g2d.dispose();
+		frame.validate();
+		Component mapPaneComp = (Component) frame.getMapPane();
+		mapPaneComp.validate();
+		BufferedImage image = com.treloc.xtreloc.app.gui.util.ChartImageExport.rasterizeComponent(mapPaneComp);
+		if (image == null) {
+			throw new IllegalStateException(
+				"Could not capture the map. Open the Viewer \"Map\" tab so the map is visible, then try again.");
+		}
 		
 		String extension = getFileExtension(outputFile.getName()).toLowerCase();
 		if ("png".equals(extension)) {

@@ -1,5 +1,7 @@
 package com.treloc.xtreloc.app.gui.view;
 
+import com.treloc.xtreloc.app.gui.util.UiFonts;
+
 import javax.swing.*;
 import java.awt.*;
 
@@ -20,7 +22,7 @@ public class ViewerStatusBar extends JPanel {
         setLayout(new FlowLayout(FlowLayout.RIGHT, 8, 2));
         setBorder(BorderFactory.createEmptyBorder(2, 4, 2, 4));
         messageLabel = new JLabel(" ");
-        messageLabel.setFont(messageLabel.getFont().deriveFont(Font.PLAIN, 11f));
+        messageLabel.setFont(UiFonts.uiPlain(11f));
         progressBar = new JProgressBar();
         progressBar.setIndeterminate(true);
         progressBar.setPreferredSize(new Dimension(120, 14));

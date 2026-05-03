@@ -1,32 +1,34 @@
 package com.treloc.xtreloc.solver;
 
-import java.io.File;
+import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.logging.Level;
 import java.util.logging.Logger;
 
 import com.treloc.xtreloc.io.AppConfig;
 import com.treloc.xtreloc.io.FileUtils;
+import com.treloc.xtreloc.io.VelocityModelCatalog;
+import com.treloc.xtreloc.io.VelocityModelLoadException;
 
 import edu.sc.seis.TauP.Arrival;
-import edu.sc.seis.TauP.NoSuchLayerException;
-import edu.sc.seis.TauP.NoSuchMatPropException;
 import edu.sc.seis.TauP.TauModel;
-import edu.sc.seis.TauP.TauModelException;
 import edu.sc.seis.TauP.TauModelLoader;
 import edu.sc.seis.TauP.TauP_Time;
-import edu.sc.seis.TauP.VelocityLayer;
-import edu.sc.seis.TauP.VelocityModel;
 
 import net.sf.geographiclib.Geodesic;
 import net.sf.geographiclib.GeodesicData;
 
 /**
- * HypoUtils
- * This class provides utility methods for ray-tracing and travel time calculations
- * using the TauP toolkit.
- * 
+ * HypoUtils — travel times and partial derivatives for hypocenter solvers.
+ * Travel times use either {@link Raytrace1D} (default, layered 1D S) or TauP spherical {@code tts,S} per
+ * {@link AppConfig#raytraceMethod}.
+ *
  * @version 0.1
  * @since 2025-02-22
  * @author K.M.
@@ -35,29 +37,39 @@ public class HypoUtils {
     private static final Logger logger = Logger.getLogger(HypoUtils.class.getName());
     /** Conversion factor from degrees to kilometers (approximately 111.32 km per degree) */
     private static final double DEG2KM = 111.32;
-    
+
+    /** Great-circle distance to degrees for TauP (matches TauP convention). */
+    private static final double EARTH_RADIUS_KM = 6371.0;
+
+    /** Forward-difference step for TauP ∂t/∂lon, ∂t/∂lat [deg] */
+    private static final double FD_DEG = 0.01;
+    /** Forward-difference step for TauP ∂t/∂depth [km] */
+    private static final double FD_DEP_KM = 0.01;
+
     /** Distance threshold for cache reuse (0.01 degrees ≈ 1.1 km) */
     private static final double CACHE_DISTANCE_THRESHOLD = 0.01;
-    
+
     /** Maximum number of travel time / partial derivative cache entries (bounded for memory safety) */
     private static final int TRAVEL_TIME_CACHE_MAX_SIZE = 256;
-    
+
     /** Quantization step for cache key: ~0.01 deg ≈ 1.1 km */
     private static final double CACHE_QUANTIZE_DEG = 0.01;
     /** Quantization step for depth: 0.1 km */
     private static final double CACHE_QUANTIZE_DEP_KM = 0.1;
-    
-    private final VelocityModel velMod;
-    private TauModel tauMod;
-    private final double threshold;
 
-    
+    private final Raytrace1D layeredRaytrace;
+    private final boolean useTauP;
+    private final TauModel tauModel;
+    private final TauP_Time tauPTime;
+
     /** Cache key for travel time / partial derivative (quantized position + station indices). Thread-safe access via synchronized map. */
     private static final class TravelTimeCacheKey {
-        final double qLat, qLon, qDep;
+        final double qLat;
+        final double qLon;
+        final double qDep;
         final int[] usedIdx;
         final int hash;
-        
+
         TravelTimeCacheKey(double lat, double lon, double dep, int[] usedIdx) {
             this.qLat = Math.round(lat / CACHE_QUANTIZE_DEG) * CACHE_QUANTIZE_DEG;
             this.qLon = Math.round(lon / CACHE_QUANTIZE_DEG) * CACHE_QUANTIZE_DEG;
@@ -65,29 +77,33 @@ public class HypoUtils {
             this.usedIdx = usedIdx;
             this.hash = Arrays.hashCode(usedIdx) ^ Double.hashCode(qLat) ^ Double.hashCode(qLon) ^ Double.hashCode(qDep);
         }
-        
+
         @Override
         public boolean equals(Object o) {
-            if (this == o) return true;
-            if (!(o instanceof TravelTimeCacheKey)) return false;
+            if (this == o) {
+                return true;
+            }
+            if (!(o instanceof TravelTimeCacheKey)) {
+                return false;
+            }
             TravelTimeCacheKey k = (TravelTimeCacheKey) o;
             return Double.compare(k.qLat, qLat) == 0 && Double.compare(k.qLon, qLon) == 0
                 && Double.compare(k.qDep, qDep) == 0 && Arrays.equals(usedIdx, k.usedIdx);
         }
-        
+
         @Override
         public int hashCode() {
             return hash;
         }
     }
-    
+
     private static class TravelTimeCacheEntry {
         double lon;
         double lat;
         double dep;
         int[] usedIdx;
         double[] trvTime;
-        
+
         boolean matches(double lon, double lat, double dep, int[] usedIdx) {
             if (this.trvTime == null || this.usedIdx == null) {
                 return false;
@@ -109,7 +125,7 @@ public class HypoUtils {
             return true;
         }
     }
-    
+
     private static class PartialDerivativeCacheEntry {
         double lon;
         double lat;
@@ -117,7 +133,7 @@ public class HypoUtils {
         int[] usedIdx;
         double[][] dtdr;
         double[] trvTime;
-        
+
         boolean matches(double lon, double lat, double dep, int[] usedIdx) {
             if (this.dtdr == null || this.trvTime == null || this.usedIdx == null) {
                 return false;
@@ -139,328 +155,163 @@ public class HypoUtils {
             return true;
         }
     }
-    
+
     /** Bounded travel-time cache (access-order, max size). Synchronized for thread safety. */
-    private final Map<TravelTimeCacheKey, TravelTimeCacheEntry> travelTimeCacheMap = new LinkedHashMap<TravelTimeCacheKey, TravelTimeCacheEntry>(TRAVEL_TIME_CACHE_MAX_SIZE, 0.75f, true) {
-        @Override
-        protected boolean removeEldestEntry(Map.Entry<TravelTimeCacheKey, TravelTimeCacheEntry> eldest) {
-            return size() > TRAVEL_TIME_CACHE_MAX_SIZE;
-        }
-    };
-    
+    private final Map<TravelTimeCacheKey, TravelTimeCacheEntry> travelTimeCacheMap =
+        new LinkedHashMap<TravelTimeCacheKey, TravelTimeCacheEntry>(TRAVEL_TIME_CACHE_MAX_SIZE, 0.75f, true) {
+            @Override
+            protected boolean removeEldestEntry(Map.Entry<TravelTimeCacheKey, TravelTimeCacheEntry> eldest) {
+                return size() > TRAVEL_TIME_CACHE_MAX_SIZE;
+            }
+        };
+
     /** Bounded partial-derivative cache. Synchronized for thread safety. */
-    private final Map<TravelTimeCacheKey, PartialDerivativeCacheEntry> partialDerivativeCacheMap = new LinkedHashMap<TravelTimeCacheKey, PartialDerivativeCacheEntry>(TRAVEL_TIME_CACHE_MAX_SIZE, 0.75f, true) {
-        @Override
-        protected boolean removeEldestEntry(Map.Entry<TravelTimeCacheKey, PartialDerivativeCacheEntry> eldest) {
-            return size() > TRAVEL_TIME_CACHE_MAX_SIZE;
-        }
-    };
+    private final Map<TravelTimeCacheKey, PartialDerivativeCacheEntry> partialDerivativeCacheMap =
+        new LinkedHashMap<TravelTimeCacheKey, PartialDerivativeCacheEntry>(TRAVEL_TIME_CACHE_MAX_SIZE, 0.75f, true) {
+            @Override
+            protected boolean removeEldestEntry(Map.Entry<TravelTimeCacheKey, PartialDerivativeCacheEntry> eldest) {
+                return size() > TRAVEL_TIME_CACHE_MAX_SIZE;
+            }
+        };
 
     /**
-     * Constructs a HypoUtils object with the specified configuration.
-     * Loads the TauP model based on the provided configuration.
-     *
-     * @param config the application configuration
+     * Constructs HypoUtils and loads {@link Raytrace1D} from {@link AppConfig#taupFile}
+     * (path or bundled name such as {@code prem.nd}). Optionally loads TauP when {@code raytraceMethod} is {@code taup}.
      */
-    public HypoUtils(AppConfig config) throws TauModelException {
-        this.threshold = config.threshold;
-
-        String taupFile = config.taupFile;
-        if (taupFile == null || taupFile.isEmpty()) {
-            throw new IllegalArgumentException("TauP file path is not specified");
+    public HypoUtils(AppConfig config) throws VelocityModelLoadException {
+        String path = config.taupFile;
+        if (path == null || path.isEmpty()) {
+            throw new IllegalArgumentException("Velocity model file path is not specified (config taupFile)");
+        }
+        try {
+            path = resolveBundledModelPath(path);
+        } catch (Exception e) {
+            throw new VelocityModelLoadException("Failed to resolve velocity model input: " + path, e);
+        }
+        try {
+            this.layeredRaytrace = Raytrace1D.load(path);
+        } catch (Exception e) {
+            throw new VelocityModelLoadException("Failed to load velocity model for Raytrace1D: " + path, e);
         }
 
-        String[] defaultModels = {"prem", "iasp91", "ak135", "ak135f"};
-        boolean isDefaultModel = false;
-        for (String model : defaultModels) {
-            if (taupFile.equalsIgnoreCase(model)) {
-                isDefaultModel = true;
-                break;
-            }
-        }
-        
-        if (isDefaultModel) {
+        this.useTauP = isTauPMethod(config);
+        if (useTauP) {
             try {
-                tauMod = TauModelLoader.load(taupFile);
+                this.tauModel = TauModelLoader.load(path);
             } catch (Exception e) {
-                // Try clearing cache and retry for serialization issues
-                if (e.getMessage() != null && e.getMessage().contains("serialVersionUID")) {
-                    logger.info("TauModel serialization issue detected. Trying alternative loading method...");
-                    try {
-                        tauMod = loadTauModelWithFallback(taupFile);
-                    } catch (Exception retryError) {
-                        logger.severe("Error loading TauP default model after retry: " + retryError.getMessage());
-                        throw new TauModelException("Failed to load TauP model", retryError);
-                    }
-                } else {
-                    logger.severe("Error loading TauP default model: " + e.getMessage());
-                    throw new TauModelException("Failed to load TauP model", e);
-                }
+                throw new VelocityModelLoadException("Failed to load TauP model from: " + path, e);
             }
+            this.tauPTime = new TauP_Time();
+            this.tauPTime.setTauModel(tauModel);
+            this.tauPTime.parsePhaseList("tts,S");
+            logger.log(Level.INFO, "Travel-time engine: TauP (S tts), model={0}", path);
         } else {
-            String extension = FileUtils.getFileExtension(taupFile);
-            switch (extension) {
-                case "":
-                case "nd":
-                    try {
-                        tauMod = TauModelLoader.load(taupFile);
-                    } catch (Exception e) {
-                        // Try alternative loading on serialization error
-                        if (e.getMessage() != null && e.getMessage().contains("serialVersionUID")) {
-                            logger.info("TauModel serialization issue detected. Trying alternative loading method...");
-                            try {
-                                tauMod = loadTauModelWithFallback(taupFile);
-                            } catch (Exception retryError) {
-                                logger.severe("Error loading TauP model after retry: " + retryError.getMessage());
-                                throw new TauModelException("Failed to load TauP model", retryError);
-                            }
-                        } else {
-                            logger.severe("Error loading TauP model: " + e.getMessage());
-                            throw new TauModelException("Failed to load TauP model", e);
-                        }
-                    }
-                    break;
-                case "taup":
-                    try {
-                        tauMod = TauModel.readModel(taupFile);
-                    } catch (Exception e) {
-                        // Check for version mismatch issues
-                        if (e.getMessage() != null && e.getMessage().contains("serialVersionUID")) {
-                            logger.info("TauModel serialVersionUID mismatch detected. Attempting version-tolerant loading...");
-                            
-                            try {
-                                // Try loading with custom ObjectInputStream that tolerates version mismatch
-                                tauMod = loadTaupFileWithVersionTolerance(taupFile);
-                                logger.info("Successfully loaded .taup file with version tolerance");
-                            } catch (Exception retryError) {
-                                // If all strategies fail, provide detailed guidance to user
-                                String errorMsg = "TauModel.taup file version mismatch.\n" +
-                                    "The .taup file was generated with a different TauP library version.\n" +
-                                    "Solutions:\n" +
-                                    "1. Use .nd format instead (recommended): Convert your .taup model to .nd format\n" +
-                                    "2. Regenerate .taup file: Run TauP_Time tool in your environment to regenerate the .taup file\n" +
-                                    "   Command: java -cp $TAUP_JAR edu.sc.seis.TauP.TauP_Time -version\n" +
-                                    "   Then use taup_create or TauP_Create to generate a new .taup file\n" +
-                                    "3. Update your TauP library to match the version used to create the .taup file\n\n" +
-                                    "File: " + taupFile;
-                                
-                                logger.severe(errorMsg);
-                                throw new TauModelException(errorMsg, retryError);
-                            }
-                        } else {
-                            logger.severe("Error: Loading TauP model: " + e.getMessage());
-                            throw new TauModelException("Failed to load TauP model", e);
-                        }
-                    }
-                    break;
-                case "tvel":
-                    // Support for .tvel velocity format (try as TauModelLoader first)
-                    try {
-                        tauMod = TauModelLoader.load(taupFile);
-                    } catch (TauModelException e) {
-                        logger.severe("Error: .tvel file format not directly supported. Please convert to .nd format.");
-                        throw new TauModelException("Failed to load .tvel file. Please use .nd or .taup format instead.", e);
-                    }
-                    break;
-                default:
-                    throw new IllegalArgumentException("Unsupported file extension: " + extension);
-            }
+            this.tauModel = null;
+            this.tauPTime = null;
+            logger.log(Level.INFO, "Travel-time engine: Raytrace1D (layered 1D S-wave), model={0}", path);
         }
-        velMod = tauMod.getVelocityModel();
-        logger.info("Loaded velocity model: " + taupFile);
     }
-    
-    /**
-     * Loads a .taup file with tolerance for serialVersionUID mismatches.
-     * Uses a custom ObjectInputStream that ignores version conflicts.
-     */
-    private static TauModel loadTaupFileWithVersionTolerance(String taupFile) throws Exception {
-        java.io.ObjectInputStream ois = null;
-        try {
-            java.io.FileInputStream fis = new java.io.FileInputStream(taupFile);
-            ois = new java.io.ObjectInputStream(fis) {
-                @Override
-                protected java.io.ObjectStreamClass readClassDescriptor() throws java.io.IOException, ClassNotFoundException {
-                    java.io.ObjectStreamClass classDesc = super.readClassDescriptor();
-                    // Check if this is a TauModel class
-                    if (classDesc.getName().contains("TauModel")) {
-                        logger.fine("Reading TauModel with version tolerance...");
-                        // Get the local class descriptor
-                        try {
-                            java.io.ObjectStreamClass localClassDesc = 
-                                java.io.ObjectStreamClass.lookup(Class.forName(classDesc.getName()));
-                            if (localClassDesc != null) {
-                                logger.fine("Using local TauModel class descriptor instead of serialized one");
-                                return localClassDesc;
-                            }
-                        } catch (ClassNotFoundException e) {
-                            logger.fine("Could not find local class: " + classDesc.getName());
-                        }
-                    }
-                    return classDesc;
+
+    private static boolean isTauPMethod(AppConfig config) {
+        if (config == null || config.raytraceMethod == null || config.raytraceMethod.isBlank()) {
+            return false;
+        }
+        return "taup".equalsIgnoreCase(config.raytraceMethod.trim());
+    }
+
+    /** Extract classpath velocity model to a temp file when needed (same resource layout as before). */
+    private static String resolveBundledModelPath(String taupFile) throws Exception {
+        String candidate = VelocityModelCatalog.toResourcePath(taupFile);
+        InputStream in = HypoUtils.class.getClassLoader().getResourceAsStream(candidate);
+        if (in == null) {
+            return taupFile;
+        }
+        String ext = FileUtils.getFileExtension(candidate);
+        Path tmp = Files.createTempFile("xtreloc-velmodel-", ext.isEmpty() ? ".nd" : "." + ext);
+        tmp.toFile().deleteOnExit();
+        try (InputStream src = in) {
+            Files.copy(src, tmp, StandardCopyOption.REPLACE_EXISTING);
+        }
+        return tmp.toAbsolutePath().toString();
+    }
+
+    private double travelTimeSecondsForEngine(double distKm, double hypDepKm, double stnDepKm) throws Exception {
+        if (!useTauP) {
+            return layeredRaytrace.travelTimeSeconds(distKm, hypDepKm, stnDepKm);
+        }
+        return taupFastestSTime(distKm, hypDepKm, stnDepKm); // NaN on TauP failure
+    }
+
+    private double taupFastestSTime(double distKm, double sourceDepthKm, double stationDepthKm) {
+        synchronized (tauPTime) {
+            try {
+                tauPTime.depthCorrect(sourceDepthKm, stationDepthKm);
+                tauPTime.setSourceDepth(sourceDepthKm);
+                double distanceDeg = Math.toDegrees(distKm / EARTH_RADIUS_KM);
+                tauPTime.calculate(distanceDeg);
+                List<Arrival> arrivals = tauPTime.getArrivals();
+                if (arrivals == null || arrivals.isEmpty()) {
+                    return Double.NaN;
                 }
-            };
-            
-            Object obj = ois.readObject();
-            if (obj instanceof TauModel) {
-                return (TauModel) obj;
-            } else {
-                throw new TauModelException("File does not contain a TauModel object");
-            }
-        } catch (java.io.InvalidClassException e) {
-            // This can still happen if the class structure has changed significantly
-            logger.severe("Class structure mismatch: " + e.getMessage());
-            throw new TauModelException("TauModel class structure mismatch", e);
-        } finally {
-            if (ois != null) {
-                ois.close();
-            }
-        }
-    }
-    
-    /**
-     * Loads TauModel with fallback strategy to handle serialization issues.
-     * This method uses multiple strategies to avoid deserializing corrupted cache.
-     * For .taup files with version mismatch, this attempts to extract and use the model data.
-     */
-    private static TauModel loadTauModelWithFallback(String taupFile) throws Exception {
-        String extension = FileUtils.getFileExtension(taupFile);
-        
-        // For .taup files, try reading as text/nd format first
-        if ("taup".equalsIgnoreCase(extension)) {
-            logger.info("For .taup files with serialization issues, trying to read model information...");
-            // Since the .taup file has version mismatch, we can't deserialize it
-            // Best strategy is to ask user to convert to .nd format
-            throw new TauModelException(
-                "Cannot load .taup file with version mismatch. Please convert to .nd format using TauP tools.");
-        }
-        
-        // Strategy 1: Try loading as nd/default format
-        try {
-            logger.info("Trying TauModelLoader.load() for fallback...");
-            return TauModelLoader.load(taupFile);
-        } catch (Exception e1) {
-            logger.info("TauModelLoader.load() failed: " + e1.getMessage());
-        }
-        
-        // Strategy 2: Try reading as taup model
-        try {
-            logger.info("Trying TauModel.readModel() for fallback...");
-            return TauModel.readModel(taupFile);
-        } catch (Exception e2) {
-            logger.info("TauModel.readModel() failed, trying cache cleanup...");
-        }
-        
-        // Strategy 3: Try reloading with deleted cache hint
-        try {
-            // Delete TauP cache directory if it exists
-            String homeDir = System.getProperty("user.home");
-            File taupCacheDir = new File(homeDir, ".taup");
-            if (taupCacheDir.exists() && taupCacheDir.isDirectory()) {
-                logger.info("Found TauP cache directory at: " + taupCacheDir.getAbsolutePath());
-                logger.info("Deleting cache files to resolve serialization issues...");
-                deleteCacheFiles(taupCacheDir);
-            }
-            
-            // Try loading again after cache deletion
-            logger.info("Retrying load after cache cleanup...");
-            return TauModelLoader.load(taupFile);
-        } catch (Exception e3) {
-            logger.warning("Failed to load even after cache cleanup: " + e3.getMessage());
-            throw e3;
-        }
-    }
-    
-    /**
-     * Recursively deletes cache files in a directory.
-     */
-    private static void deleteCacheFiles(File dir) {
-        if (!dir.exists()) return;
-        
-        File[] files = dir.listFiles();
-        if (files != null) {
-            for (File file : files) {
-                if (file.isDirectory()) {
-                    deleteCacheFiles(file);
-                } else {
-                    // Only delete .taup and .ser files
-                    if (file.getName().endsWith(".taup") || file.getName().endsWith(".ser")) {
-                        if (file.delete()) {
-                            logger.fine("Deleted cache file: " + file.getName());
-                        }
+                Arrival fastest = arrivals.get(0);
+                for (Arrival a : arrivals) {
+                    if (a.getTime() < fastest.getTime()) {
+                        fastest = a;
                     }
                 }
+                return fastest.getTime();
+            } catch (Exception e) {
+                logger.log(Level.FINE, "TauP calculate failed: {0}", e.getMessage());
+                return Double.NaN;
             }
         }
     }
-    
+
     /**
      * Calculates S-wave travel times from the hypocenter to specified stations.
-     * Uses the TauP toolkit for ray-tracing calculations with depth corrections.
      *
      * @param stnTable the station table with columns [lat, lon, dep, pc, sc]
      *                  where dep is in kilometers (positive, depth below surface)
      * @param idxList  the index list of stations to use
      * @param point    the hypocenter coordinates
-     * @return an array of travel times in seconds (Double.MAX_VALUE for invalid stations)
-     * @throws TauModelException if there is an error in the Tau model
+     * @return an array of travel times in seconds ({@link Double#MAX_VALUE} for stations not in {@code idxList} or on ray failure)
      */
-    public double[] travelTime(double[][] stnTable, int[] idxList, Point point)
-        throws TauModelException {
+    public double[] travelTime(double[][] stnTable, int[] idxList, Point point) {
         double hypLon = point.getLon();
         double hypLat = point.getLat();
         double hypDep = point.getDep();
-        
+
         TravelTimeCacheKey key = new TravelTimeCacheKey(hypLat, hypLon, hypDep, idxList);
         synchronized (travelTimeCacheMap) {
-            TravelTimeCacheEntry entry = travelTimeCacheMap.get(key);
-            if (entry != null) {
-                return entry.trvTime.clone();
+            TravelTimeCacheEntry hit = travelTimeCacheMap.get(key);
+            if (hit != null) {
+                return hit.trvTime.clone();
             }
         }
 
-        TauP_Time taup_time = new TauP_Time();
-        taup_time.setTauModel(tauMod);
-        taup_time.clearPhaseNames();
-        taup_time.clearArrivals();
-        taup_time.clearPhases();
-        taup_time.parsePhaseList("tts");
-
         double[] trvTime = new double[stnTable.length];
+        Arrays.fill(trvTime, Double.MAX_VALUE);
         for (int i : idxList) {
             double stnLat = stnTable[i][0];
             double stnLon = stnTable[i][1];
             double stnDep = stnTable[i][2];
-
-            if (stnDep <= 0) {
-                logger.warning(String.format("Invalid station depth for station %d: stnDep=%.6f (should be positive km)", 
-                    i, stnDep));
-                trvTime[i] = Double.MAX_VALUE;
-                continue;
-            }
-
             GeodesicData g = Geodesic.WGS84.Inverse(hypLat, hypLon, stnLat, stnLon);
-            double dis = Math.toDegrees(g.s12 / 1000.0 / 6371.0);
-
+            double distKm = g.s12 / 1000.0;
             try {
-                taup_time.depthCorrect(hypDep, stnDep);
-                taup_time.setSourceDepth(hypDep);
-                taup_time.calculate(dis);
-                
-                Arrival fastestArr = taup_time.getArrival(0);
-                for (Arrival arr : taup_time.getArrivals()) {
-                    if (fastestArr.getTime() > arr.getTime()) {
-                        fastestArr = arr;
-                    }
+                double tt = travelTimeSecondsForEngine(distKm, hypDep, stnDep);
+                if (!Double.isFinite(tt) || tt <= 0.0) {
+                    trvTime[i] = Double.MAX_VALUE;
+                } else {
+                    trvTime[i] = tt + stnTable[i][4];
                 }
-                trvTime[i] = fastestArr.getTime() + stnTable[i][4];
             } catch (Exception e) {
-                logger.warning(String.format("Depth correction failed for station %d: hypDep=%.3f, stnDep=%.3f, error=%s", 
-                    i, hypDep, stnDep, e.getMessage()));
+                logger.warning(String.format(
+                    "%s raytrace failed for station %d: dep=(%.3f, %.3f) dist=%.3f km, error=%s",
+                    useTauP ? "TauP" : "Raytrace1D",
+                    i, hypDep, stnDep, distKm, e.getMessage()));
                 trvTime[i] = Double.MAX_VALUE;
             }
         }
-        
         TravelTimeCacheEntry entry = new TravelTimeCacheEntry();
         entry.lon = hypLon;
         entry.lat = hypLat;
@@ -470,7 +321,6 @@ public class HypoUtils {
         synchronized (travelTimeCacheMap) {
             travelTimeCacheMap.put(key, entry);
         }
-        
         return trvTime.clone();
     }
 
@@ -492,130 +342,107 @@ public class HypoUtils {
 
     /**
      * Calculates the partial derivative matrix for travel time with respect to hypocenter coordinates.
-     * Uses analytical calculation based on take-off angle and azimuth.
+     * Layered 1D mode: analytical (take-off angle). TauP mode: forward differences on TauP travel times.
      * Units: dtdr[i][0] = dt/dlon [s/deg], dtdr[i][1] = dt/dlat [s/deg], dtdr[i][2] = dt/ddep [s/km]
-     * 
+     *
      * @param stnTable the station table with columns [lat, lon, dep, pc, sc]
      * @param idxList  the index list of stations to use
      * @param point    the hypocenter coordinates
      * @return an Object array containing [dtdr (double[][]), trvTime (double[])]
-     *         where dtdr[i][0] = dt/dlon [s/deg], dtdr[i][1] = dt/dlat [s/deg], dtdr[i][2] = dt/ddep [s/km]
-     * @throws TauModelException if there is an error in the Tau model
-     * @throws NoSuchLayerException if a specified layer does not exist
-     * @throws NoSuchMatPropException if a specified material property does not exist
      */
-    public Object[] partialDerivativeMatrix(double[][] stnTable, int[] idxList, Point point)
-        throws TauModelException, NoSuchLayerException, NoSuchMatPropException {
+    public Object[] partialDerivativeMatrix(double[][] stnTable, int[] idxList, Point point) {
         double hypLon = point.getLon();
         double hypLat = point.getLat();
         double hypDep = point.getDep();
-        
+
         TravelTimeCacheKey key = new TravelTimeCacheKey(hypLat, hypLon, hypDep, idxList);
         synchronized (partialDerivativeCacheMap) {
-            PartialDerivativeCacheEntry entry = partialDerivativeCacheMap.get(key);
-            if (entry != null) {
-                double[][] dtdrCopy = new double[entry.dtdr.length][];
-                for (int i = 0; i < entry.dtdr.length; i++) {
-                    dtdrCopy[i] = entry.dtdr[i].clone();
+            PartialDerivativeCacheEntry hit = partialDerivativeCacheMap.get(key);
+            if (hit != null) {
+                double[][] dtdrCopy = new double[hit.dtdr.length][];
+                for (int i = 0; i < hit.dtdr.length; i++) {
+                    dtdrCopy[i] = hit.dtdr[i].clone();
                 }
-                return new Object[]{dtdrCopy, entry.trvTime.clone()};
+                return new Object[] { dtdrCopy, hit.trvTime.clone() };
             }
         }
-
-        int layerNumber = velMod.layerNumberBelow(hypDep);
-        VelocityLayer velocityLayer = velMod.getVelocityLayer(layerNumber);
-        double sVel = velocityLayer.evaluateAt(hypDep, 's');
 
         double[][] dtdr = new double[stnTable.length][3];
-        double[] trvTime = new double[stnTable.length];
+        double[] t0 = new double[stnTable.length];
+        Arrays.fill(t0, Double.MAX_VALUE);
 
-        TauP_Time taup_time = new TauP_Time();
-        taup_time.setTauModel(tauMod);
-        taup_time.clearPhaseNames();
-        taup_time.clearArrivals();
-        taup_time.clearPhases();
-        taup_time.parsePhaseList("tts");
-
-        for (int i : idxList) {
-            double stnLat = stnTable[i][0];
-            double stnLon = stnTable[i][1];
-            double stnDep = stnTable[i][2];
-
-            GeodesicData g = Geodesic.WGS84.Inverse(hypLat, hypLon, stnLat, stnLon);
-            double azm = Math.toRadians(g.azi1);
-            double dis = Math.toDegrees(g.s12 / 1000.0 / 6371.0);
-
-            taup_time.depthCorrect(hypDep, stnDep);
-            taup_time.setSourceDepth(hypDep);
-            taup_time.calculate(dis);
-
-            java.util.List<Arrival> arrivals = taup_time.getArrivals();
-            if (arrivals == null || arrivals.isEmpty()) {
-                throw new TauModelException(
-                    "No ray arrivals for source depth " + hypDep + " km, distance " + dis + " deg (station index " + i + "). " +
-                    "Depth may be outside model range or phase 'tts' has no solution.");
-            }
-            Arrival fastestArr = arrivals.get(0);
-            for (Arrival arr : arrivals) {
-                if (fastestArr.getTime() > arr.getTime()) {
-                    fastestArr = arr;
-                }
-            }
-
-            double tak = fastestArr.getTakeoffAngle();
-            if (!Double.isNaN(tak)) {
-                if (tak < 0.0) {
-                    tak += 180.0;
-                }
-                tak = Math.toRadians(tak);
-            } else {
-                double p = fastestArr.getRayParam();
-                double dip = Math.asin(p * sVel);
-                boolean downgoing = true;
-                int branch = fastestArr.getPhase().getTauModel().getSourceBranch();
-                while (true) {
-                    try {
-                        downgoing = ((Boolean) (fastestArr.getPhase().getDownGoing()[branch])).booleanValue();
-                        break;
-                    } catch (Exception e) {
-                        if (branch > 0) {
-                            branch--;
-                            continue;
-                        }
-                        logger.warning("Warning: downgoing error: " + e);
-                        break;
+        if (useTauP) {
+            for (int i : idxList) {
+                double stnLat = stnTable[i][0];
+                double stnLon = stnTable[i][1];
+                double stnDep = stnTable[i][2];
+                GeodesicData g = Geodesic.WGS84.Inverse(hypLat, hypLon, stnLat, stnLon);
+                double distKm = g.s12 / 1000.0;
+                try {
+                    double baseT = taupFastestSTime(distKm, hypDep, stnDep);
+                    if (!Double.isFinite(baseT) || baseT <= 0.0) {
+                        dtdr[i][0] = 0.0;
+                        dtdr[i][1] = 0.0;
+                        dtdr[i][2] = 0.0;
+                        t0[i] = Double.MAX_VALUE;
+                        continue;
                     }
-                }
-                if (!downgoing) {
-                    tak = Math.PI - dip;
-                } else {
-                    tak = dip;
+                    double distLon = Geodesic.WGS84.Inverse(hypLat, hypLon + FD_DEG, stnLat, stnLon).s12 / 1000.0;
+                    double distLat = Geodesic.WGS84.Inverse(hypLat + FD_DEG, hypLon, stnLat, stnLon).s12 / 1000.0;
+                    double tLon = taupFastestSTime(distLon, hypDep, stnDep);
+                    double tLat = taupFastestSTime(distLat, hypDep, stnDep);
+                    double tDep = taupFastestSTime(distKm, hypDep + FD_DEP_KM, stnDep);
+                    dtdr[i][0] = (tLon - baseT) / FD_DEG;
+                    dtdr[i][1] = (tLat - baseT) / FD_DEG;
+                    dtdr[i][2] = (tDep - baseT) / FD_DEP_KM;
+                    t0[i] = baseT + stnTable[i][4];
+                } catch (Exception e) {
+                    dtdr[i][0] = 0.0;
+                    dtdr[i][1] = 0.0;
+                    dtdr[i][2] = 0.0;
+                    t0[i] = Double.MAX_VALUE;
                 }
             }
-
-            dtdr[i][0] = -Math.sin(tak) * Math.sin(azm) / sVel * DEG2KM * Math.cos(Math.toRadians(hypLat));
-            dtdr[i][1] = -Math.sin(tak) * Math.cos(azm) / sVel * DEG2KM;
-            dtdr[i][2] = -Math.cos(tak) / sVel;
-
-            trvTime[i] = fastestArr.getTime() + stnTable[i][4];
+        } else {
+            double sVel = layeredRaytrace.sourceSVelocity(hypDep);
+            for (int i : idxList) {
+                double stnLat = stnTable[i][0];
+                double stnLon = stnTable[i][1];
+                double stnDep = stnTable[i][2];
+                GeodesicData g = Geodesic.WGS84.Inverse(hypLat, hypLon, stnLat, stnLon);
+                double azm = Math.toRadians(g.azi1);
+                double distKm = g.s12 / 1000.0;
+                try {
+                    Raytrace1D.RaySolution sol = layeredRaytrace.solveFastestRay(distKm, hypDep, stnDep);
+                    double tak = sol.takeoffAngleRad;
+                    dtdr[i][0] = -Math.sin(tak) * Math.sin(azm) / sVel * DEG2KM * Math.cos(Math.toRadians(hypLat));
+                    dtdr[i][1] = -Math.sin(tak) * Math.cos(azm) / sVel * DEG2KM;
+                    dtdr[i][2] = -Math.cos(tak) / sVel;
+                    t0[i] = sol.travelTimeSeconds + stnTable[i][4];
+                } catch (Exception e) {
+                    dtdr[i][0] = 0.0;
+                    dtdr[i][1] = 0.0;
+                    dtdr[i][2] = 0.0;
+                    t0[i] = Double.MAX_VALUE;
+                }
+            }
         }
-        
+
         PartialDerivativeCacheEntry entry = new PartialDerivativeCacheEntry();
         entry.lon = hypLon;
         entry.lat = hypLat;
         entry.dep = hypDep;
         entry.usedIdx = idxList.clone();
         entry.dtdr = dtdr;
-        entry.trvTime = trvTime;
+        entry.trvTime = t0;
         synchronized (partialDerivativeCacheMap) {
             partialDerivativeCacheMap.put(key, entry);
         }
-        
         double[][] dtdrCopy = new double[dtdr.length][];
         for (int i = 0; i < dtdr.length; i++) {
             dtdrCopy[i] = dtdr[i].clone();
         }
-        return new Object[]{dtdrCopy, trvTime.clone()};
+        return new Object[] { dtdrCopy, t0.clone() };
     }
 
     /**
@@ -625,7 +452,9 @@ public class HypoUtils {
      * @return the standard deviation, or 0.0 if data is empty
      */
     public static double standardDeviation(double[] data) {
-        if (data == null || data.length == 0) return 0.0;
+        if (data == null || data.length == 0) {
+            return 0.0;
+        }
         double sum = 0.0;
         int length = data.length;
         for (double num : data) {
@@ -648,4 +477,3 @@ public class HypoUtils {
         return DEG2KM;
     }
 }
-

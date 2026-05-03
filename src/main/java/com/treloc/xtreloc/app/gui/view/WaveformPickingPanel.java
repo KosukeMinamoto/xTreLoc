@@ -857,7 +857,7 @@ public class WaveformPickingPanel extends JPanel {
         }
         
         // Custom Y-axis with station names
-        org.jfree.chart.axis.SymbolAxis yAxis = new org.jfree.chart.axis.SymbolAxis(null, fileNames);
+        org.jfree.chart.axis.SymbolAxis yAxis = new org.jfree.chart.axis.SymbolAxis("Station / component", fileNames);
         yAxis.setTickUnit(new org.jfree.chart.axis.NumberTickUnit(1));
         yAxis.setTickLabelsVisible(true);
         yAxis.setTickLabelFont(new Font("SansSerif", Font.PLAIN, 10));

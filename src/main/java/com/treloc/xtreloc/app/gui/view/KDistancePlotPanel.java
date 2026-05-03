@@ -14,6 +14,7 @@ import org.jfree.ui.RectangleAnchor;
 import org.jfree.ui.TextAnchor;
 import com.treloc.xtreloc.app.gui.util.AppSettingsCache;
 import com.treloc.xtreloc.app.gui.util.ChartAppearanceSettings;
+import com.treloc.xtreloc.app.gui.util.UiFonts;
 
 import javax.swing.*;
 import java.awt.*;
@@ -30,16 +31,66 @@ import java.util.List;
  * @since 2025-02-22
  */
 public class KDistancePlotPanel extends JPanel {
+    private static final Color K_DISTANCE_LEGEND_COLOR = Color.BLUE;
+    private static final Color ELBOW_LEGEND_COLOR = Color.RED;
+
     private ChartPanel chartPanel;
     private JFreeChart chart;
     private List<Double> kDistances;
     private double elbowEps;
+
+    /** Strip above the chart (same layout as residual modes: no in-chart JFreeChart legend). */
+    private final JPanel externalLegendStrip = createKDistanceExternalLegend();
     
     public KDistancePlotPanel() {
         setLayout(new BorderLayout());
-        
+        add(externalLegendStrip, BorderLayout.NORTH);
         createEmptyChart();
         add(chartPanel, BorderLayout.CENTER);
+    }
+
+    private static JPanel lineSwatch(Color color, boolean dashed) {
+        JPanel swatch = new JPanel() {
+            @Override
+            protected void paintComponent(Graphics g) {
+                super.paintComponent(g);
+                Graphics2D g2 = (Graphics2D) g.create();
+                try {
+                    g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                    g2.setColor(color);
+                    if (dashed) {
+                        g2.setStroke(new BasicStroke(2f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND,
+                            1f, new float[]{5f, 5f}, 0f));
+                    } else {
+                        g2.setStroke(new BasicStroke(2.5f));
+                    }
+                    int midY = getHeight() / 2;
+                    g2.drawLine(0, midY, getWidth(), midY);
+                } finally {
+                    g2.dispose();
+                }
+            }
+        };
+        swatch.setPreferredSize(new Dimension(24, 12));
+        swatch.setOpaque(false);
+        return swatch;
+    }
+
+    private static JPanel createKDistanceExternalLegend() {
+        JPanel panel = new JPanel(new FlowLayout(FlowLayout.LEFT, 16, 4));
+        panel.setOpaque(false);
+        Font labelFont = UiFonts.getLabelFont();
+        panel.add(lineSwatch(K_DISTANCE_LEGEND_COLOR, false));
+        JLabel kLabel = new JLabel("k-Distance");
+        kLabel.setForeground(K_DISTANCE_LEGEND_COLOR);
+        kLabel.setFont(labelFont);
+        panel.add(kLabel);
+        panel.add(lineSwatch(ELBOW_LEGEND_COLOR, false));
+        JLabel eLabel = new JLabel("Elbow");
+        eLabel.setForeground(ELBOW_LEGEND_COLOR);
+        eLabel.setFont(labelFont);
+        panel.add(eLabel);
+        return panel;
     }
     
     /**
@@ -51,16 +102,17 @@ public class KDistancePlotPanel extends JPanel {
         
         chart = ChartFactory.createXYLineChart(
             "k-Distance Graph",
-            "Points",
-            "Distance (km)",
+            "Point index (sorted)",
+            "k-distance (km)",
             dataset,
             PlotOrientation.VERTICAL,
-            true,
+            false,
             true,
             false
         );
         
         applyChartAppearance(chart);
+        hideChartLegend(chart);
         
         XYPlot plot = chart.getXYPlot();
         if (plot != null) {
@@ -127,21 +179,22 @@ public class KDistancePlotPanel extends JPanel {
         
         chart = ChartFactory.createXYLineChart(
             "k-Distance Graph",
-            "Points",
-            "Distance (km)",
+            "Point index (sorted)",
+            "k-distance (km)",
             dataset,
             PlotOrientation.VERTICAL,
-            true,
+            false,
             true,
             false
         );
         
         applyChartAppearance(chart);
+        hideChartLegend(chart);
         
         XYPlot plot = chart.getXYPlot();
         XYLineAndShapeRenderer renderer = new XYLineAndShapeRenderer();
-        renderer.setSeriesPaint(0, Color.BLUE);
-        renderer.setSeriesPaint(1, Color.RED);
+        renderer.setSeriesPaint(0, K_DISTANCE_LEGEND_COLOR);
+        renderer.setSeriesPaint(1, ELBOW_LEGEND_COLOR);
         renderer.setSeriesShapesVisible(1, true);
         
         // Get line width from settings
@@ -197,11 +250,6 @@ public class KDistancePlotPanel extends JPanel {
             plot.addDomainMarker(elbowMarker);
         }
         
-        chart.getLegend().setPosition(org.jfree.ui.RectangleEdge.TOP);
-        if (chart.getLegend() != null) {
-            chart.getLegend().setItemFont(settings.getLegendFont());
-        }
-        
         chartPanel.setChart(chart);
         chartPanel.repaint();
     }
@@ -234,6 +282,12 @@ public class KDistancePlotPanel extends JPanel {
             chart.getLegend().setItemFont(settings.getLegendFont());
         }
     }
+
+    private static void hideChartLegend(JFreeChart chart) {
+        if (chart.getLegend() != null) {
+            chart.getLegend().setVisible(false);
+        }
+    }
     
     /**
      * Exports the chart as an image file.
@@ -243,8 +297,8 @@ public class KDistancePlotPanel extends JPanel {
      * @throws Exception if export fails
      */
     public void exportChartImageToFile(File outputFile) throws Exception {
-        int width = chartPanel.getWidth();
-        int height = chartPanel.getHeight();
+        int width = getWidth();
+        int height = getHeight();
         if (width <= 0 || height <= 0) {
             width = 800;
             height = 600;
@@ -252,7 +306,9 @@ public class KDistancePlotPanel extends JPanel {
         
         BufferedImage image = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
         Graphics2D g2d = image.createGraphics();
-        chartPanel.print(g2d);
+        g2d.setColor(getBackground() != null ? getBackground() : Color.WHITE);
+        g2d.fillRect(0, 0, width, height);
+        printAll(g2d);
         g2d.dispose();
         
         String fileName = outputFile.getName().toLowerCase();

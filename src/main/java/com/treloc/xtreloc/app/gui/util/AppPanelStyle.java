@@ -28,11 +28,17 @@ public final class AppPanelStyle {
     private static final Color DISABLED_FG = new Color(150, 150, 150);
     private static final Color TABLE_HEADER_BG = new Color(240, 240, 242);
 
-    /* ----- Typography (same for both themes) ----- */
-    /** Section title font (bold) */
-    public static final Font SECTION_TITLE_BOLD = new Font(Font.SANS_SERIF, Font.BOLD, 13);
-    /** Label font */
-    public static final Font LABEL_FONT = new Font(Font.SANS_SERIF, Font.PLAIN, 12);
+    /* ----- Typography: from settings.json "font" via {@link UiFonts} ----- */
+
+    /** Body label font (12 pt) from General → Font. */
+    public static Font getLabelFont() {
+        return UiFonts.getLabelFont();
+    }
+
+    /** Section / titled-border title (13 pt bold) from General → Font. */
+    public static Font getSectionTitleFont() {
+        return UiFonts.getSectionTitleFont();
+    }
 
     /* ----- Spacing ----- */
     /** Standard insets for section content */
@@ -63,7 +69,7 @@ public final class AppPanelStyle {
             title,
             TitledBorder.LEFT,
             TitledBorder.TOP,
-            SECTION_TITLE_BOLD,
+            getSectionTitleFont(),
             getTitleColor()
         );
         return new CompoundBorder(titled, new EmptyBorder(SECTION_INSETS));
@@ -79,7 +85,7 @@ public final class AppPanelStyle {
             title,
             TitledBorder.LEFT,
             TitledBorder.TOP,
-            SECTION_TITLE_BOLD,
+            getSectionTitleFont(),
             getTitleColor()
         );
         return titled;

@@ -47,6 +47,12 @@ public class ChartAppearanceSettings {
     private float lineWidth = 2.0f;
     private float gridlineWidth = 1.0f;
     private String gridlineStyle = "solid"; // "solid", "dash", "dot"
+
+    /**
+     * Minimum interval (ms) between repaints of the Solver convergence chart ({@code ResidualPlotPanel}).
+     * Larger values reduce GUI load during MCMC / parallel runs. 0 disables throttling (repaint every update).
+     */
+    private int convergenceRepaintThrottleMs = 350;
     
     // Default constructor
     public ChartAppearanceSettings() {
@@ -222,6 +228,14 @@ public class ChartAppearanceSettings {
     
     public void setGridlineStyle(String gridlineStyle) {
         this.gridlineStyle = gridlineStyle != null ? gridlineStyle : "solid";
+    }
+
+    public int getConvergenceRepaintThrottleMs() {
+        return convergenceRepaintThrottleMs;
+    }
+
+    public void setConvergenceRepaintThrottleMs(int convergenceRepaintThrottleMs) {
+        this.convergenceRepaintThrottleMs = convergenceRepaintThrottleMs;
     }
     
     /**

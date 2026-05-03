@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import com.treloc.xtreloc.util.JsonMapperHolder;
+import com.treloc.xtreloc.util.LogRotationDefaults;
 
 import java.io.File;
 import java.io.IOException;
@@ -26,8 +27,8 @@ public class AppSettings {
     private String defaultPalette = "Blue to Red";
     private String logLevel = "INFO";
     private int historyLines = 50;
-    private int logLimitBytes = 10 * 1024 * 1024;  // 10 MB per file before rotation
-    private int logCount = 5;                       // number of rotated files to keep
+    private int logLimitBytes = LogRotationDefaults.DEFAULT_LIMIT_BYTES;
+    private int logCount = LogRotationDefaults.DEFAULT_COUNT;
     private boolean autoUpdateEnabled = true;
     private long lastUpdateCheck = 0;
     private String homeDirectory = System.getProperty("user.home");
@@ -35,6 +36,9 @@ public class AppSettings {
     private double zoomWindowSeconds = 10.0; // Default zoom window: ±10 seconds
     private boolean confirmBeforeOverwrite = true;
     private int recentFilesCount = 10;
+    /** Main JFrame width / height (pixels). Applied at startup after {@code pack()}. */
+    private int mainWindowWidth = 1800;
+    private int mainWindowHeight = 850;
     private ChartAppearanceSettings chartAppearance = new ChartAppearanceSettings();
     /** Default symbol color (map) as hex e.g. "#000000". */
     private String defaultSymbolColor = "#000000";
@@ -48,6 +52,8 @@ public class AppSettings {
     private String pickingKeyP = "None";
     /** Picking: optional key for S (None, P, S, 1, 2). When held, click = S. */
     private String pickingKeyS = "None";
+    /** Travel-time engine for location solvers: {@code layered} or {@code taup} (see AppConfig#raytraceMethod). */
+    private String raytraceMethod = "layered";
     
     /**
      * Loads application settings from the settings file.
@@ -103,12 +109,20 @@ public class AppSettings {
                 if (node.has("recentFilesCount")) {
                     settings.recentFilesCount = node.get("recentFilesCount").asInt();
                 }
+                if (node.has("mainWindowWidth")) {
+                    settings.setMainWindowWidth(node.get("mainWindowWidth").asInt());
+                }
+                if (node.has("mainWindowHeight")) {
+                    settings.setMainWindowHeight(node.get("mainWindowHeight").asInt());
+                }
                 if (node.has("pickingMouseP")) settings.pickingMouseP = node.get("pickingMouseP").asText();
                 if (node.has("pickingMouseS")) settings.pickingMouseS = node.get("pickingMouseS").asText();
                 if (node.has("pickingMouseContext")) settings.pickingMouseContext = node.get("pickingMouseContext").asText();
                 if (node.has("pickingKeyP")) settings.pickingKeyP = node.get("pickingKeyP").asText();
                 if (node.has("pickingKeyS")) settings.pickingKeyS = node.get("pickingKeyS").asText();
-                // Load chart appearance settings
+                if (node.has("raytraceMethod")) {
+                    settings.setRaytraceMethod(node.get("raytraceMethod").asText());
+                }
                 if (node.has("chartAppearance")) {
                     ObjectNode chartNode = (ObjectNode) node.get("chartAppearance");
                     ChartAppearanceSettings chartSettings = new ChartAppearanceSettings();
@@ -166,6 +180,9 @@ public class AppSettings {
                     if (chartNode.has("gridlineStyle")) {
                         chartSettings.setGridlineStyle(chartNode.get("gridlineStyle").asText());
                     }
+                    if (chartNode.has("convergenceRepaintThrottleMs")) {
+                        chartSettings.setConvergenceRepaintThrottleMs(chartNode.get("convergenceRepaintThrottleMs").asInt());
+                    }
                     settings.chartAppearance = chartSettings;
                 }
                 if (node.has("defaultSymbolColor")) {
@@ -201,12 +218,14 @@ public class AppSettings {
             node.put("zoomWindowSeconds", zoomWindowSeconds);
             node.put("confirmBeforeOverwrite", confirmBeforeOverwrite);
             node.put("recentFilesCount", recentFilesCount);
+            node.put("mainWindowWidth", mainWindowWidth);
+            node.put("mainWindowHeight", mainWindowHeight);
             node.put("pickingMouseP", pickingMouseP);
             node.put("pickingMouseS", pickingMouseS);
             node.put("pickingMouseContext", pickingMouseContext);
             node.put("pickingKeyP", pickingKeyP);
             node.put("pickingKeyS", pickingKeyS);
-            // Save chart appearance settings
+            node.put("raytraceMethod", getRaytraceMethod());
             ObjectNode chartNode = node.putObject("chartAppearance");
             chartNode.put("titleFontName", chartAppearance.getTitleFontName());
             chartNode.put("titleFontSize", chartAppearance.getTitleFontSize());
@@ -226,6 +245,7 @@ public class AppSettings {
             chartNode.put("lineWidth", chartAppearance.getLineWidth());
             chartNode.put("gridlineWidth", chartAppearance.getGridlineWidth());
             chartNode.put("gridlineStyle", chartAppearance.getGridlineStyle());
+            chartNode.put("convergenceRepaintThrottleMs", chartAppearance.getConvergenceRepaintThrottleMs());
             node.put("defaultSymbolColor", defaultSymbolColor);
             mapper.writerWithDefaultPrettyPrinter().writeValue(settingsFile, node);
             AppSettingsCache.invalidate();
@@ -335,7 +355,8 @@ public class AppSettings {
      * Sets the maximum log file size in bytes before rotation. Takes effect after restart.
      */
     public void setLogLimitBytes(int logLimitBytes) {
-        this.logLimitBytes = Math.max(1024 * 1024, Math.min(500 * 1024 * 1024, logLimitBytes)); // 1 MB–500 MB
+        this.logLimitBytes = Math.max(LogRotationDefaults.MIN_LIMIT_BYTES,
+            Math.min(LogRotationDefaults.MAX_LIMIT_BYTES, logLimitBytes));
     }
     
     /**
@@ -349,7 +370,7 @@ public class AppSettings {
      * Sets the number of rotated log files to keep. Takes effect after restart.
      */
     public void setLogCount(int logCount) {
-        this.logCount = Math.max(1, Math.min(20, logCount));
+        this.logCount = Math.max(LogRotationDefaults.MIN_COUNT, Math.min(LogRotationDefaults.MAX_COUNT, logCount));
     }
     
     /**
@@ -491,6 +512,28 @@ public class AppSettings {
     public void setRecentFilesCount(int recentFilesCount) {
         this.recentFilesCount = Math.max(1, Math.min(50, recentFilesCount));
     }
+
+    /**
+     * Main window width in pixels (clamped to {@link MainWindowSizePresets#WIDTH_MIN}–{@link MainWindowSizePresets#WIDTH_MAX}).
+     */
+    public int getMainWindowWidth() {
+        return mainWindowWidth;
+    }
+
+    public void setMainWindowWidth(int mainWindowWidth) {
+        this.mainWindowWidth = MainWindowSizePresets.clampWidth(mainWindowWidth);
+    }
+
+    /**
+     * Main window height in pixels (clamped to {@link MainWindowSizePresets#HEIGHT_MIN}–{@link MainWindowSizePresets#HEIGHT_MAX}).
+     */
+    public int getMainWindowHeight() {
+        return mainWindowHeight;
+    }
+
+    public void setMainWindowHeight(int mainWindowHeight) {
+        this.mainWindowHeight = MainWindowSizePresets.clampHeight(mainWindowHeight);
+    }
     
     public String getPickingMouseP() { return pickingMouseP; }
     public void setPickingMouseP(String pickingMouseP) { this.pickingMouseP = pickingMouseP != null ? pickingMouseP : "Left"; }
@@ -502,6 +545,35 @@ public class AppSettings {
     public void setPickingKeyP(String pickingKeyP) { this.pickingKeyP = pickingKeyP != null ? pickingKeyP : "None"; }
     public String getPickingKeyS() { return pickingKeyS; }
     public void setPickingKeyS(String pickingKeyS) { this.pickingKeyS = pickingKeyS != null ? pickingKeyS : "None"; }
+
+    /**
+     * Travel-time method for solvers: {@code layered} (default) or {@code taup}.
+     * The value {@code legacy} is normalized to {@code layered} for compatibility.
+     */
+    public String getRaytraceMethod() {
+        if (raytraceMethod == null || raytraceMethod.isBlank()) {
+            return "layered";
+        }
+        String m = raytraceMethod.trim().toLowerCase();
+        if ("legacy".equals(m)) {
+            return "layered";
+        }
+        return raytraceMethod;
+    }
+
+    public void setRaytraceMethod(String raytraceMethod) {
+        if (raytraceMethod == null || raytraceMethod.isBlank()) {
+            this.raytraceMethod = "layered";
+            return;
+        }
+        String m = raytraceMethod.trim().toLowerCase();
+        if ("taup".equals(m)) {
+            this.raytraceMethod = "taup";
+        } else {
+            this.raytraceMethod = "layered";
+        }
+    }
+
     public String getDefaultSymbolColor() { return defaultSymbolColor; }
     public void setDefaultSymbolColor(String defaultSymbolColor) { this.defaultSymbolColor = defaultSymbolColor != null ? defaultSymbolColor : "#000000"; }
 }

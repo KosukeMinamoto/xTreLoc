@@ -53,6 +53,12 @@ configurations {
     guiOnly
 }
 
+// Legacy JAI ImageIO SPI breaks javax.imageio.ImageIO on modern JDKs (ServiceConfigurationError:
+// ChannelImageOutputStreamSpi / vendorName == null). GeoTools pulls it transitively; we do not need it for xTreLoc GUI.
+configurations.configureEach {
+    exclude group: 'javax.media', module: 'jai_imageio'
+}
+
 dependencies {
     // GUI-only dependencies
     guiOnly "org.geotools:gt-main:${geotoolsVersion}"

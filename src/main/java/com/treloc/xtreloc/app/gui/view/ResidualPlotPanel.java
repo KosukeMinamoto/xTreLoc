@@ -12,6 +12,7 @@ import org.jfree.data.xy.XYSeriesCollection;
 import com.treloc.xtreloc.util.ModeNameMapper;
 import com.treloc.xtreloc.app.gui.util.AppSettingsCache;
 import com.treloc.xtreloc.app.gui.util.ChartAppearanceSettings;
+import com.treloc.xtreloc.app.gui.util.UiFonts;
 
 import javax.swing.*;
 import javax.swing.event.PopupMenuEvent;
@@ -26,15 +27,19 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Set;
 import java.util.HashSet;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 /**
  * Convergence plot area for the Solver tab: residual charts (GRD, LMO, MCMC, DE, TRD),
- * split multi-event view, and CLS k-distance — all use the same central {@link #residualPlotContainer}.
+ * optional split multi-event view (DE/TRD), and CLS k-distance — all use the same central {@link #residualPlotContainer}.
  * 
  * @author xTreLoc Development Team
  * @version 1.0
  */
 public class ResidualPlotPanel extends JPanel {
+    private static final Logger log = Logger.getLogger(ResidualPlotPanel.class.getName());
+
     private ChartPanel chartPanel;
     private JFreeChart chart;
     private XYSeries residualSeries;
@@ -59,13 +64,28 @@ public class ResidualPlotPanel extends JPanel {
     private Set<String> activeProcessingEvents;
     
     private JPanel residualPlotContainer;
-    /** Custom legend panel for MCMC: labels colored to match Residual / Log-Likelihood lines */
-    private JPanel mcmcLegendPanel;
+    /** Strip above the main chart: Residual only, or + Log-Likelihood (MCMC), or + Per Cluster (TRD). */
+    private JPanel externalLegendPanel;
     private KDistancePlotPanel kDistancePlotPanel;
     
-    private static final int REPAINT_THROTTLE_MS = 100;
     private volatile long lastRepaintRequestTime = 0;
     private Timer repaintThrottleTimer;
+
+    /**
+     * Reads {@link ChartAppearanceSettings#getConvergenceRepaintThrottleMs()}: 0 = no throttle;
+     * positive values are clamped to {@code [16, 60000]} ms.
+     */
+    private static int effectiveConvergenceRepaintThrottleMs() {
+        try {
+            int v = AppSettingsCache.chartAppearance().getConvergenceRepaintThrottleMs();
+            if (v <= 0) {
+                return 0;
+            }
+            return Math.max(16, Math.min(60_000, v));
+        } catch (Exception e) {
+            return 350;
+        }
+    }
 
     /**
      * Lets the chart scale to the full {@link ChartPanel} size. Defaults (e.g. max width 1024) leave empty
@@ -76,12 +96,18 @@ public class ResidualPlotPanel extends JPanel {
     }
     
     /**
-     * Schedules a repaint with throttling (at most once per REPAINT_THROTTLE_MS) to reduce EDT load.
+     * Schedules a repaint with throttling to reduce EDT load during convergence updates.
+     * Interval comes from chart appearance settings ({@code convergenceRepaintThrottleMs}).
      */
     private void requestRepaint() {
+        int throttleMs = effectiveConvergenceRepaintThrottleMs();
+        if (throttleMs <= 0) {
+            SwingUtilities.invokeLater(this::doThrottledRepaint);
+            return;
+        }
         long now = System.currentTimeMillis();
         synchronized (this) {
-            if (now - lastRepaintRequestTime >= REPAINT_THROTTLE_MS) {
+            if (now - lastRepaintRequestTime >= throttleMs) {
                 lastRepaintRequestTime = now;
                 if (repaintThrottleTimer != null && repaintThrottleTimer.isRunning()) {
                     repaintThrottleTimer.stop();
@@ -90,7 +116,7 @@ public class ResidualPlotPanel extends JPanel {
                 return;
             }
             if (repaintThrottleTimer == null || !repaintThrottleTimer.isRunning()) {
-                repaintThrottleTimer = new Timer(REPAINT_THROTTLE_MS, e -> {
+                repaintThrottleTimer = new Timer(throttleMs, e -> {
                     lastRepaintRequestTime = System.currentTimeMillis();
                     doThrottledRepaint();
                 });
@@ -137,6 +163,8 @@ public class ResidualPlotPanel extends JPanel {
     private static class EventChartInfo {
         JFreeChart chart;
         ChartPanel chartPanel;
+        /** Chart plus external legend strip (same layout as the main convergence plot). */
+        JPanel plotHost;
         XYSeries series;
         XYSeries likelihoodSeries;
         XYSeriesCollection dataset;
@@ -203,12 +231,21 @@ public class ResidualPlotPanel extends JPanel {
                 renderer.setSeriesPaint(1, ResidualPlotPanel.LIKELIHOOD_LEGEND_COLOR);
                 renderer.setSeriesStroke(1, new BasicStroke(1.5f));
             }
+            
+            if (this.chart.getLegend() != null) {
+                this.chart.getLegend().setVisible(false);
+            }
+            JPanel legendStrip = ResidualPlotPanel.createSplitEventLegendStrip(mode);
+            this.plotHost = new JPanel(new BorderLayout());
+            this.plotHost.setOpaque(false);
+            this.plotHost.add(legendStrip, BorderLayout.NORTH);
+            this.plotHost.add(this.chartPanel, BorderLayout.CENTER);
         }
     }
     
     public ResidualPlotPanel() {
         setLayout(new BorderLayout());
-        setBorder(BorderFactory.createTitledBorder("📈 Residual Convergence Plot"));
+        setBorder(BorderFactory.createTitledBorder("Residual Convergence Plot"));
         
         eventSeriesMap = new HashMap<>();
         eventChartMap = new HashMap<>();
@@ -222,8 +259,6 @@ public class ResidualPlotPanel extends JPanel {
         splitScrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
         
         createEmptyChart();
-        
-        mcmcLegendPanel = createMcmcLegendPanel();
         
         kDistancePlotPanel = new KDistancePlotPanel();
         
@@ -249,7 +284,7 @@ public class ResidualPlotPanel extends JPanel {
 
         JPanel controlPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 2));
         activeEventLabel = new JLabel("Active: None");
-        activeEventLabel.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 11));
+        activeEventLabel.setFont(UiFonts.uiPlain(11f));
         controlPanel.add(activeEventLabel);
 
         add(controlPanel, BorderLayout.NORTH);
@@ -287,14 +322,16 @@ public class ResidualPlotPanel extends JPanel {
             return;
         }
 
-        JCheckBoxMenuItem splitItem = new JCheckBoxMenuItem("Split view", useSplitView);
-        splitItem.addItemListener(e -> {
-            if (e.getStateChange() == ItemEvent.SELECTED || e.getStateChange() == ItemEvent.DESELECTED) {
-                useSplitView = splitItem.isSelected();
-                updateViewMode();
-            }
-        });
-        popup.add(splitItem);
+        if (isSplitViewSupported(mode)) {
+            JCheckBoxMenuItem splitItem = new JCheckBoxMenuItem("Split view", useSplitView);
+            splitItem.addItemListener(e -> {
+                if (e.getStateChange() == ItemEvent.SELECTED || e.getStateChange() == ItemEvent.DESELECTED) {
+                    useSplitView = splitItem.isSelected();
+                    updateViewMode();
+                }
+            });
+            popup.add(splitItem);
+        }
 
         JCheckBoxMenuItem autoItem = new JCheckBoxMenuItem("Auto scale", autoScale);
         autoItem.addItemListener(e -> {
@@ -315,50 +352,90 @@ public class ResidualPlotPanel extends JPanel {
         popup.add(exportItem);
     }
     
-    /**
-     * Creates a small legend panel for MCMC mode: "Residual" and "Log-Likelihood" with labels
-     * colored to match the series line colors.
-     */
     private static final Color RESIDUAL_LEGEND_COLOR = new Color(50, 150, 200);
     private static final Color LIKELIHOOD_LEGEND_COLOR = new Color(200, 100, 50);
+    private static final Color TRD_CLUSTER_LEGEND_COLOR = new Color(150, 200, 100);
 
-    private JPanel createMcmcLegendPanel() {
+    private static boolean isResidualLocationMode(String m) {
+        return "GRD".equals(m) || "LMO".equals(m) || "MCMC".equals(m) || "DE".equals(m) || "TRD".equals(m);
+    }
+
+    /** GRD/LMO/MCMC use a single combined chart (no split view); DE/TRD may use split for parallel events. */
+    private static boolean isSplitViewSupported(String m) {
+        return !"MCMC".equals(m) && !"LMO".equals(m) && !"GRD".equals(m);
+    }
+
+    private static JPanel createLineSwatch(Color color, boolean dashed, float lineWidth) {
+        JPanel swatch = new JPanel() {
+            @Override
+            protected void paintComponent(Graphics g) {
+                super.paintComponent(g);
+                Graphics2D g2 = (Graphics2D) g.create();
+                try {
+                    g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                    g2.setColor(color);
+                    if (dashed) {
+                        g2.setStroke(new BasicStroke(lineWidth, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND,
+                            1.0f, new float[]{5.0f, 5.0f}, 0.0f));
+                    } else {
+                        g2.setStroke(new BasicStroke(lineWidth));
+                    }
+                    int midY = getHeight() / 2;
+                    g2.drawLine(0, midY, getWidth(), midY);
+                } finally {
+                    g2.dispose();
+                }
+            }
+        };
+        swatch.setPreferredSize(new Dimension(24, 12));
+        swatch.setOpaque(false);
+        return swatch;
+    }
+
+    private static void addExternalLegendResidual(JPanel row, Font labelFont) {
+        row.add(createLineSwatch(RESIDUAL_LEGEND_COLOR, false, 2.5f));
+        JLabel lab = new JLabel("Residual");
+        lab.setForeground(RESIDUAL_LEGEND_COLOR);
+        lab.setFont(labelFont);
+        row.add(lab);
+    }
+
+    private static void addExternalLegendSecondSeries(JPanel row, String text, Color color, boolean dashed,
+                                                      float lineWidth, Font labelFont) {
+        row.add(createLineSwatch(color, dashed, lineWidth));
+        JLabel lab = new JLabel(text);
+        lab.setForeground(color);
+        lab.setFont(labelFont);
+        row.add(lab);
+    }
+
+    /**
+     * Legend strip above the main convergence chart for GRD/LMO/DE (residual only), MCMC (+ likelihood), TRD (+ per cluster).
+     */
+    private static JPanel createExternalLegendStrip(String mode) {
         JPanel panel = new JPanel(new FlowLayout(FlowLayout.LEFT, 16, 4));
         panel.setOpaque(false);
-        JLabel residualLabel = new JLabel("Residual");
-        residualLabel.setForeground(RESIDUAL_LEGEND_COLOR);
-        residualLabel.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 12));
-        JPanel residualSwatch = new JPanel() {
-            @Override
-            protected void paintComponent(Graphics g) {
-                super.paintComponent(g);
-                Graphics2D g2 = (Graphics2D) g;
-                g2.setColor(RESIDUAL_LEGEND_COLOR);
-                g2.setStroke(new BasicStroke(2.5f));
-                g2.drawLine(0, getHeight() / 2, getWidth(), getHeight() / 2);
-            }
-        };
-        residualSwatch.setPreferredSize(new Dimension(24, 12));
-        residualSwatch.setOpaque(false);
-        JLabel likelihoodLabel = new JLabel("Log-Likelihood");
-        likelihoodLabel.setForeground(LIKELIHOOD_LEGEND_COLOR);
-        likelihoodLabel.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 12));
-        JPanel likelihoodSwatch = new JPanel() {
-            @Override
-            protected void paintComponent(Graphics g) {
-                super.paintComponent(g);
-                Graphics2D g2 = (Graphics2D) g;
-                g2.setColor(LIKELIHOOD_LEGEND_COLOR);
-                g2.setStroke(new BasicStroke(2.5f));
-                g2.drawLine(0, getHeight() / 2, getWidth(), getHeight() / 2);
-            }
-        };
-        likelihoodSwatch.setPreferredSize(new Dimension(24, 12));
-        likelihoodSwatch.setOpaque(false);
-        panel.add(residualSwatch);
-        panel.add(residualLabel);
-        panel.add(likelihoodSwatch);
-        panel.add(likelihoodLabel);
+        Font labelFont = UiFonts.getLabelFont();
+        addExternalLegendResidual(panel, labelFont);
+        if ("MCMC".equals(mode)) {
+            addExternalLegendSecondSeries(panel, "Log-Likelihood", LIKELIHOOD_LEGEND_COLOR, false, 1.5f, labelFont);
+        } else if ("TRD".equals(mode)) {
+            addExternalLegendSecondSeries(panel, "Per Cluster", TRD_CLUSTER_LEGEND_COLOR, true, 1.5f, labelFont);
+        }
+        return panel;
+    }
+
+    /**
+     * Compact strip for split-view per-event charts (TRD mini-charts only show RMS residual, not the dashed cluster line).
+     */
+    private static JPanel createSplitEventLegendStrip(String mode) {
+        JPanel panel = new JPanel(new FlowLayout(FlowLayout.LEFT, 16, 4));
+        panel.setOpaque(false);
+        Font labelFont = UiFonts.uiPlain(11f);
+        addExternalLegendResidual(panel, labelFont);
+        if ("MCMC".equals(mode)) {
+            addExternalLegendSecondSeries(panel, "Log-Likelihood", LIKELIHOOD_LEGEND_COLOR, false, 1.5f, labelFont);
+        }
         return panel;
     }
     
@@ -420,6 +497,9 @@ public class ResidualPlotPanel extends JPanel {
      */
     public void setMode(String mode) {
         this.mode = mode;
+        if (!isSplitViewSupported(mode)) {
+            useSplitView = false;
+        }
         
         boolean isLocationMode = "GRD".equals(mode) || "LMO".equals(mode) || 
                                 "MCMC".equals(mode) || "DE".equals(mode) || "TRD".equals(mode);
@@ -429,28 +509,35 @@ public class ResidualPlotPanel extends JPanel {
             if (clsTitle == null) {
                 clsTitle = "CLS";
             }
-            setBorder(BorderFactory.createTitledBorder("📈 " + clsTitle + " — k-distance"));
+            setBorder(BorderFactory.createTitledBorder(clsTitle + " — k-distance"));
             updateViewMode();
             refreshPlotToolbarForMode();
             return;
         }
         
-        setBorder(BorderFactory.createTitledBorder("📈 Residual Convergence Plot"));
+        setBorder(BorderFactory.createTitledBorder("Residual Convergence Plot"));
         
         if (isLocationMode) {
             dataset.removeAllSeries();
             eventSeriesMap.clear();
             activeEventName = null;
+            mcmcLikelihoodSeries = null;
+            trdClusterSeries = null;
             
             residualSeries = new XYSeries("Residual");
             residualSeries.add(0, 0);
             dataset.addSeries(residualSeries);
+            XYPlot plot = chart.getXYPlot();
+            // Clear stale secondary axis/series mappings when switching away from MCMC/TRD.
+            plot.setRangeAxis(1, null);
+            for (int i = 1; i < dataset.getSeriesCount(); i++) {
+                plot.mapDatasetToRangeAxis(i, 0);
+            }
             
             if ("MCMC".equals(mode)) {
                 mcmcLikelihoodSeries = new XYSeries("Log-Likelihood");
                 dataset.addSeries(mcmcLikelihoodSeries);
                 
-                XYPlot plot = chart.getXYPlot();
                 XYLineAndShapeRenderer renderer = (XYLineAndShapeRenderer) plot.getRenderer();
                 renderer.setSeriesPaint(1, LIKELIHOOD_LEGEND_COLOR);
                 renderer.setSeriesStroke(1, new BasicStroke(1.5f));
@@ -461,26 +548,20 @@ public class ResidualPlotPanel extends JPanel {
                 likelihoodAxis.setTickLabelPaint(LIKELIHOOD_LEGEND_COLOR);
                 plot.setRangeAxis(1, likelihoodAxis);
                 plot.mapDatasetToRangeAxis(1, 1);
-                
-                if (chart.getLegend() != null) {
-                    chart.getLegend().setVisible(false);
-                }
             } else if ("TRD".equals(mode)) {
                 trdClusterSeries = new XYSeries("Per Cluster");
                 dataset.addSeries(trdClusterSeries);
                 
-                XYPlot plot = chart.getXYPlot();
                 XYLineAndShapeRenderer renderer = (XYLineAndShapeRenderer) plot.getRenderer();
-                renderer.setSeriesPaint(1, new Color(150, 200, 100));
+                renderer.setSeriesPaint(1, TRD_CLUSTER_LEGEND_COLOR);
                 renderer.setSeriesStroke(1, new BasicStroke(1.5f, BasicStroke.CAP_ROUND, 
                     BasicStroke.JOIN_ROUND, 1.0f, new float[]{5.0f, 5.0f}, 0.0f));
             }
             
-            if (!"MCMC".equals(mode)) {
-                if (chart.getLegend() != null) {
-                    chart.getLegend().setVisible(true);
-                }
+            if (chart.getLegend() != null) {
+                chart.getLegend().setVisible(false);
             }
+            externalLegendPanel = createExternalLegendStrip(mode);
             
             updateChartTitle();
             updateChart();
@@ -528,6 +609,7 @@ public class ResidualPlotPanel extends JPanel {
         String displayName = ModeNameMapper.getDisplayName(mode);
         switch (mode) {
             case "LMO":
+            case "GRD":
                 title = displayName + " - Residual Convergence";
                 break;
             case "MCMC":
@@ -607,7 +689,7 @@ public class ResidualPlotPanel extends JPanel {
                         
                         JPanel eventPanel = new JPanel(new BorderLayout());
                         eventPanel.setBorder(BorderFactory.createTitledBorder(eventName + " (Processing)"));
-                        eventPanel.add(chartInfo.chartPanel, BorderLayout.CENTER);
+                        eventPanel.add(chartInfo.plotHost, BorderLayout.CENTER);
                         splitViewPanel.add(eventPanel);
                         eventPanelMap.put(eventName, eventPanel);
                         requestRepaint();
@@ -695,7 +777,7 @@ public class ResidualPlotPanel extends JPanel {
                     
                     JPanel eventPanel = new JPanel(new BorderLayout());
                     eventPanel.setBorder(BorderFactory.createTitledBorder(eventName + " (Processing)"));
-                    eventPanel.add(chartInfo.chartPanel, BorderLayout.CENTER);
+                    eventPanel.add(chartInfo.plotHost, BorderLayout.CENTER);
                     splitViewPanel.add(eventPanel);
                     eventPanelMap.put(eventName, eventPanel);
                     requestRepaint();
@@ -1060,6 +1142,9 @@ public class ResidualPlotPanel extends JPanel {
                     likelihoodAxis.setTickLabelPaint(LIKELIHOOD_LEGEND_COLOR);
                 }
             }
+            if (chart.getLegend() != null) {
+                chart.getLegend().setVisible(!isResidualLocationMode(mode));
+            }
             requestRepaint();
         }
     }
@@ -1077,14 +1162,14 @@ public class ResidualPlotPanel extends JPanel {
             requestRepaint();
             return;
         }
-        if (useSplitView && eventChartMap.size() > 0) {
+        if (isSplitViewSupported(mode) && useSplitView && eventChartMap.size() > 0) {
             JScrollPane splitScrollPane = new JScrollPane(splitViewPanel);
             splitScrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED);
             splitScrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
             residualPlotContainer.add(splitScrollPane, BorderLayout.CENTER);
         } else {
-            if ("MCMC".equals(mode) && mcmcLegendPanel != null) {
-                residualPlotContainer.add(mcmcLegendPanel, BorderLayout.NORTH);
+            if (isResidualLocationMode(mode) && externalLegendPanel != null) {
+                residualPlotContainer.add(externalLegendPanel, BorderLayout.NORTH);
             }
             residualPlotContainer.add(chartPanel, BorderLayout.CENTER);
         }
@@ -1168,13 +1253,9 @@ public class ResidualPlotPanel extends JPanel {
                 try {
                     java.io.File file = fileChooser.getSelectedFile();
                     kDistancePlotPanel.exportChartImageToFile(file);
-                    JOptionPane.showMessageDialog(parent != null ? parent : this,
-                        "Chart exported successfully to:\n" + file.getAbsolutePath(),
-                        "Export Success", JOptionPane.INFORMATION_MESSAGE);
+                    log.info("Solver chart export saved: " + file.getAbsolutePath());
                 } catch (Exception e) {
-                    JOptionPane.showMessageDialog(parent != null ? parent : this,
-                        "Error exporting chart: " + e.getMessage(),
-                        "Export Error", JOptionPane.ERROR_MESSAGE);
+                    log.log(Level.WARNING, "Solver chart export failed", e);
                 }
             }
         } else {
@@ -1190,18 +1271,12 @@ public class ResidualPlotPanel extends JPanel {
                     BufferedImage image = createVisibleResidualImage(width, height);
                     if (image != null) {
                         javax.imageio.ImageIO.write(image, "png", file);
-                        JOptionPane.showMessageDialog(parent != null ? parent : this,
-                            "Chart exported successfully to:\n" + file.getAbsolutePath(),
-                            "Export Success", JOptionPane.INFORMATION_MESSAGE);
+                        log.info("Solver chart export saved: " + file.getAbsolutePath());
                     } else {
-                        JOptionPane.showMessageDialog(parent != null ? parent : this,
-                            "Could not export: no chart visible.",
-                            "Export Error", JOptionPane.ERROR_MESSAGE);
+                        log.warning("Solver chart export: no chart visible to capture.");
                     }
                 } catch (Exception e) {
-                    JOptionPane.showMessageDialog(parent != null ? parent : this,
-                        "Error exporting chart: " + e.getMessage(),
-                        "Export Error", JOptionPane.ERROR_MESSAGE);
+                    log.log(Level.WARNING, "Solver chart export failed", e);
                 }
             }
         }
@@ -1212,8 +1287,15 @@ public class ResidualPlotPanel extends JPanel {
      */
     private BufferedImage createVisibleResidualImage(int width, int height) {
         if ("CLS".equals(mode) && kDistancePlotPanel != null) {
-            JFreeChart ch = kDistancePlotPanel.getChart();
-            return ch != null ? ch.createBufferedImage(width, height) : null;
+            BufferedImage img = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
+            Graphics2D g2 = img.createGraphics();
+            g2.setColor(Color.WHITE);
+            g2.fillRect(0, 0, width, height);
+            kDistancePlotPanel.setSize(width, height);
+            kDistancePlotPanel.doLayout();
+            kDistancePlotPanel.printAll(g2);
+            g2.dispose();
+            return img;
         }
         if (residualPlotContainer == null || residualPlotContainer.getComponentCount() == 0) {
             return chart != null ? chart.createBufferedImage(width, height) : null;

@@ -65,7 +65,6 @@ public final class XTreLocCLI {
         try {
             runWithoutLogo(mode, configPath);
         } catch (Exception e) {
-            // Detailed error reporting for CLI
             System.err.println("\n========================================");
             System.err.println("ERROR: " + e.getMessage());
             System.err.println("========================================");
@@ -78,6 +77,7 @@ public final class XTreLocCLI {
                 java.io.File logFile = com.treloc.xtreloc.util.AppLogFile.getLogFile();
                 System.err.println("  " + logFile.getAbsolutePath());
             } catch (Exception logEx) {
+                logger.log(Level.FINE, "Could not resolve log file path for stderr hint.", logEx);
             }
             System.err.println("========================================");
             

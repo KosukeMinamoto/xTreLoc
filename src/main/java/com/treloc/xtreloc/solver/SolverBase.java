@@ -6,7 +6,7 @@ import java.util.logging.Logger;
 
 import com.treloc.xtreloc.io.AppConfig;
 import com.treloc.xtreloc.io.StationRepository;
-import edu.sc.seis.TauP.TauModelException;
+import com.treloc.xtreloc.io.VelocityModelLoadException;
 
 /**
  * Base class for hypocenter location solvers.
@@ -29,9 +29,9 @@ public abstract class SolverBase extends HypoUtils {
      * Loads station data from the config's station file.
      *
      * @param appConfig the application configuration
-     * @throws TauModelException if there is an error loading the TauP model
+     * @throws VelocityModelLoadException if the velocity model cannot be loaded for Raytrace1D
      */
-    protected SolverBase(AppConfig appConfig) throws TauModelException {
+    protected SolverBase(AppConfig appConfig) throws VelocityModelLoadException {
         super(appConfig);
         this.threshold = appConfig.threshold;
         loadStationData(appConfig);
@@ -43,9 +43,9 @@ public abstract class SolverBase extends HypoUtils {
      *
      * @param appConfig the application configuration
      * @param stationRepo pre-loaded station repository (must not be null)
-     * @throws TauModelException if there is an error loading the TauP model
+     * @throws VelocityModelLoadException if the velocity model cannot be loaded for Raytrace1D
      */
-    protected SolverBase(AppConfig appConfig, StationRepository stationRepo) throws TauModelException {
+    protected SolverBase(AppConfig appConfig, StationRepository stationRepo) throws VelocityModelLoadException {
         super(appConfig);
         this.threshold = appConfig.threshold;
         this.stationTable = stationRepo.getStationTable();

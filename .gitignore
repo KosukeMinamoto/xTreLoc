@@ -100,3 +100,10 @@ scripts/
 
 # Directory containing moved files during release cleanup
 tmp/release-cleanup/
+
+# Local screenshots / exports (not source)
+/histogram.png
+/map.png
+
+# Unused high-res logo (code references logo.png only)
+src/main/resources/images/logo2.png

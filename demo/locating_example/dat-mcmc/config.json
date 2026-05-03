@@ -1,0 +1,57 @@
+{
+  "logLevel" : "INFO",
+  "numJobs" : 4,
+  "stationFile" : "/Users/kosukeminamoto/kminamoto/java/xTreLoc/demo/locating_example/station.tbl",
+  "taupFile" : "prem.nd",
+  "raytraceMethod" : "layered",
+  "hypBottom" : 40.0,
+  "threshold" : 0.0,
+  "io" : {
+    "MCMC" : {
+      "datDirectory" : "/Users/kosukeminamoto/kminamoto/java/xTreLoc/demo/locating_example/dat",
+      "outDirectory" : "/Users/kosukeminamoto/kminamoto/java/xTreLoc/demo/locating_example/dat-mcmc",
+      "catalogFile" : null
+    }
+  },
+  "params" : {
+    "MCMC" : {
+      "nSamples" : 500,
+      "burnIn" : 100,
+      "stepSize" : 0.1,
+      "stepSizeDepth" : 1.0,
+      "temperature" : 1.0,
+      "showConvergenceLog" : true
+    }
+  },
+  "solver" : {
+    "MCMC" : {
+      "nSamples" : 500,
+      "burnIn" : 100,
+      "stepSize" : 0.1,
+      "stepSizeDepth" : 1.0,
+      "temperature" : 1.0,
+      "showConvergenceLog" : true
+    }
+  },
+  "modes" : {
+    "MCMC" : {
+      "datDirectory" : "/Users/kosukeminamoto/kminamoto/java/xTreLoc/demo/locating_example/dat",
+      "outDirectory" : "/Users/kosukeminamoto/kminamoto/java/xTreLoc/demo/locating_example/dat-mcmc",
+      "catalogFile" : null,
+      "randomSeed" : null,
+      "phsErr" : null,
+      "locErr" : null,
+      "minSelectRate" : null,
+      "maxSelectRate" : null,
+      "minPts" : null,
+      "eps" : null,
+      "epsPercentile" : null,
+      "useBinaryFormat" : null,
+      "rmsThreshold" : null,
+      "locErrThreshold" : null,
+      "doClustering" : null,
+      "calcTripleDiff" : null,
+      "maxTripleDiffCount" : null
+    }
+  }
+}

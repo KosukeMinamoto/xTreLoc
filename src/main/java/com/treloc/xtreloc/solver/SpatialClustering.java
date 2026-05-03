@@ -29,7 +29,7 @@ import com.treloc.xtreloc.util.CatalogFileNameGenerator;
 import com.treloc.xtreloc.util.SolverLogger;
 import com.treloc.xtreloc.util.TimeFormatConverter;
 
-import edu.sc.seis.TauP.TauModelException;
+import com.treloc.xtreloc.io.VelocityModelLoadException;
 
 /**
  * SpatialClustering
@@ -61,9 +61,9 @@ public class SpatialClustering extends SolverBase {
      * Constructs a SpatialClustering object with the specified configuration.
      *
      * @param appConfig the application configuration
-     * @throws TauModelException if there is an error in the Tau model
+     * @throws VelocityModelLoadException if there is an error in the velocity model
      */
-    public SpatialClustering(AppConfig appConfig) throws TauModelException {
+    public SpatialClustering(AppConfig appConfig) throws VelocityModelLoadException {
         super(appConfig);
         
         if (appConfig.getModes() != null && appConfig.getModes().containsKey("CLS")) {
@@ -150,9 +150,9 @@ public class SpatialClustering extends SolverBase {
      * 
      * @param catalogFile the input catalog file path (not used, uses config)
      * @param outputDir the output directory path (not used, uses config)
-     * @throws TauModelException if there is an error in the Tau model
+     * @throws VelocityModelLoadException if there is an error in the velocity model
      */
-    public void start(String catalogFile, String outputDir) throws TauModelException {
+    public void start(String catalogFile, String outputDir) throws VelocityModelLoadException {
         try {
             SolverLogger.info("CLS: Starting. Catalog=" + this.catalogFile + ", outputDir=" + this.outputDir +
                 ", doClustering=" + doClustering + ", calcTripleDiff=" + calcTripleDiff + ", numJobs=" + numJobs + ".");
@@ -828,7 +828,7 @@ public class SpatialClustering extends SolverBase {
                     trvTbl[i][j] = (tt != null && j < tt.length) ? tt[j] : Double.MAX_VALUE;
                 }
             }
-        } catch (TauModelException e) {
+        } catch (Exception e) {
             logger.warning("CLS: Travel time computation failed; saving without residual: " + e.getMessage());
             SolverLogger.warning("CLS: Travel time failed; triple differences saved without residual.");
             return tripleDifferences;

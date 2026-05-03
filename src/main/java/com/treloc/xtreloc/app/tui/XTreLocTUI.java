@@ -1651,7 +1651,6 @@ public final class XTreLocTUI {
                 screen.stopScreen();
             }
         } catch (Exception e) {
-            // Ignore cleanup errors
         }
     }
 

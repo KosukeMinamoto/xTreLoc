@@ -69,13 +69,16 @@ cd xTreLoc
 mvn clean package
 ```
 
-JARs in `target/`:
+JARs in `target/` (same layout as Gradle `jar`, `guiJar`, `cliJar`, `tuiJar`):
 
-- `xTreLoc-GUI-1.0-SNAPSHOT.jar`
-- `xTreLoc-CLI-1.0-SNAPSHOT.jar`
-- `xTreLoc-TUI-1.0-SNAPSHOT.jar` (TUI-only, if built with TUI profile)
+| JAR | Role |
+|-----|------|
+| `xTreLoc-1.0-SNAPSHOT.jar` | Launcher (`com.treloc.xtreloc.app.XTreLoc`) — full classpath |
+| `xTreLoc-GUI-1.0-SNAPSHOT.jar` | GUI only |
+| `xTreLoc-CLI-1.0-SNAPSHOT.jar` | CLI — GeoTools / FlatLaf / JFreeChart / JTS and `app/gui` excluded |
+| `xTreLoc-TUI-1.0-SNAPSHOT.jar` | TUI — same slimming as CLI |
 
-Options: `mvn clean package -Pgui` or `-Pcli` for a single mode-specific JAR (see `pom.xml` for profiles). There is no separate TUI profile; the default build produces GUI, CLI, and TUI JARs.
+`mvn clean package` builds all four. An `original-*.jar` in `target/` may appear as a Shade backup; it is not needed to run the app.
 
 #### Platform-specific build (Linux / Windows / macOS)
 
@@ -96,6 +99,7 @@ With Maven, build JARs on the target OS with `mvn clean package -Plinux`, `-Pwin
 **Launcher (choose GUI / TUI / CLI):**
 ```bash
 java -jar build/libs/xTreLoc-1.0-SNAPSHOT.jar
+# Maven build: java -jar target/xTreLoc-1.0-SNAPSHOT.jar
 ```
 
 **GUI:**

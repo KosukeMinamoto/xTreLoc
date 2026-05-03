@@ -14,7 +14,7 @@ import com.treloc.xtreloc.io.StationRepository;
 import com.treloc.xtreloc.util.BatchExecutorFactory;
 import com.treloc.xtreloc.util.SolverLogger;
 import com.fasterxml.jackson.databind.JsonNode;
-import edu.sc.seis.TauP.TauModelException;
+import com.treloc.xtreloc.io.VelocityModelLoadException;
 
 /**
  * Hypocenter location using Differential Evolution (DE) algorithm.
@@ -91,9 +91,9 @@ public class HypoDifferentialEvolution extends SolverBase {
      * Constructs a HypoDifferentialEvolution object with the specified configuration.
      * 
      * @param appConfig the application configuration
-     * @throws TauModelException if there is an error loading the TauP model
+     * @throws VelocityModelLoadException if there is an error loading the velocity model
      */
-    public HypoDifferentialEvolution(AppConfig appConfig) throws TauModelException {
+    public HypoDifferentialEvolution(AppConfig appConfig) throws VelocityModelLoadException {
         super(appConfig);
         this.hypBottom = appConfig.hypBottom;
         initDeParams(appConfig);
@@ -102,7 +102,7 @@ public class HypoDifferentialEvolution extends SolverBase {
     /**
      * Constructs with pre-loaded station data (for parallel batch to avoid concurrent file I/O).
      */
-    public HypoDifferentialEvolution(AppConfig appConfig, StationRepository stationRepo) throws TauModelException {
+    public HypoDifferentialEvolution(AppConfig appConfig, StationRepository stationRepo) throws VelocityModelLoadException {
         super(appConfig, stationRepo);
         this.hypBottom = appConfig.hypBottom;
         initDeParams(appConfig);
@@ -148,10 +148,11 @@ public class HypoDifferentialEvolution extends SolverBase {
      * 
      * @param datFile the input .dat file path
      * @param outFile the output .dat file path
-     * @throws TauModelException if there is an error in the Tau model
+     * @throws VelocityModelLoadException if there is an error in the velocity model
      * @throws RuntimeException if file I/O fails
      */
-    public void start(String datFile, String outFile) throws TauModelException {
+    public void start(String datFile, String outFile) throws VelocityModelLoadException {
+        SolverRunMetricsContext.clear();
         String fileName = new java.io.File(datFile).getName();
         SolverLogger.info("DE: Starting. File=" + fileName);
         logger.info("Starting Differential Evolution location for: " + fileName);
@@ -171,6 +172,8 @@ public class HypoDifferentialEvolution extends SolverBase {
             throw new RuntimeException("Failed to read dat file: " + datFile, e);
         }
         
+        long wallT0 = System.nanoTime();
+
         PointsHandler pointsHandler = new PointsHandler();
         pointsHandler.setMainPoint(point);
         
@@ -366,6 +369,9 @@ public class HypoDifferentialEvolution extends SolverBase {
         
         try {
             pointsHandler.writeDatFile(outFile, codeStrings);
+            long ms = (System.nanoTime() - wallT0) / 1_000_000L;
+            int totalEvals = populationSize * (1 + maxGenerations);
+            SolverRunMetricsContext.set(new SolverRunMetrics(maxGenerations, totalEvals, ms, finalRes));
             SolverLogger.info("DE: Completed. File=" + fileName);
             logger.info("Differential Evolution location completed for: " + fileName);
         } catch (IOException e) {
@@ -434,7 +440,7 @@ public class HypoDifferentialEvolution extends SolverBase {
             double[] sWaveTravelTime = travelTime(stationTable, usedIdx, testPoint);
             double[] residual = differentialTravelTimeResidual(lagTable, sWaveTravelTime);
             return HypoUtils.standardDeviation(residual);
-        } catch (TauModelException e) {
+        } catch (Exception e) {
             logger.warning("Failed to calculate travel time: " + e.getMessage());
             SolverLogger.warning("DE: Failed to calculate travel time.");
             return Double.MAX_VALUE; // Penalty for invalid solutions

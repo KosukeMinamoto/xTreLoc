@@ -1,0 +1,49 @@
+{
+  "logLevel" : "INFO",
+  "numJobs" : 4,
+  "stationFile" : "/Users/kosukeminamoto/kminamoto/java/xTreLoc/demo/locating_example/station.tbl",
+  "taupFile" : "prem.nd",
+  "raytraceMethod" : "layered",
+  "hypBottom" : 40.0,
+  "threshold" : 0.0,
+  "io" : {
+    "GRD" : {
+      "datDirectory" : "/Users/kosukeminamoto/kminamoto/java/xTreLoc/demo/locating_example/dat",
+      "outDirectory" : "/Users/kosukeminamoto/kminamoto/java/xTreLoc/demo/locating_example/dat-grd",
+      "catalogFile" : null
+    }
+  },
+  "params" : {
+    "GRD" : {
+      "totalGrids" : 300,
+      "numFocus" : 3
+    }
+  },
+  "solver" : {
+    "GRD" : {
+      "totalGrids" : 300,
+      "numFocus" : 3
+    }
+  },
+  "modes" : {
+    "GRD" : {
+      "datDirectory" : "/Users/kosukeminamoto/kminamoto/java/xTreLoc/demo/locating_example/dat",
+      "outDirectory" : "/Users/kosukeminamoto/kminamoto/java/xTreLoc/demo/locating_example/dat-grd",
+      "catalogFile" : null,
+      "randomSeed" : null,
+      "phsErr" : null,
+      "locErr" : null,
+      "minSelectRate" : null,
+      "maxSelectRate" : null,
+      "minPts" : null,
+      "eps" : null,
+      "epsPercentile" : null,
+      "useBinaryFormat" : null,
+      "rmsThreshold" : null,
+      "locErrThreshold" : null,
+      "doClustering" : null,
+      "calcTripleDiff" : null,
+      "maxTripleDiffCount" : null
+    }
+  }
+}

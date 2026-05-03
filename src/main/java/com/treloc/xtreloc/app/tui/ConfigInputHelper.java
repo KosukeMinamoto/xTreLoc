@@ -18,6 +18,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.treloc.xtreloc.io.AppConfig;
+import com.treloc.xtreloc.io.VelocityModelCatalog;
 import com.treloc.xtreloc.util.JsonMapperHolder;
 
 /**
@@ -107,7 +108,7 @@ public class ConfigInputHelper {
         TextBox stationFileBox = new TextBox(new TerminalSize(textBoxWidth, 1));
         paramPanel.addComponent(stationFileBox);
         
-        paramPanel.addComponent(new Label("TauP velocity model (e.g., 'prem') *:"));
+        paramPanel.addComponent(new Label("Velocity model (.nd/.tvel or bundled name) *:"));
         TextBox taupFileBox = new TextBox(new TerminalSize(textBoxWidth, 1));
         paramPanel.addComponent(taupFileBox);
         
@@ -628,7 +629,7 @@ public class ConfigInputHelper {
                 else {
                     String ext = getFileExtension(taupPath);
                     if (!ext.isEmpty() && !"nd".equalsIgnoreCase(ext) && !"taup".equalsIgnoreCase(ext) && !"tvel".equalsIgnoreCase(ext)) {
-                        errors.add("TauP model file should have extension .nd, .taup or .tvel: " + taupPath);
+                        errors.add("Velocity model file should have extension .nd or .tvel: " + taupPath);
                     }
                 }
             }
@@ -932,9 +933,7 @@ public class ConfigInputHelper {
     }
     
     private static boolean isBuiltinTaupModel(String name) {
-        if (name == null || name.isEmpty()) return false;
-        String n = name.trim().toLowerCase();
-        return "prem".equals(n) || "iasp91".equals(n) || "ak135".equals(n) || "ak135f".equals(n);
+        return VelocityModelCatalog.isBundledModelName(name);
     }
     
     private static String getFileExtension(String path) {

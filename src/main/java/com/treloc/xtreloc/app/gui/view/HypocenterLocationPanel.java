@@ -3,6 +3,8 @@ package com.treloc.xtreloc.app.gui.view;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.treloc.xtreloc.io.AppConfig;
 import com.treloc.xtreloc.io.ModeConfigResolver;
+import com.treloc.xtreloc.io.VelocityModelCatalog;
+import com.treloc.xtreloc.util.ExecutionFailureReporter;
 import com.treloc.xtreloc.util.JsonMapperHolder;
 import com.treloc.xtreloc.solver.HypoGridSearch;
 import com.treloc.xtreloc.solver.HypoStationPairDiff;
@@ -13,6 +15,11 @@ import com.treloc.xtreloc.util.ModeNameMapper;
 import com.treloc.xtreloc.util.CatalogFileNameGenerator;
 import com.treloc.xtreloc.util.SolverLogger;
 import com.treloc.xtreloc.app.gui.util.AppPanelStyle;
+import com.treloc.xtreloc.app.gui.util.BundledImageLoader;
+import com.treloc.xtreloc.app.gui.util.SolverBatchSummary;
+import com.treloc.xtreloc.solver.SolverRunMetrics;
+import com.treloc.xtreloc.solver.SolverRunMetricsContext;
+import com.treloc.xtreloc.app.gui.util.UiFonts;
 import com.treloc.xtreloc.app.gui.service.CatalogLoader;
 
 import java.util.logging.Level;
@@ -20,11 +27,16 @@ import java.util.logging.Level;
 import javax.swing.*;
 import javax.swing.border.TitledBorder;
 import javax.swing.DefaultComboBoxModel;
+import javax.swing.text.DefaultEditorKit;
 import javax.swing.text.SimpleAttributeSet;
 import javax.swing.text.StyleConstants;
 import javax.swing.text.StyledDocument;
 import java.awt.*;
+import java.awt.event.KeyEvent;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
 import java.io.File;
+import java.io.IOException;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -39,8 +51,8 @@ import java.util.logging.Logger;
  * Levenberg-Marquardt (LMO), MCMC, differential evolution (DE), triple difference (TRD),
  * spatial clustering (CLS), and synthetic test (SYN). Manages input/output paths,
  * mode-specific parameters, execution log, and a full-bleed residual / k-distance chart in the
- * main window's right column when the Solver tab is active (SYN hides the chart; convergence text
- * can stream to the Execution log when enabled).
+ * main window's right column when the Solver tab is active (SYN hides the chart). Per-run metrics are
+ * appended to the Execution log as a TSV table, not per-iteration residual lines.
  *
  * @see HypoGridSearch
  * @see HypoStationPairDiff
@@ -284,13 +296,13 @@ public class HypocenterLocationPanel extends JPanel {
         convergenceLogCommentLabel = new JLabel(
             "<html><div style='text-align: left; padding: 20px; color: #c9d1e0;'>" +
             "<div style='font-size: 18px; font-weight: bold;'>Chart panel is hidden</div>" +
-            "<div style='margin-top: 8px;'>Enable &quot;Show convergence (chart + log)&quot; to show the chart here " +
-            "and stream iteration lines to the Execution log below.</div>" +
+            "<div style='margin-top: 8px;'>Enable &quot;Show convergence chart&quot; to show the residual chart here. " +
+            "Per-run totals appear as a tab-separated summary at the end of the Execution log.</div>" +
             "</div></html>"
         );
         convergenceLogCommentLabel.setHorizontalAlignment(SwingConstants.LEFT);
         convergenceLogCommentLabel.setVerticalAlignment(SwingConstants.CENTER);
-        convergenceLogCommentLabel.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 14));
+        convergenceLogCommentLabel.setFont(UiFonts.uiPlain(14f));
         convergenceLogCommentLabel.setMinimumSize(new Dimension(200, 100));
         convergenceContentPanel.add(convergenceLogCommentLabel, "MESSAGE");
         
@@ -363,8 +375,12 @@ public class HypocenterLocationPanel extends JPanel {
         }
     }
 
+    /**
+     * Per-iteration residual/sample lines are not copied to the Execution log (they explode volume for GRD/MCMC/DE).
+     * Charts still update live when the convergence panel is visible; runs end with a {@link SolverBatchSummary} TSV block.
+     */
     private boolean shouldStreamConvergenceToExecutionLog() {
-        return showConvergenceLogCheckBox == null || showConvergenceLogCheckBox.isSelected();
+        return false;
     }
 
     private void updateConvergenceLogForMode(String mode) {
@@ -532,9 +548,18 @@ public class HypocenterLocationPanel extends JPanel {
         selectImportJsonButton.setToolTipText("Select config file (JSON)");
         AppPanelStyle.stylePrimaryButton(selectImportJsonButton);
         selectImportJsonButton.addActionListener(e -> selectImportJsonFile());
-        importJsonButton = new JButton("Load");
-        importJsonButton.setFont(AppPanelStyle.LABEL_FONT.deriveFont(Font.BOLD));
-        importJsonButton.setPreferredSize(new Dimension(50, 26));
+        importJsonButton = new JButton();
+        ImageIcon applyIcon = BundledImageLoader.loadImageIcon("Check.png");
+        if (applyIcon != null && applyIcon.getIconWidth() > 0) {
+            Image scaled = applyIcon.getImage().getScaledInstance(16, 16, Image.SCALE_SMOOTH);
+            importJsonButton.setIcon(new ImageIcon(scaled));
+            importJsonButton.setText(null);
+        } else {
+            importJsonButton.setText("Load");
+            importJsonButton.setFont(UiFonts.uiBold(12f));
+        }
+        importJsonButton.setToolTipText("Apply configuration from JSON");
+        importJsonButton.setPreferredSize(new Dimension(28, 26));
         AppPanelStyle.stylePrimaryButton(importJsonButton);
         importJsonButton.addActionListener(e -> importConfigFromJson());
         JPanel importJsonPanel = new JPanel(new BorderLayout());
@@ -654,13 +679,16 @@ public class HypocenterLocationPanel extends JPanel {
         
         gbc.gridx = 0; gbc.gridy = 4;
         taupModelLabel = new JLabel("Velocity Model:");
-        taupModelLabel.setFont(AppPanelStyle.LABEL_FONT);
+        taupModelLabel.setFont(AppPanelStyle.getLabelFont());
         taupModelLabel.setForeground(AppPanelStyle.getContentTextColor());
         panel.add(taupModelLabel, gbc);
         gbc.gridx = 1;
         gbc.weightx = 1.0;
-        taupModelCombo = new JComboBox<>(new String[]{"prem", "iasp91", "ak135", "ak135f", "Select from file..."});
-        taupModelCombo.setSelectedItem("prem");
+        String[] models = VelocityModelCatalog.comboModels();
+        String[] comboItems = java.util.Arrays.copyOf(models, models.length + 1);
+        comboItems[models.length] = "Select from file...";
+        taupModelCombo = new JComboBox<>(comboItems);
+        taupModelCombo.setSelectedItem(VelocityModelCatalog.DEFAULT_MODEL);
         AppPanelStyle.styleComboBox(taupModelCombo);
         taupModelCombo.addActionListener(e -> {
             String selected = (String) taupModelCombo.getSelectedItem();
@@ -669,7 +697,7 @@ public class HypocenterLocationPanel extends JPanel {
                     selectTaupFile();
                     if (selectedTaupFile != null) {
                     } else {
-                        taupModelCombo.setSelectedItem("prem");
+                        taupModelCombo.setSelectedItem(VelocityModelCatalog.DEFAULT_MODEL);
                     }
                 } else {
                     com.treloc.xtreloc.app.gui.util.SharedFileManager.getInstance().setTaupFile(selected);
@@ -693,7 +721,7 @@ public class HypocenterLocationPanel extends JPanel {
         
         gbc.gridx = 0; gbc.gridy = 0;
         outputDirLabel = new JLabel("Output Directory:");
-        outputDirLabel.setFont(AppPanelStyle.LABEL_FONT);
+        outputDirLabel.setFont(AppPanelStyle.getLabelFont());
         panel.add(outputDirLabel, gbc);
         gbc.gridx = 1;
         gbc.weightx = 1.0;
@@ -731,7 +759,7 @@ public class HypocenterLocationPanel extends JPanel {
         
         gbc.gridx = 0; gbc.gridy = 1;
         outputFileLabel = new JLabel("Output File:");
-        outputFileLabel.setFont(AppPanelStyle.LABEL_FONT);
+        outputFileLabel.setFont(AppPanelStyle.getLabelFont());
         panel.add(outputFileLabel, gbc);
         gbc.gridx = 1;
         gbc.weightx = 1.0;
@@ -761,7 +789,7 @@ public class HypocenterLocationPanel extends JPanel {
         
         gbc.gridx = 0; gbc.gridy = 2;
         configExportLabel = new JLabel("Export config.json:");
-        configExportLabel.setFont(AppPanelStyle.LABEL_FONT);
+        configExportLabel.setFont(AppPanelStyle.getLabelFont());
         panel.add(configExportLabel, gbc);
         gbc.gridx = 1;
         gbc.weightx = 1.0;
@@ -871,7 +899,7 @@ public class HypocenterLocationPanel extends JPanel {
         
         gbc.gridx = 0; gbc.gridy = 0;
         JLabel modeLabel = new JLabel("Mode:");
-        modeLabel.setFont(AppPanelStyle.LABEL_FONT);
+        modeLabel.setFont(AppPanelStyle.getLabelFont());
         modeLabel.setForeground(AppPanelStyle.getContentTextColor());
         panel.add(modeLabel, gbc);
         gbc.gridx = 1;
@@ -904,7 +932,7 @@ public class HypocenterLocationPanel extends JPanel {
         JPanel titlePanel = new JPanel(new BorderLayout());
         titlePanel.setOpaque(false);
         try {
-            java.net.URL helpImageUrl = HypocenterLocationPanel.class.getResource("/images/help.png");
+            java.net.URL helpImageUrl = HypocenterLocationPanel.class.getResource("/images/Help.png");
             if (helpImageUrl != null) {
                 ImageIcon helpIcon = new ImageIcon(helpImageUrl);
                 Image scaledImage = helpIcon.getImage().getScaledInstance(16, 16, Image.SCALE_SMOOTH);
@@ -1010,7 +1038,7 @@ public class HypocenterLocationPanel extends JPanel {
         lsqrShowLogCheckBox = new JCheckBox("Show LSQR Convergence Log", true);
         lsqrCalcVarCheckBox = new JCheckBox("Calculate Variance (Error Estimation)", true);
         
-        showConvergenceLogCheckBox = new JCheckBox("Show convergence (chart + log)", true);
+        showConvergenceLogCheckBox = new JCheckBox("Show convergence chart", true);
         showConvergenceLogCheckBox.addActionListener(e -> {
             boolean selected = showConvergenceLogCheckBox.isSelected();
             if (convergenceLogPanel != null) {
@@ -1035,7 +1063,7 @@ public class HypocenterLocationPanel extends JPanel {
         
         executeButton = new JButton("▶ Execute");
         executeButton.setEnabled(false);
-        executeButton.setFont(AppPanelStyle.LABEL_FONT.deriveFont(Font.BOLD));
+        executeButton.setFont(UiFonts.uiBold(12f));
         executeButton.setPreferredSize(new Dimension(120, 35));
         AppPanelStyle.styleSuccessButton(executeButton);
         executeButton.addActionListener(e -> executeLocation());
@@ -1043,7 +1071,7 @@ public class HypocenterLocationPanel extends JPanel {
         
         cancelButton = new JButton("⏹ Cancel");
         cancelButton.setEnabled(false);
-        cancelButton.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 14));
+        cancelButton.setFont(UiFonts.uiBold(14f));
         cancelButton.setPreferredSize(new Dimension(120, 35));
         cancelButton.setBackground(new Color(200, 50, 50));
         cancelButton.setForeground(Color.WHITE);
@@ -1072,10 +1100,21 @@ public class HypocenterLocationPanel extends JPanel {
         
         logArea = new JTextPane();
         logArea.setEditable(false);
+        logArea.setFocusable(true);
         logArea.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 12));
         logArea.setBackground(Color.BLACK);
         logArea.setForeground(Color.GREEN);
-        
+        int menuShortcut = Toolkit.getDefaultToolkit().getMenuShortcutKeyMaskEx();
+        InputMap logInput = logArea.getInputMap(JComponent.WHEN_FOCUSED);
+        logInput.put(KeyStroke.getKeyStroke(KeyEvent.VK_C, menuShortcut), DefaultEditorKit.copyAction);
+        logInput.put(KeyStroke.getKeyStroke(KeyEvent.VK_A, menuShortcut), DefaultEditorKit.selectAllAction);
+        logArea.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mousePressed(MouseEvent e) {
+                logArea.requestFocusInWindow();
+            }
+        });
+
         logScrollPane = new JScrollPane(logArea);
         logScrollPane.setMinimumSize(new Dimension(300, 100));
         contentPanel.add(logScrollPane, "LOG");
@@ -1087,7 +1126,7 @@ public class HypocenterLocationPanel extends JPanel {
         );
         logCommentLabel.setHorizontalAlignment(SwingConstants.CENTER);
         logCommentLabel.setVerticalAlignment(SwingConstants.CENTER);
-        logCommentLabel.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 12));
+        logCommentLabel.setFont(UiFonts.uiPlain(12f));
         logCommentLabel.setMinimumSize(new Dimension(300, 100));
         logCommentLabel.setPreferredSize(new Dimension(500, 200));
         contentPanel.add(logCommentLabel, "COMMENT");
@@ -1285,7 +1324,7 @@ public class HypocenterLocationPanel extends JPanel {
      */
     private File getSuggestedOutputCatalogFile(File outputDir) {
         File dir = outputDir != null ? outputDir : getOutputDirForResolve();
-        if (dir == null || !dir.exists() || !dir.isDirectory()) {
+        if (dir == null) {
             String mode = getSelectedModeAbbreviation();
             String suffix = (mode != null && !mode.isEmpty()) ? "_" + mode.toLowerCase() : "";
             return new File("catalog" + suffix + ".csv");
@@ -1357,10 +1396,10 @@ public class HypocenterLocationPanel extends JPanel {
     }
     
     private void selectTaupFile() {
-        fileChooser.setDialogTitle("Select TauP Model File");
+        fileChooser.setDialogTitle("Select Velocity Model File");
         fileChooser.setFileSelectionMode(JFileChooser.FILES_ONLY);
         fileChooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter(
-            "TauP model files (*.taup, *.nd)", "taup", "nd"));
+            "Velocity model files (*.nd, *.tvel)", "nd", "tvel"));
         fileChooser.setAcceptAllFileFilterUsed(true);
         
         String homeDir = System.getProperty("user.home");
@@ -1480,6 +1519,98 @@ public class HypocenterLocationPanel extends JPanel {
         String fileName = f.getName();
         return new File(baseDir, fileName).getAbsolutePath();
     }
+
+    /**
+     * When the output file is a bare name, config-relative path, or a single-segment absolute path
+     * (e.g. {@code /catalog.csv} on Unix), rewrites it under the current output directory for display
+     * and for consistent resolution.
+     */
+    private String normalizeOutputFilePathUsingOutputDir(File outDir, String pathStr) {
+        if (pathStr == null || pathStr.trim().isEmpty() || outDir == null) {
+            return pathStr;
+        }
+        String trimmed = pathStr.trim();
+        File f = new File(trimmed);
+        String name = f.getName();
+        if (name.isEmpty()) {
+            return pathStr;
+        }
+        String outAbs = outDir.getAbsolutePath();
+        if (!f.isAbsolute()) {
+            return new File(outDir, name).getAbsolutePath();
+        }
+        String curAbs = f.getAbsolutePath();
+        if (curAbs.equals(outAbs) || curAbs.startsWith(outAbs + File.separator)) {
+            return curAbs;
+        }
+        File parent = f.getParentFile();
+        if (parent != null && isFilesystemRoot(parent)) {
+            return new File(outDir, name).getAbsolutePath();
+        }
+        return pathStr;
+    }
+
+    private static boolean isFilesystemRoot(File dir) {
+        if (dir == null) {
+            return false;
+        }
+        for (File root : File.listRoots()) {
+            try {
+                if (dir.getCanonicalFile().equals(root.getCanonicalFile())) {
+                    return true;
+                }
+            } catch (IOException e) {
+                if (dir.getAbsolutePath().equals(root.getAbsolutePath())) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
+     * After importing JSON: sync output directory from fields and fill or fix the Output File path
+     * using {@link #normalizeOutputFilePathUsingOutputDir(File, String)} / suggested catalog name.
+     */
+    private void completeOutputFileFieldAfterConfigImport() {
+        syncSelectedOutputDirFromField();
+        File out = getResolvedOutputDirectoryPathFromUi();
+        if (out == null || outputFileField == null) {
+            return;
+        }
+        String p = outputFileField.getText().trim();
+        if (p.isEmpty()) {
+            File suggested = getSuggestedOutputCatalogFile(out);
+            outputFileField.setText(suggested.getAbsolutePath());
+            appendLog("Output file auto-filled: " + suggested.getAbsolutePath());
+            return;
+        }
+        String normalized = normalizeOutputFilePathUsingOutputDir(out, p);
+        if (!normalized.equals(p)) {
+            outputFileField.setText(normalized);
+            appendLog("Output file path completed: " + normalized);
+        }
+    }
+
+    /**
+     * Resolved output directory path from the Output Directory field for UI completion, even when the
+     * directory does not exist yet (execute step may create it). Prefer {@link #getOutputDirForResolve()}
+     * when the path exists on disk.
+     */
+    private File getResolvedOutputDirectoryPathFromUi() {
+        File existing = getOutputDirForResolve();
+        if (existing != null) {
+            return existing;
+        }
+        if (outputDirField == null) {
+            return null;
+        }
+        String v = outputDirField.getText();
+        if (v == null || v.trim().isEmpty()) {
+            return null;
+        }
+        return new File(resolvePathToAbsolute(v.trim()));
+    }
     
     /** Returns the current output directory for resolving relative output/config paths; may be null. */
     private File getOutputDirForResolve() {
@@ -1590,7 +1721,7 @@ public class HypocenterLocationPanel extends JPanel {
             parameterTableModel.addRow(new Object[]{"LM Orthogonal Tolerance (orthoTolerance)", lmOrthoToleranceField.getText(), ""});
             parameterTableModel.addRow(new Object[]{"LM Max Evaluations (maxEvaluations)", lmMaxEvaluationsField.getText(), ""});
             parameterTableModel.addRow(new Object[]{"LM Max Iterations (maxIterations)", lmMaxIterationsField.getText(), ""});
-            parameterTableModel.addRow(new Object[]{"Show convergence (showConvergenceLog)", showConvergenceLogCheckBox.isSelected() ? "true" : "false", "Show right chart; stream convergence lines to Execution log"});
+            parameterTableModel.addRow(new Object[]{"Show convergence (showConvergenceLog)", showConvergenceLogCheckBox.isSelected() ? "true" : "false", "Show residual chart on the right; run totals only in TSV summary below"});
         } else if ("TRD".equals(selectedMode)) {
             parameterTableModel.addRow(new Object[]{"Iteration Count (iterNum)", trdIterNumField.getText(), "Comma-separated (e.g., 10,10)"});
             parameterTableModel.addRow(new Object[]{"Distance Threshold (distKm)", trdDistKmField.getText(), "km, comma-separated (e.g., 50,20)"});
@@ -1602,20 +1733,20 @@ public class HypocenterLocationPanel extends JPanel {
             parameterTableModel.addRow(new Object[]{"LSQR Iteration Limit (iter_lim)", lsqrIterLimField.getText(), "Maximum iterations (default: 1000)"});
             parameterTableModel.addRow(new Object[]{"LSQR Show Log (showLSQR)", lsqrShowLogCheckBox.isSelected() ? "true" : "false", "Display LSQR iteration log"});
             parameterTableModel.addRow(new Object[]{"LSQR Calculate Variance (calcVar)", lsqrCalcVarCheckBox.isSelected() ? "true" : "false", "Estimate error covariance diagonal elements"});
-            parameterTableModel.addRow(new Object[]{"Show convergence (showConvergenceLog)", showConvergenceLogCheckBox.isSelected() ? "true" : "false", "Show right chart; stream convergence lines to Execution log"});
+            parameterTableModel.addRow(new Object[]{"Show convergence (showConvergenceLog)", showConvergenceLogCheckBox.isSelected() ? "true" : "false", "Show residual chart on the right; run totals only in TSV summary below"});
         } else if ("MCMC".equals(selectedMode)) {
             parameterTableModel.addRow(new Object[]{"Sample Count (nSamples)", nSamplesField.getText(), ""});
             parameterTableModel.addRow(new Object[]{"Burn-in Period (burnIn)", burnInField.getText(), ""});
             parameterTableModel.addRow(new Object[]{"Step Size (stepSize)", stepSizeField.getText(), "degree"});
             parameterTableModel.addRow(new Object[]{"Depth Step Size (stepSizeDepth)", stepSizeDepthField.getText(), "km"});
             parameterTableModel.addRow(new Object[]{"Temperature Parameter (temperature)", temperatureField.getText(), ""});
-            parameterTableModel.addRow(new Object[]{"Show convergence (showConvergenceLog)", showConvergenceLogCheckBox.isSelected() ? "true" : "false", "Show right chart; stream convergence lines to Execution log"});
+            parameterTableModel.addRow(new Object[]{"Show convergence (showConvergenceLog)", showConvergenceLogCheckBox.isSelected() ? "true" : "false", "Show residual chart on the right; run totals only in TSV summary below"});
         } else if ("DE".equals(selectedMode)) {
             parameterTableModel.addRow(new Object[]{"Population Size (populationSize)", dePopulationSizeField.getText(), ""});
             parameterTableModel.addRow(new Object[]{"Max Generations (maxGenerations)", deMaxGenerationsField.getText(), ""});
             parameterTableModel.addRow(new Object[]{"Scaling Factor (scalingFactor)", deScalingFactorField.getText(), "[0-2]"});
             parameterTableModel.addRow(new Object[]{"Crossover Rate (crossoverRate)", deCrossoverRateField.getText(), "[0-1]"});
-            parameterTableModel.addRow(new Object[]{"Show convergence (showConvergenceLog)", showConvergenceLogCheckBox.isSelected() ? "true" : "false", "Show right chart; stream convergence lines to Execution log"});
+            parameterTableModel.addRow(new Object[]{"Show convergence (showConvergenceLog)", showConvergenceLogCheckBox.isSelected() ? "true" : "false", "Show residual chart on the right; run totals only in TSV summary below"});
         } else if ("CLS".equals(selectedMode)) {
             parameterTableModel.addRow(new Object[]{"Minimum Points (minPts)", minPtsField.getText(), ""});
             parameterTableModel.addRow(new Object[]{"Epsilon (eps)", epsField.getText(), "km (negative value for auto-estimation)"});
@@ -1690,12 +1821,19 @@ public class HypocenterLocationPanel extends JPanel {
         if (outputDirField != null) cache.put("outputDir", outputDirField.getText() != null ? outputDirField.getText() : "");
         if (stationFileField != null) cache.put("stationFile", stationFileField.getText() != null ? stationFileField.getText() : "");
         if (catalogFileField != null) cache.put("catalogFile", catalogFileField.getText() != null ? catalogFileField.getText() : "");
+        if (taupModelCombo != null) {
+            Object selected = taupModelCombo.getSelectedItem();
+            cache.put("taupFile", selected != null ? selected.toString() : "");
+        }
         if (importJsonFileField != null) {
             String importPath = importJsonFileField.getText() != null ? importJsonFileField.getText() : "";
             cache.put("configFile", importPath);
             cache.put("importJsonFile", importPath);
         }
         if (configExportField != null) cache.put("configExport", configExportField.getText() != null ? configExportField.getText() : "");
+        if (outputFileField != null) {
+            cache.put("outputFile", outputFileField.getText() != null ? outputFileField.getText() : "");
+        }
     }
     
     /**
@@ -1717,6 +1855,8 @@ public class HypocenterLocationPanel extends JPanel {
                     Map<String, String> targetCache = modeParameterCache.computeIfAbsent(mode, k -> new HashMap<>());
                     targetCache.clear();
                     targetCache.putAll(sourceCache);
+                    // First visit to this mode: do not inherit the previous mode's output path (names are mode-specific).
+                    targetCache.remove("outputFile");
                     cache = targetCache;
                 }
             }
@@ -1730,7 +1870,8 @@ public class HypocenterLocationPanel extends JPanel {
         for (Map.Entry<String, String> e : cache.entrySet()) {
             String k = e.getKey();
             if ("targetDir".equals(k) || "outputDir".equals(k) || "stationFile".equals(k) || "catalogFile".equals(k)
-                    || "configFile".equals(k) || "configExport".equals(k) || "importJsonFile".equals(k)) {
+                    || "configFile".equals(k) || "configExport".equals(k) || "importJsonFile".equals(k)
+                    || "taupFile".equals(k) || "outputFile".equals(k)) {
                 continue;
             }
             setParameterValue(k, e.getValue());
@@ -1753,10 +1894,6 @@ public class HypocenterLocationPanel extends JPanel {
                 if (configExportField != null && (configExportField.getText() == null || configExportField.getText().trim().isEmpty())) {
                     configExportField.setText(new File(resolvedOut, "config.json").getAbsolutePath());
                 }
-                if (outputFileField != null && (outputFileField.getText() == null || outputFileField.getText().trim().isEmpty())) {
-                    File suggested = getSuggestedOutputCatalogFile(f);
-                    outputFileField.setText(suggested.getAbsolutePath());
-                }
             }
         }
         if ((v = cache.get("stationFile")) != null && stationFileField != null) {
@@ -1769,6 +1906,20 @@ public class HypocenterLocationPanel extends JPanel {
         if ((v = cache.get("catalogFile")) != null && catalogFileField != null) {
             catalogFileField.setText(v);
         }
+        syncSelectedOutputDirFromField();
+        File outDirForOutput = getResolvedOutputDirectoryPathFromUi();
+        String cachedOutputFile = cache.get("outputFile");
+        if (outputFileField != null) {
+            if (cachedOutputFile != null && !cachedOutputFile.trim().isEmpty()) {
+                if (outDirForOutput != null) {
+                    outputFileField.setText(normalizeOutputFilePathUsingOutputDir(outDirForOutput, cachedOutputFile.trim()));
+                } else {
+                    outputFileField.setText(cachedOutputFile.trim());
+                }
+            } else if (outDirForOutput != null) {
+                outputFileField.setText(getSuggestedOutputCatalogFile(outDirForOutput).getAbsolutePath());
+            }
+        }
         if ((v = cache.get("configFile")) != null && importJsonFileField != null) {
             importJsonFileField.setText(v);
         } else if ((v = cache.get("importJsonFile")) != null && importJsonFileField != null) {
@@ -1776,6 +1927,9 @@ public class HypocenterLocationPanel extends JPanel {
         }
         if ((v = cache.get("configExport")) != null && configExportField != null) {
             configExportField.setText(v);
+        }
+        if ((v = cache.get("taupFile")) != null && taupModelCombo != null && !v.trim().isEmpty()) {
+            taupModelCombo.setSelectedItem(v);
         }
         updateParameterFields();
     }
@@ -2011,6 +2165,7 @@ public class HypocenterLocationPanel extends JPanel {
      * so the user can run again. Call from worker's done() in a finally block.
      */
     private void resetExecutionStateAfterRun() {
+        SolverLogger.setSuppressInfoInCallback(false);
         SolverLogger.setMode(true, false, false);
         SolverLogger.setCallback(null);
         if (executeButton != null) {
@@ -2056,6 +2211,24 @@ public class HypocenterLocationPanel extends JPanel {
             Color color = colorForLogMessage(message);
             appendLogLine(line, color);
         });
+    }
+
+    /**
+     * Appends a TSV block on the EDT (no timestamp prefix on data rows so paste into spreadsheets stays aligned).
+     */
+    private void appendLogTsvSection(java.util.List<String> tsvLines) {
+        if (tsvLines == null || tsvLines.isEmpty()) {
+            return;
+        }
+        if (logArea == null) {
+            return;
+        }
+        String ts = "[" + java.time.LocalTime.now() + "] ";
+        appendLogLine(ts + "--- Solver run summary (tab-separated; copy lines below into a spreadsheet) ---\n",
+            LOG_SECTION_HEADER_COLOR);
+        for (String line : tsvLines) {
+            appendLogLine(line + "\n", new Color(200, 230, 200));
+        }
     }
 
     /**
@@ -2285,6 +2458,7 @@ public class HypocenterLocationPanel extends JPanel {
         if (selectedModel != null && !"Select from file...".equals(selectedModel)) {
             cfg.taupFile = selectedModel;
         }
+        cfg.raytraceMethod = com.treloc.xtreloc.app.gui.util.AppSettingsCache.snapshot().getRaytraceMethod();
         if (selectedStationFile != null) {
             cfg.stationFile = selectedStationFile.getAbsolutePath();
         }
@@ -2643,14 +2817,7 @@ public class HypocenterLocationPanel extends JPanel {
             for (String msg : validationErrors) {
                 appendLog("ERROR: " + msg);
             }
-            StringBuilder dialogMsg = new StringBuilder("Input/output paths or parameters for " + selectedMode + " are incomplete or invalid:\n\n");
-            for (String msg : validationErrors) {
-                dialogMsg.append("• ").append(msg).append("\n");
-            }
-            JOptionPane.showMessageDialog(this,
-                dialogMsg.toString(),
-                "Execute Error",
-                JOptionPane.ERROR_MESSAGE);
+            logger.warning("Execute aborted: validation failed for mode " + selectedMode);
             return;
         }
         
@@ -2670,9 +2837,8 @@ public class HypocenterLocationPanel extends JPanel {
         }
         
         if (selectedOutputDir == null) {
-            JOptionPane.showMessageDialog(this,
-                "Please select an output directory.",
-                "Error", JOptionPane.ERROR_MESSAGE);
+            appendLog("ERROR: Please select an output directory.");
+            logger.warning("Execute aborted: no output directory selected.");
             return;
         }
         
@@ -2682,9 +2848,7 @@ public class HypocenterLocationPanel extends JPanel {
                 "  Please create the directory before running the task.",
                 selectedOutputDir.getAbsolutePath());
             appendLog("ERROR: " + errorMsg);
-            JOptionPane.showMessageDialog(this,
-                errorMsg,
-                "Error", JOptionPane.ERROR_MESSAGE);
+            logger.warning(errorMsg);
             return;
         }
         if (!selectedOutputDir.isDirectory()) {
@@ -2693,9 +2857,7 @@ public class HypocenterLocationPanel extends JPanel {
                 "  Please select a valid directory.",
                 selectedOutputDir.getAbsolutePath());
             appendLog("ERROR: " + errorMsg);
-            JOptionPane.showMessageDialog(this,
-                errorMsg,
-                "Error", JOptionPane.ERROR_MESSAGE);
+            logger.warning(errorMsg);
             return;
         }
         
@@ -2709,9 +2871,7 @@ public class HypocenterLocationPanel extends JPanel {
                     "  Please select a valid target directory.",
                     selectedTargetDir.getAbsolutePath());
                 appendLog("ERROR: " + errorMsg);
-                JOptionPane.showMessageDialog(this,
-                    errorMsg,
-                    "Error", JOptionPane.ERROR_MESSAGE);
+                logger.warning(errorMsg);
                 return;
             }
             if (!selectedTargetDir.isDirectory()) {
@@ -2720,9 +2880,7 @@ public class HypocenterLocationPanel extends JPanel {
                     "  Please select a valid directory.",
                     selectedTargetDir.getAbsolutePath());
                 appendLog("ERROR: " + errorMsg);
-                JOptionPane.showMessageDialog(this,
-                    errorMsg,
-                    "Error", JOptionPane.ERROR_MESSAGE);
+                logger.warning(errorMsg);
                 return;
             }
         }
@@ -2752,16 +2910,12 @@ public class HypocenterLocationPanel extends JPanel {
             File catalogFile = getCatalogFileFromField();
             if (catalogFile == null || !catalogFile.exists()) {
                 appendLog("Error: Catalog file is required for TRD mode.");
-                JOptionPane.showMessageDialog(this,
-                    "Catalog file is required for TRD mode.\nPlease select a catalog file.",
-                    "Error", JOptionPane.ERROR_MESSAGE);
+                logger.warning("TRD: catalog file required.");
                 return;
             }
             if (selectedTargetDir == null) {
                 appendLog("Error: Target directory (dat files) is required for TRD mode.");
-                JOptionPane.showMessageDialog(this,
-                    "Target directory (dat files) is required for TRD mode.\nPlease select a target directory.",
-                    "Error", JOptionPane.ERROR_MESSAGE);
+                logger.warning("TRD: target directory required.");
                 return;
             }
             appendLog("Catalog file: " + catalogFile.getAbsolutePath());
@@ -2770,9 +2924,7 @@ public class HypocenterLocationPanel extends JPanel {
             List<File> datFiles = findDatFiles(selectedTargetDir);
             if (datFiles.isEmpty()) {
                 appendLog("Error: No .dat files found in the selected directory.");
-                JOptionPane.showMessageDialog(this,
-                    "No .dat files found in the selected directory.",
-                    "Information", JOptionPane.INFORMATION_MESSAGE);
+                logger.info("Execute aborted: no .dat files in target directory.");
                 return;
             }
             appendLog("Number of .dat files found: " + datFiles.size());
@@ -2792,7 +2944,7 @@ public class HypocenterLocationPanel extends JPanel {
                     }
                 });
                 publish("Execution started...");
-                
+                try {
                 if ("TRD".equals(currentMode)) {
                     try {
                         var trdMode = config.getModes().get("TRD");
@@ -2840,6 +2992,32 @@ public class HypocenterLocationPanel extends JPanel {
                         }
                         
                         publish("TRD mode: Processing completed");
+                        try {
+                            String trdOutPath = solver.getLastOutputCatalogAbsolutePath();
+                            if (trdOutPath != null) {
+                                File trdCatalogFile = new File(trdOutPath);
+                                if (trdCatalogFile.exists()) {
+                                    java.util.List<com.treloc.xtreloc.app.gui.model.Hypocenter> trdHypos =
+                                        CatalogLoader.load(trdCatalogFile);
+                                    if (solverResultCatalogPanel != null) {
+                                        SwingUtilities.invokeLater(() -> solverResultCatalogPanel.addCatalogFromHypocenters(
+                                            new java.util.ArrayList<>(trdHypos), trdCatalogFile.getName(), trdCatalogFile));
+                                    } else if (mapView != null && !trdHypos.isEmpty()) {
+                                        SwingUtilities.invokeLater(() -> {
+                                            try {
+                                                mapView.showHypocenters(trdHypos);
+                                            } catch (Exception ex) {
+                                                ExecutionFailureReporter.log(logger, "Map display after TRD failed.", ex);
+                                            }
+                                        });
+                                    }
+                                    publish("Viewer: loaded TRD output (" + trdHypos.size() + " events) — " + trdCatalogFile.getName());
+                                }
+                            }
+                        } catch (IOException ioEx) {
+                            publish("Warning: TRD finished but could not load output catalog into Viewer: " + ioEx.getMessage());
+                            logger.log(Level.WARNING, "TRD Viewer auto-load", ioEx);
+                        }
                     } catch (Exception e) {
                         if (isCancelled()) {
                             publish("Cancelled");
@@ -2877,6 +3055,13 @@ public class HypocenterLocationPanel extends JPanel {
                     new java.util.concurrent.CopyOnWriteArrayList<>();
 
                 List<File> datFiles = findDatFiles(selectedTargetDir);
+                ConcurrentHashMap<String, SolverBatchSummary.Row> batchSummary = new ConcurrentHashMap<>();
+                boolean multiEventBatch = datFiles.size() > 1;
+                if (multiEventBatch) {
+                    SolverLogger.setSuppressInfoInCallback(true);
+                    publish("Batch: " + datFiles.size()
+                        + " events — per-event INFO lines are omitted from this log; tab-separated summary follows.");
+                }
 
                 ExecutorService executor = (numJobs > 1)
                     ? BatchExecutorFactory.newFixedThreadPoolBounded(
@@ -2906,7 +3091,9 @@ public class HypocenterLocationPanel extends JPanel {
                                         return null;
                                     }
                                     int current = processedCount.get() + errorCount.get() + 1;
-                                    publish("Processing: " + finalDatFile.getName() + " (" + current + "/" + datFiles.size() + ")");
+                                    if (!multiEventBatch) {
+                                        publish("Processing: " + finalDatFile.getName() + " (" + current + "/" + datFiles.size() + ")");
+                                    }
                                     
                                     String mode = currentMode;
                                     String eventName = finalDatFile.getName();
@@ -2953,6 +3140,7 @@ public class HypocenterLocationPanel extends JPanel {
                                     } else {
                                         throw new IllegalArgumentException("Unknown mode: " + mode);
                                     }
+                                    SolverRunMetrics runMetrics = SolverRunMetricsContext.getAndClear();
                                     
                                     if (residualPlotPanel != null) {
                                         SwingUtilities.invokeLater(() -> {
@@ -2965,9 +3153,19 @@ public class HypocenterLocationPanel extends JPanel {
                                         java.util.List<com.treloc.xtreloc.app.gui.model.Hypocenter> hypocenters = 
                                             loadHypocentersFromDatFile(new File(outputPath));
                                         allHypocenters.addAll(hypocenters);
-                                        publish("Success: " + finalDatFile.getName() + " - " + hypocenters.size() + " hypocenter data");
+                                        batchSummary.put(finalDatFile.getName(),
+                                            SolverBatchSummary.Row.fromMetrics(currentMode, finalDatFile.getName(), "OK",
+                                                hypocenters.size(), runMetrics, ""));
+                                        if (!multiEventBatch) {
+                                            publish("Success: " + finalDatFile.getName() + " - " + hypocenters.size() + " hypocenter data");
+                                        }
                                     } catch (Exception e) {
-                                        publish("Warning: Failed to load results from " + finalDatFile.getName() + ": " + e.getMessage());
+                                        batchSummary.put(finalDatFile.getName(),
+                                            SolverBatchSummary.Row.fromMetrics(currentMode, finalDatFile.getName(), "WARN", 0,
+                                                runMetrics, SolverBatchSummary.truncateNote(e.getMessage(), 240)));
+                                        if (!multiEventBatch) {
+                                            publish("Warning: Failed to load results from " + finalDatFile.getName() + ": " + e.getMessage());
+                                        }
                                         logger.warning("Result loading error: " + finalDatFile.getName() + " - " + e.getMessage());
                                     }
                                     
@@ -2977,7 +3175,12 @@ public class HypocenterLocationPanel extends JPanel {
                                         return null;
                                     }
                                     errorCount.incrementAndGet();
-                                    publish("Error: Skipping processing of " + finalDatFile.getName() + ": " + e.getMessage());
+                                    batchSummary.put(finalDatFile.getName(),
+                                        new SolverBatchSummary.Row(currentMode, finalDatFile.getName(), "ERROR", 0,
+                                            SolverBatchSummary.truncateNote(e.getMessage(), 240)));
+                                    if (!multiEventBatch) {
+                                        publish("Error: Skipping processing of " + finalDatFile.getName() + ": " + e.getMessage());
+                                    }
                                     logger.warning("File processing error: " + finalDatFile.getName() + " - " + e.getMessage());
                                 }
                                 return null;
@@ -3025,7 +3228,9 @@ public class HypocenterLocationPanel extends JPanel {
                             
                             try {
                                 int current = processedCount.get() + errorCount.get() + 1;
-                                publish("Processing: " + datFile.getName() + " (" + current + "/" + datFiles.size() + ")");
+                                if (!multiEventBatch) {
+                                    publish("Processing: " + datFile.getName() + " (" + current + "/" + datFiles.size() + ")");
+                                }
                                 
                                 String mode = currentMode;
                                 String eventName = datFile.getName();
@@ -3072,6 +3277,7 @@ public class HypocenterLocationPanel extends JPanel {
                                 } else {
                                     throw new IllegalArgumentException("Unknown mode: " + mode);
                                 }
+                                SolverRunMetrics runMetrics = SolverRunMetricsContext.getAndClear();
                                 
                                 if (residualPlotPanel != null) {
                                     SwingUtilities.invokeLater(() -> {
@@ -3083,9 +3289,19 @@ public class HypocenterLocationPanel extends JPanel {
                                     java.util.List<com.treloc.xtreloc.app.gui.model.Hypocenter> hypocenters = 
                                         loadHypocentersFromDatFile(new File(outputPath));
                                     allHypocenters.addAll(hypocenters);
-                                    publish("Success: " + datFile.getName() + " - " + hypocenters.size() + " hypocenter data");
+                                    batchSummary.put(datFile.getName(),
+                                        SolverBatchSummary.Row.fromMetrics(currentMode, datFile.getName(), "OK",
+                                            hypocenters.size(), runMetrics, ""));
+                                    if (!multiEventBatch) {
+                                        publish("Success: " + datFile.getName() + " - " + hypocenters.size() + " hypocenter data");
+                                    }
                                 } catch (Exception e) {
-                                    publish("Warning: Failed to load results from " + datFile.getName() + ": " + e.getMessage());
+                                    batchSummary.put(datFile.getName(),
+                                        SolverBatchSummary.Row.fromMetrics(currentMode, datFile.getName(), "WARN", 0,
+                                            runMetrics, SolverBatchSummary.truncateNote(e.getMessage(), 240)));
+                                    if (!multiEventBatch) {
+                                        publish("Warning: Failed to load results from " + datFile.getName() + ": " + e.getMessage());
+                                    }
                                     logger.warning("Result loading error: " + datFile.getName() + " - " + e.getMessage());
                                 }
                                 
@@ -3095,7 +3311,12 @@ public class HypocenterLocationPanel extends JPanel {
                                     break;
                                 }
                                 errorCount.incrementAndGet();
-                                publish("Error: Skipping processing of " + datFile.getName() + ": " + e.getMessage());
+                                batchSummary.put(datFile.getName(),
+                                    new SolverBatchSummary.Row(currentMode, datFile.getName(), "ERROR", 0,
+                                        SolverBatchSummary.truncateNote(e.getMessage(), 240)));
+                                if (!multiEventBatch) {
+                                    publish("Error: Skipping processing of " + datFile.getName() + ": " + e.getMessage());
+                                }
                                 logger.warning("File processing error: " + datFile.getName() + " - " + e.getMessage());
                             }
                         }
@@ -3139,7 +3360,7 @@ public class HypocenterLocationPanel extends JPanel {
                                 try {
                                     mapView.showHypocenters(allHypocenters);
                                 } catch (Exception e) {
-                                    logger.warning("Map display error: " + e.getMessage());
+                                    ExecutionFailureReporter.log(logger, "Map display: showHypocenters failed.", e);
                                 }
                             });
                         }
@@ -3186,8 +3407,16 @@ public class HypocenterLocationPanel extends JPanel {
                         }
                     }
                 }
-                
+
+                    if (!datFiles.isEmpty()) {
+                        java.util.List<String> tsvLines = SolverBatchSummary.formatTsvLines(currentMode, datFiles, batchSummary);
+                        SwingUtilities.invokeLater(() -> appendLogTsvSection(tsvLines));
+                    }
+
                 return null;
+                } finally {
+                    SolverLogger.setSuppressInfoInCallback(false);
+                }
             }
             
             @Override
@@ -3209,23 +3438,11 @@ public class HypocenterLocationPanel extends JPanel {
                     } catch (java.util.concurrent.CancellationException e) {
                         appendLog("Cancelled successfully");
                     } catch (Exception e) {
-                        StringBuilder errorMsg = new StringBuilder("Execution error:\n");
-                        errorMsg.append("  Error type: ").append(e.getClass().getSimpleName()).append("\n");
-                        errorMsg.append("  Error message: ").append(e.getMessage()).append("\n");
-                        if (e.getCause() != null) {
-                            errorMsg.append("  Caused by: ").append(e.getCause().getClass().getSimpleName())
-                                   .append(": ").append(e.getCause().getMessage()).append("\n");
-                        }
-                        appendLog(errorMsg.toString());
-                        JOptionPane.showMessageDialog(HypocenterLocationPanel.this,
-                            "Error: " + e.getMessage() +
-                            (e.getCause() != null ? "\nCaused by: " + e.getCause().getMessage() : ""),
-                            "Error", JOptionPane.ERROR_MESSAGE);
+                        ExecutionFailureReporter.log(logger, "Solver execution: worker failed.", e);
+                        appendLog(ExecutionFailureReporter.formatExecutionLogBlock(e));
                     } catch (Throwable t) {
-                        appendLog("Execution failed: " + (t.getCause() != null ? t.getCause().getMessage() : t.getMessage()));
-                        JOptionPane.showMessageDialog(HypocenterLocationPanel.this,
-                            "Execution failed. You can run again.\n" + t.getMessage(),
-                            "Error", JOptionPane.ERROR_MESSAGE);
+                        ExecutionFailureReporter.log(logger, "Solver execution: unexpected throwable.", t);
+                        appendLog(ExecutionFailureReporter.formatExecutionLogBlock(t));
                     } finally {
                         resetExecutionStateAfterRun();
                     }
@@ -3251,16 +3468,14 @@ public class HypocenterLocationPanel extends JPanel {
         
         File catalogFile = getCatalogFileFromField();
         if (catalogFile == null || !catalogFile.exists()) {
-            JOptionPane.showMessageDialog(this,
-                "Please select a catalog file",
-                "Error", JOptionPane.ERROR_MESSAGE);
+            appendLog("ERROR: Please select a catalog file.");
+            logger.warning("SYN aborted: no catalog file.");
             return;
         }
         
         if (selectedOutputDir == null) {
-            JOptionPane.showMessageDialog(this,
-                "Please select an output directory",
-                "Error", JOptionPane.ERROR_MESSAGE);
+            appendLog("ERROR: Please select an output directory.");
+            logger.warning("SYN aborted: no output directory.");
             return;
         }
         
@@ -3270,9 +3485,7 @@ public class HypocenterLocationPanel extends JPanel {
                 "  Please create the directory before running SYN mode.",
                 selectedOutputDir.getAbsolutePath());
             appendLog("ERROR: " + errorMsg);
-            JOptionPane.showMessageDialog(this,
-                errorMsg,
-                "Error", JOptionPane.ERROR_MESSAGE);
+            logger.warning(errorMsg);
             return;
         }
         if (!selectedOutputDir.isDirectory()) {
@@ -3281,16 +3494,13 @@ public class HypocenterLocationPanel extends JPanel {
                 "  Please select a valid directory.",
                 selectedOutputDir.getAbsolutePath());
             appendLog("ERROR: " + errorMsg);
-            JOptionPane.showMessageDialog(this,
-                errorMsg,
-                "Error", JOptionPane.ERROR_MESSAGE);
+            logger.warning(errorMsg);
             return;
         }
         
         if (selectedStationFile == null || !selectedStationFile.exists()) {
-            JOptionPane.showMessageDialog(this,
-                "Please select a station file",
-                "Error", JOptionPane.ERROR_MESSAGE);
+            appendLog("ERROR: Please select a station file.");
+            logger.warning("SYN aborted: no station file.");
             return;
         }
         String selectedModel = (String) taupModelCombo.getSelectedItem();
@@ -3435,8 +3645,8 @@ public class HypocenterLocationPanel extends JPanel {
                         }
                     }
                 } catch (Exception e) {
-                    logger.severe("Synthetic test data generation error: " + e.getMessage());
-                    publish("Error: " + e.getMessage());
+                    ExecutionFailureReporter.log(logger, "SYN: synthetic test worker failed in background.", e);
+                    publish("Error: " + ExecutionFailureReporter.oneLine(e));
                     throw e;
                 }
                 return null;
@@ -3461,19 +3671,11 @@ public class HypocenterLocationPanel extends JPanel {
                     } catch (java.util.concurrent.CancellationException e) {
                         appendLog("Cancelled successfully");
                     } catch (Exception e) {
-                        StringBuilder errorMsg = new StringBuilder("Error: " + e.getMessage());
-                        if (e.getCause() != null) {
-                            errorMsg.append("\nCaused by: ").append(e.getCause().getClass().getSimpleName())
-                                   .append(": ").append(e.getCause().getMessage());
-                        }
-                        JOptionPane.showMessageDialog(HypocenterLocationPanel.this,
-                            errorMsg.toString(),
-                            "Error", JOptionPane.ERROR_MESSAGE);
+                        ExecutionFailureReporter.log(logger, "SYN: synthetic test worker failed on completion.", e);
+                        appendLog(ExecutionFailureReporter.formatExecutionLogBlock(e));
                     } catch (Throwable t) {
-                        appendLog("Execution failed: " + (t.getCause() != null ? t.getCause().getMessage() : t.getMessage()));
-                        JOptionPane.showMessageDialog(HypocenterLocationPanel.this,
-                            "Execution failed. You can run again.\n" + t.getMessage(),
-                            "Error", JOptionPane.ERROR_MESSAGE);
+                        ExecutionFailureReporter.log(logger, "SYN: unexpected throwable on worker completion.", t);
+                        appendLog(ExecutionFailureReporter.formatExecutionLogBlock(t));
                     } finally {
                         resetExecutionStateAfterRun();
                     }
@@ -3503,23 +3705,20 @@ public class HypocenterLocationPanel extends JPanel {
         
         File catalogFile = getCatalogFileFromField();
         if (catalogFile == null || !catalogFile.exists()) {
-            JOptionPane.showMessageDialog(this,
-                "Please select a catalog file",
-                "Error", JOptionPane.ERROR_MESSAGE);
+            appendLog("ERROR: Please select a catalog file.");
+            logger.warning("CLS aborted: no catalog file.");
             return;
         }
         
         if (selectedOutputDir == null) {
-            JOptionPane.showMessageDialog(this,
-                "Please select an output directory",
-                "Error", JOptionPane.ERROR_MESSAGE);
+            appendLog("ERROR: Please select an output directory.");
+            logger.warning("CLS aborted: no output directory.");
             return;
         }
         
         if (selectedStationFile == null || !selectedStationFile.exists()) {
-            JOptionPane.showMessageDialog(this,
-                "Please select a station file",
-                "Error", JOptionPane.ERROR_MESSAGE);
+            appendLog("ERROR: Please select a station file.");
+            logger.warning("CLS aborted: no station file.");
             return;
         }
         String selectedModel = (String) taupModelCombo.getSelectedItem();
@@ -3605,9 +3804,7 @@ public class HypocenterLocationPanel extends JPanel {
         if (clsConfig.calcTripleDiff == null) clsConfig.calcTripleDiff = true;
         if (!clsConfig.doClustering && !clsConfig.calcTripleDiff) {
             appendLog("ERROR: Both Do Clustering and Calc. Triple Diff are false. At least one must be true.");
-            JOptionPane.showMessageDialog(this,
-                "CLS mode: Both doClustering and calcTripleDiff are false.\nAt least one must be true.",
-                "Invalid Parameters", JOptionPane.ERROR_MESSAGE);
+            logger.warning("CLS aborted: doClustering and calcTripleDiff both false.");
             executeButton.setEnabled(true);
             if (cancelButton != null) cancelButton.setEnabled(false);
             return;
@@ -3661,17 +3858,7 @@ public class HypocenterLocationPanel extends JPanel {
                     }
                     
                 } catch (Exception e) {
-                    StringBuilder errorMsg = new StringBuilder("Clustering process error:\n");
-                    errorMsg.append("  Error type: ").append(e.getClass().getName()).append("\n");
-                    errorMsg.append("  Error message: ").append(e.getMessage()).append("\n");
-                    if (e.getCause() != null) {
-                        errorMsg.append("  Caused by: ").append(e.getCause().getClass().getName())
-                               .append(": ").append(e.getCause().getMessage()).append("\n");
-                    }
-                    String errorStr = errorMsg.toString();
-                    logger.severe(errorStr);
-                    publish(errorStr);
-                    logger.log(Level.SEVERE, "Clustering process error", e);
+                    ExecutionFailureReporter.log(logger, "CLS: clustering process error.", e);
                     throw e;
                 }
                 return null;
@@ -3701,7 +3888,7 @@ public class HypocenterLocationPanel extends JPanel {
                                 solverResultCatalogPanel.addCatalogFromHypocenters(
                                     hypos, clsCat.getName(), clsCat);
                             } catch (Exception ex) {
-                                logger.warning("CLS: could not add output catalog to Viewer: " + ex.getMessage());
+                                ExecutionFailureReporter.log(logger, "CLS: could not add output catalog to Viewer.", ex);
                             }
                         }
                     }
@@ -3716,20 +3903,12 @@ public class HypocenterLocationPanel extends JPanel {
                     if (cancelled) {
                         appendLog("Cancelled successfully");
                     } else {
-                        StringBuilder errorMsg = new StringBuilder("Error: " + e.getMessage());
-                        if (e.getCause() != null) {
-                            errorMsg.append("\nCaused by: ").append(e.getCause().getClass().getSimpleName())
-                                   .append(": ").append(e.getCause().getMessage());
-                        }
-                        JOptionPane.showMessageDialog(HypocenterLocationPanel.this,
-                            errorMsg.toString(),
-                            "Error", JOptionPane.ERROR_MESSAGE);
+                        ExecutionFailureReporter.log(logger, "CLS: clustering worker failed on completion.", e);
+                        appendLog(ExecutionFailureReporter.formatExecutionLogBlock(e));
                     }
                 } catch (Throwable t) {
-                    appendLog("Execution failed: " + (t.getCause() != null ? t.getCause().getMessage() : t.getMessage()));
-                    JOptionPane.showMessageDialog(HypocenterLocationPanel.this,
-                        "Execution failed. You can run again.\n" + t.getMessage(),
-                        "Error", JOptionPane.ERROR_MESSAGE);
+                    ExecutionFailureReporter.log(logger, "CLS: unexpected throwable on worker completion.", t);
+                    appendLog(ExecutionFailureReporter.formatExecutionLogBlock(t));
                 } finally {
                     resetExecutionStateAfterRun();
                 }
@@ -3814,9 +3993,8 @@ public class HypocenterLocationPanel extends JPanel {
             if (path.isEmpty()) return;
             File file = new File(path);
             if (!file.exists() || !file.isFile()) {
-                JOptionPane.showMessageDialog(this,
-                    "File not found: " + path,
-                    "Import (Json)", JOptionPane.ERROR_MESSAGE);
+                appendLog("ERROR: Import (Json) file not found: " + path);
+                logger.warning("Import config: file not found: " + path);
                 return;
             }
             int confirm = JOptionPane.showConfirmDialog(this,
@@ -3830,31 +4008,16 @@ public class HypocenterLocationPanel extends JPanel {
             com.treloc.xtreloc.io.ConfigLoader loader = new com.treloc.xtreloc.io.ConfigLoader(file.getAbsolutePath());
             AppConfig loaded = loader.getConfig();
             setConfig(loaded);
+            completeOutputFileFieldAfterConfigImport();
             if (importJsonFileField != null) {
                 importJsonFileField.setText(file.getAbsolutePath());
             }
             appendLog("Configuration imported from: " + file.getAbsolutePath());
-            JOptionPane.showMessageDialog(this,
-                "Configuration imported successfully from:\n" + file.getAbsolutePath(),
-                "Import (Json)", JOptionPane.INFORMATION_MESSAGE);
+            logger.info("Import (Json): configuration applied from " + file.getAbsolutePath());
         } catch (Exception e) {
-            logger.warning("Failed to import config: " + e.getMessage());
-            appendLog("ERROR: Failed to import configuration: " + e.getMessage());
+            logger.log(Level.WARNING, "Failed to import config", e);
             String message = e.getMessage() != null ? e.getMessage() : e.toString();
-            if (message.contains("No such file") || message.contains("missing or invalid") || message.length() > 200) {
-                JTextArea area = new JTextArea(message, 12, 60);
-                area.setLineWrap(true);
-                area.setWrapStyleWord(true);
-                area.setEditable(false);
-                area.setFont(UIManager.getFont("Label.font"));
-                JOptionPane.showMessageDialog(this,
-                    new JScrollPane(area),
-                    "Import Error", JOptionPane.ERROR_MESSAGE);
-            } else {
-                JOptionPane.showMessageDialog(this,
-                    "Failed to import configuration:\n" + message,
-                    "Import Error", JOptionPane.ERROR_MESSAGE);
-            }
+            appendLog("ERROR: Failed to import configuration: " + message);
         }
     }
     
@@ -3967,6 +4130,9 @@ public class HypocenterLocationPanel extends JPanel {
                     Map<String, String> cache = modeParameterCache.computeIfAbsent(mode, k -> new HashMap<>());
                     if (config.stationFile != null && !config.stationFile.isEmpty()) {
                         cache.put("stationFile", config.stationFile);
+                    }
+                    if (config.taupFile != null && !config.taupFile.isEmpty()) {
+                        cache.put("taupFile", config.taupFile);
                     }
                     if (mc.datDirectory != null) {
                         cache.put("targetDir", mc.datDirectory.toString());
@@ -4211,7 +4377,7 @@ public class HypocenterLocationPanel extends JPanel {
         textArea.setEditable(false);
         textArea.setLineWrap(true);
         textArea.setWrapStyleWord(true);
-        textArea.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 12));
+        textArea.setFont(UiFonts.uiPlain(12f));
         textArea.setMargin(new Insets(10, 10, 10, 10));
         
         JScrollPane scrollPane = new JScrollPane(textArea);

@@ -31,7 +31,6 @@ public final class RunContextFactory {
             mc.outDirectory = mc.datDirectory.getParent().resolve("dat-de");
         }
 
-        // Validate required paths for batch processing modes (GRD, LMO, MCMC, DE)
         if (mode.equals("GRD") || mode.equals("LMO") || mode.equals("MCMC") || mode.equals("DE")) {
             if (mc.datDirectory == null) {
                 throw new ConfigException(
@@ -41,7 +40,6 @@ public final class RunContextFactory {
                 throw new ConfigException(
                     String.format("Mode %s requires outDirectory to be specified in config", mode));
             }
-            // Validate that datDirectory exists
             if (!java.nio.file.Files.exists(mc.datDirectory)) {
                 throw new ConfigException(
                     String.format("Target directory does not exist: %s\n" +

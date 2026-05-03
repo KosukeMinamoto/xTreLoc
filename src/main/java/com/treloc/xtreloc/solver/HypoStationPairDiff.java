@@ -6,7 +6,7 @@ import java.util.logging.Logger;
 import com.treloc.xtreloc.io.AppConfig;
 import com.treloc.xtreloc.io.StationRepository;
 import com.treloc.xtreloc.util.SolverLogger;
-import edu.sc.seis.TauP.TauModelException;
+import com.treloc.xtreloc.io.VelocityModelLoadException;
 
 import org.apache.commons.math3.fitting.leastsquares.LeastSquaresBuilder;
 import org.apache.commons.math3.fitting.leastsquares.LeastSquaresOptimizer;
@@ -92,10 +92,10 @@ public class HypoStationPairDiff extends SolverBase {
      * Loads station data from the configuration file.
      *
      * @param appConfig the application configuration
-     * @throws TauModelException if there is an error loading the TauP model
+     * @throws VelocityModelLoadException if there is an error loading the velocity model
      * @throws RuntimeException if station data cannot be loaded
      */
-    public HypoStationPairDiff(AppConfig appConfig) throws TauModelException {
+    public HypoStationPairDiff(AppConfig appConfig) throws VelocityModelLoadException {
         super(appConfig);
         this.hypBottom = appConfig.hypBottom;
         initLmoParams(appConfig);
@@ -104,7 +104,7 @@ public class HypoStationPairDiff extends SolverBase {
     /**
      * Constructs with pre-loaded station data (for parallel batch to avoid concurrent file I/O).
      */
-    public HypoStationPairDiff(AppConfig appConfig, StationRepository stationRepo) throws TauModelException {
+    public HypoStationPairDiff(AppConfig appConfig, StationRepository stationRepo) throws VelocityModelLoadException {
         super(appConfig, stationRepo);
         this.hypBottom = appConfig.hypBottom;
         initLmoParams(appConfig);
@@ -145,10 +145,11 @@ public class HypoStationPairDiff extends SolverBase {
      *
      * @param datFile the input .dat file path
      * @param outFile the output .dat file path
-     * @throws TauModelException if there is an error in the Tau model
+     * @throws VelocityModelLoadException if there is an error in the velocity model
      * @throws RuntimeException if file I/O fails
      */
-    public void start(String datFile, String outFile) throws TauModelException {
+    public void start(String datFile, String outFile) throws VelocityModelLoadException {
+        SolverRunMetricsContext.clear();
         String fileName = new java.io.File(datFile).getName();
         SolverLogger.info("LMO: Starting. File=" + fileName);
         logger.info("Starting Levenberg-Marquardt optimization for: " + fileName);
@@ -168,6 +169,8 @@ public class HypoStationPairDiff extends SolverBase {
             throw new RuntimeException("Failed to read dat file: " + datFile, e);
         }
         
+        long wallT0 = System.nanoTime();
+
         PointsHandler pointsHandler = new PointsHandler();
         pointsHandler.setMainPoint(point);
 
@@ -357,6 +360,9 @@ public class HypoStationPairDiff extends SolverBase {
         
         try {
             pointsHandler.writeDatFile(outFile, codeStrings);
+            long ms = (System.nanoTime() - wallT0) / 1_000_000L;
+            String excludedPairsNote = formatExcludedStationPairsNote(isOutlier, lagTable, codeStrings);
+            SolverRunMetricsContext.set(new SolverRunMetrics(nIter, nEval, ms, res, excludedPairsNote));
             SolverLogger.info("LMO: Completed. File=" + fileName);
             logger.info("Levenberg-Marquardt optimization completed for: " + fileName);
         } catch (IOException e) {
@@ -445,6 +451,37 @@ public class HypoStationPairDiff extends SolverBase {
                 return new Pair<RealVector, RealMatrix>(value, jacobian);
             }
         };
+    }
+
+    /**
+     * Lag-table rows (1-based index among differential-time pairs in order stored) excluded as outliers
+     * during LM iterations. Format: {@code row:stationCodeK-stationCodeL, ...}
+     */
+    private static String formatExcludedStationPairsNote(boolean[] isOutlier, double[][] lagTable, String[] codeStrings) {
+        if (isOutlier == null || lagTable == null || codeStrings == null) {
+            return null;
+        }
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < lagTable.length; i++) {
+            if (i >= isOutlier.length || !isOutlier[i]) {
+                continue;
+            }
+            if (sb.length() > 0) {
+                sb.append(", ");
+            }
+            int ik = (int) lagTable[i][0];
+            int il = (int) lagTable[i][1];
+            sb.append(i + 1).append(':')
+                .append(stationCodeAt(codeStrings, ik)).append('-').append(stationCodeAt(codeStrings, il));
+        }
+        return sb.length() == 0 ? null : sb.toString();
+    }
+
+    private static String stationCodeAt(String[] codeStrings, int idx) {
+        if (idx >= 0 && idx < codeStrings.length) {
+            return codeStrings[idx];
+        }
+        return "?" + idx;
     }
 }
 

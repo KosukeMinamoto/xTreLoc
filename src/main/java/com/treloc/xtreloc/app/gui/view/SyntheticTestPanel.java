@@ -1,6 +1,7 @@
 package com.treloc.xtreloc.app.gui.view;
 
 import com.treloc.xtreloc.io.AppConfig;
+import com.treloc.xtreloc.io.VelocityModelCatalog;
 import com.treloc.xtreloc.solver.SyntheticTest;
 
 import javax.swing.*;
@@ -77,8 +78,8 @@ public class SyntheticTestPanel extends JPanel {
         gbc.gridx = 0; gbc.gridy = 0;
         panel.add(new JLabel("TauP Model:"), gbc);
         gbc.gridx = 1;
-        JComboBox<String> taupCombo = new JComboBox<>(new String[]{"prem", "iasp91", "ak135", "ak135f"});
-        taupCombo.setSelectedItem("prem");
+        JComboBox<String> taupCombo = new JComboBox<>(VelocityModelCatalog.comboModels());
+        taupCombo.setSelectedItem(VelocityModelCatalog.DEFAULT_MODEL);
         taupCombo.addActionListener(e -> {
             String selected = (String) taupCombo.getSelectedItem();
             if (selected != null && config != null) {
@@ -374,8 +375,8 @@ public class SyntheticTestPanel extends JPanel {
         }
         
         if (config != null && (config.taupFile == null || config.taupFile.isEmpty())) {
-            config.taupFile = "prem";
-            com.treloc.xtreloc.app.gui.util.SharedFileManager.getInstance().setTaupFile("prem");
+            config.taupFile = VelocityModelCatalog.DEFAULT_MODEL;
+            com.treloc.xtreloc.app.gui.util.SharedFileManager.getInstance().setTaupFile(VelocityModelCatalog.DEFAULT_MODEL);
         }
         
         updateExecuteButtonState();

@@ -1,5 +1,7 @@
 package com.treloc.xtreloc.app.gui.view;
 
+import com.treloc.xtreloc.app.gui.util.UiFonts;
+
 import javax.swing.*;
 import java.awt.*;
 
@@ -22,7 +24,7 @@ public class LoadingOverlay extends JPanel {
         JPanel centerPanel = new JPanel(new BorderLayout(0, 12));
         centerPanel.setOpaque(false);
         messageLabel = new JLabel("Loading...");
-        messageLabel.setFont(messageLabel.getFont().deriveFont(Font.PLAIN, 14f));
+        messageLabel.setFont(UiFonts.uiPlain(14f));
         messageLabel.setForeground(Color.WHITE);
         messageLabel.setHorizontalAlignment(SwingConstants.CENTER);
         centerPanel.add(messageLabel, BorderLayout.NORTH);

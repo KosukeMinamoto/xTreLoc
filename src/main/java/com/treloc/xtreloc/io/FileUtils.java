@@ -10,7 +10,6 @@ package com.treloc.xtreloc.io;
 public final class FileUtils {
     
     private FileUtils() {
-        // Utility class - prevent instantiation
     }
     
     /**

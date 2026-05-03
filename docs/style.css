@@ -6,6 +6,8 @@ body {
     padding-bottom: 10px;
     background-color: white;
     padding: 30px;
+    /* Outline numbering (h2–h6); h1 = document title, not numbered */
+    counter-reset: doc-h2 doc-h3 doc-h4 doc-h5 doc-h6;
 }
 
 body>*:first-child {
@@ -92,29 +94,70 @@ h6 code {
 h1 {
     font-size: 28px;
     color: black;
+    /* New top-level chapter: restart outline (multi–h1 documents) */
+    counter-reset: doc-h2 doc-h3 doc-h4 doc-h5 doc-h6;
 }
 
 h2 {
     font-size: 24px;
     border-bottom: 1px solid #cccccc;
     color: black;
+    counter-increment: doc-h2;
+    counter-reset: doc-h3 doc-h4 doc-h5 doc-h6;
+}
+
+h2::before {
+    content: counter(doc-h2) ". ";
+    font-weight: bold;
+    color: #333333;
 }
 
 h3 {
     font-size: 18px;
+    counter-increment: doc-h3;
+    counter-reset: doc-h4 doc-h5 doc-h6;
+}
+
+h3::before {
+    content: counter(doc-h2) "." counter(doc-h3) " ";
+    font-weight: bold;
+    color: #333333;
 }
 
 h4 {
     font-size: 16px;
+    counter-increment: doc-h4;
+    counter-reset: doc-h5 doc-h6;
+}
+
+h4::before {
+    content: counter(doc-h2) "." counter(doc-h3) "." counter(doc-h4) " ";
+    font-weight: bold;
+    color: #444444;
 }
 
 h5 {
     font-size: 14px;
+    counter-increment: doc-h5;
+    counter-reset: doc-h6;
+}
+
+h5::before {
+    content: counter(doc-h2) "." counter(doc-h3) "." counter(doc-h4) "." counter(doc-h5) " ";
+    font-weight: bold;
+    color: #555555;
 }
 
 h6 {
     color: #777777;
     font-size: 14px;
+    counter-increment: doc-h6;
+}
+
+h6::before {
+    content: counter(doc-h2) "." counter(doc-h3) "." counter(doc-h4) "." counter(doc-h5) "." counter(doc-h6) " ";
+    font-weight: bold;
+    color: #666666;
 }
 
 p,

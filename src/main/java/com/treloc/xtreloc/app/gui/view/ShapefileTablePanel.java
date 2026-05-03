@@ -140,7 +140,7 @@ public class ShapefileTablePanel extends JPanel {
         buttonPanel.add(removeButton);
 
         refreshButton = new JButton();
-        java.net.URL refreshUrl = ShapefileTablePanel.class.getResource("/images/refresh.png");
+        java.net.URL refreshUrl = ShapefileTablePanel.class.getResource("/images/Refresh.png");
         if (refreshUrl != null) {
             ImageIcon refreshIcon = new ImageIcon(refreshUrl);
             Image refreshImg = refreshIcon.getImage().getScaledInstance(16, 16, Image.SCALE_SMOOTH);
@@ -256,7 +256,6 @@ public class ShapefileTablePanel extends JPanel {
                         GuiExecutionLog.info(String.format("Viewer: %s shapefile \"%s\"",
                             reload ? "reloaded" : "loaded", result.file.getName()));
                     } catch (java.util.concurrent.CancellationException e) {
-                        // ignore
                     } catch (Exception ex) {
                         logger.log(Level.SEVERE, "Shapefile load error: " + f.getAbsolutePath() + " - " + ex.getMessage(), ex);
                         GuiExecutionLog.severe("Viewer: shapefile load failed — " + f.getName() + ": " + ex.getMessage());

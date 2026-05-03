@@ -189,7 +189,7 @@ public class StationTablePanel extends JPanel {
         buttonPanel.add(removeButton);
 
         JButton refreshButton = new JButton();
-        java.net.URL refreshUrl = StationTablePanel.class.getResource("/images/refresh.png");
+        java.net.URL refreshUrl = StationTablePanel.class.getResource("/images/Refresh.png");
         if (refreshUrl != null) {
             ImageIcon refreshIcon = new ImageIcon(refreshUrl);
             Image refreshImg = refreshIcon.getImage().getScaledInstance(16, 16, Image.SCALE_SMOOTH);
@@ -415,14 +415,12 @@ public class StationTablePanel extends JPanel {
                 try {
                     mapView.showStations(currentStations);
                 } catch (Exception e2) {
-                    // ignore
                 }
             }
         } else {
             try {
                 mapView.showStations(currentStations);
             } catch (Exception e) {
-                // ignore
             }
         }
     }

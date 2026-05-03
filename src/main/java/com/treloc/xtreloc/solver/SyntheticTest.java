@@ -13,7 +13,7 @@ import com.treloc.xtreloc.app.gui.service.CatalogLoader;
 import com.treloc.xtreloc.io.AppConfig;
 import com.treloc.xtreloc.util.SolverLogger;
 
-import edu.sc.seis.TauP.TauModelException;
+import com.treloc.xtreloc.io.VelocityModelLoadException;
 
 /**
  * SyntheticTest
@@ -40,9 +40,9 @@ public class SyntheticTest extends SolverBase {
      * Constructs a SyntheticTest object with the specified configuration.
      *
      * @param appConfig the application configuration
-     * @throws TauModelException if there is an error in the Tau model
+     * @throws VelocityModelLoadException if there is an error in the velocity model
      */
-    public SyntheticTest(AppConfig appConfig) throws TauModelException {
+    public SyntheticTest(AppConfig appConfig) throws VelocityModelLoadException {
         this(appConfig, 100, 0.1, 0.03, 0.2, 0.4, false);
     }
     
@@ -56,11 +56,11 @@ public class SyntheticTest extends SolverBase {
      * @param minSelectRate minimum selection rate for phase pairs
      * @param maxSelectRate maximum selection rate for phase pairs
      * @param addLocationPerturbation whether to add perturbation to location
-     * @throws TauModelException if there is an error in the Tau model
+     * @throws VelocityModelLoadException if there is an error in the velocity model
      */
     public SyntheticTest(AppConfig appConfig, int randomSeed, double phsErr, double locErr, 
                         double minSelectRate, double maxSelectRate, boolean addLocationPerturbation) 
-                        throws TauModelException {
+                        throws VelocityModelLoadException {
         super(appConfig);
         
         this.randomSeed = randomSeed;
@@ -98,7 +98,7 @@ public class SyntheticTest extends SolverBase {
      * Generates synthetic data from the catalog file.
      * It reads each line from the catalog and generates data based on the parsed information.
      */
-    public void generateDataFromCatalog() throws TauModelException, IOException {
+    public void generateDataFromCatalog() throws VelocityModelLoadException, IOException {
         java.io.File outputDirFile = new java.io.File(outputDirectory);
         if (!outputDirFile.exists()) {
             throw new IOException(
@@ -209,9 +209,9 @@ public class SyntheticTest extends SolverBase {
      * @param pointTrue      the true point of the event
      * @param minSelectRate   the minimum selection rate for phase pairs
      * @param maxSelectRate   the maximum selection rate for phase pairs
-     * @throws TauModelException if there is an error in the Tau model
+     * @throws VelocityModelLoadException if there is an error in the velocity model
      */
-    public void generateData(Point pointTrue, double minSelectRate, double maxSelectRate) throws TauModelException {
+    public void generateData(Point pointTrue, double minSelectRate, double maxSelectRate) throws VelocityModelLoadException {
         PointsHandler pointsHandler = new PointsHandler();
         
         boolean isRef = "REF".equals(pointTrue.getType());
@@ -317,9 +317,13 @@ public class SyntheticTest extends SolverBase {
      * @param maxSelectRate  the maximum selection rate for phase pairs
      * @param addPurturb     whether to add perturbation to lag times
      * @return a 2D array of selected lag times
-     * @throws TauModelException if there is an error in the Tau model
+     * @throws VelocityModelLoadException if there is an error in the velocity model
      */
-    private double[][] randomLagTime(Point point, double minSelectRate, double maxSelectRate, boolean addPurturb) throws TauModelException {
+    private double[][] randomLagTime(Point point, double minSelectRate, double maxSelectRate, boolean addPurturb) throws VelocityModelLoadException {
+        if (stationTable.length < 2) {
+            throw new IllegalStateException(
+                "SYN needs at least 2 stations for differential times; station table has " + stationTable.length);
+        }
         int[] codeIdx = IntStream.rangeClosed(0, stationTable.length - 1).toArray();
         double[] sTravelTime = travelTime(stationTable, codeIdx, point);
 
@@ -339,9 +343,15 @@ public class SyntheticTest extends SolverBase {
         }
 
         // Select phase randomly
-        int minPairs = (int)(numAllPairs * minSelectRate);
-        int maxPairs = (int)(numAllPairs * maxSelectRate);
-        int numRandomPairs = minPairs + rand.nextInt(maxPairs - minPairs + 1);
+        int minPairs = (int) Math.floor(numAllPairs * Math.min(minSelectRate, maxSelectRate));
+        int maxPairs = (int) Math.floor(numAllPairs * Math.max(minSelectRate, maxSelectRate));
+        minPairs = Math.max(0, Math.min(minPairs, numAllPairs));
+        maxPairs = Math.max(minPairs, Math.min(maxPairs, numAllPairs));
+        int span = maxPairs - minPairs + 1;
+        int numRandomPairs = span <= 0 ? minPairs : minPairs + rand.nextInt(span);
+        if (numRandomPairs <= 0 && numAllPairs > 0) {
+            numRandomPairs = Math.min(numAllPairs, Math.max(1, minPairs));
+        }
 
         // Shuffle indices using Fisher-Yates algorithm
         int[] indices = IntStream.rangeClosed(0, numAllPairs - 1).toArray();

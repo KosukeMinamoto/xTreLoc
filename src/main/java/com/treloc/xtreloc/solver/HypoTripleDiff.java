@@ -20,7 +20,7 @@ import com.treloc.xtreloc.io.TripleDifferenceIO.TripleDifference;
 import com.treloc.xtreloc.util.BatchExecutorFactory;
 import com.treloc.xtreloc.util.SolverLogger;
 
-import edu.sc.seis.TauP.TauModelException;
+import com.treloc.xtreloc.io.VelocityModelLoadException;
 
 /**
  * Triple difference relocation for clustered seismic events.
@@ -66,6 +66,8 @@ public class HypoTripleDiff extends SolverBase {
     private java.util.function.Consumer<String> logConsumer;
     private ConvergenceCallback convergenceCallback;
     private int numJobs;
+    /** Absolute path of the catalog CSV written by the last successful {@link #start}; used by the GUI to auto-load results. */
+    private volatile String lastOutputCatalogAbsolutePath;
 
     /**
      * Sets the convergence callback for reporting convergence information.
@@ -77,20 +79,27 @@ public class HypoTripleDiff extends SolverBase {
     }
 
     /**
+     * @return absolute path of the TRD output catalog from the last successful {@link #start}, or {@code null}
+     */
+    public String getLastOutputCatalogAbsolutePath() {
+        return lastOutputCatalogAbsolutePath;
+    }
+
+    /**
      * Constructs a new HypoTripleDiff solver with the specified configuration.
      * 
      * <p>The configuration must include:
      * <ul>
      *   <li>TRD mode configuration with catalog file and datDirectory</li>
-     *   <li>Station file and TauP velocity model</li>
+     *   <li>Station file and velocity model (.nd / .tvel for Raytrace1D)</li>
      *   <li>Optional solver parameters (iterNum, distKm, dampFact arrays)</li>
      * </ul>
      * 
      * @param appConfig the application configuration containing TRD mode settings
-     * @throws TauModelException if there is an error loading the TauP velocity model
+     * @throws VelocityModelLoadException if there is an error loading the velocity model
      * @throws IllegalArgumentException if TRD mode configuration is missing or invalid
      */
-    public HypoTripleDiff(AppConfig appConfig) throws TauModelException {
+    public HypoTripleDiff(AppConfig appConfig) throws VelocityModelLoadException {
         super(appConfig);
         
         this.hypBottom = appConfig.hypBottom;
@@ -265,11 +274,12 @@ public class HypoTripleDiff extends SolverBase {
      * 
      * @param datFile the input .dat file path (not used in TRD mode, uses catalog from config)
      * @param outputFile the output .dat file path (not used in TRD mode, uses output directory from config)
-     * @throws TauModelException if there is an error in the TauP velocity model
+     * @throws VelocityModelLoadException if there is an error in the velocity model
      * @throws IllegalArgumentException if clustering has not been performed or triple difference data is missing
      * @throws RuntimeException if relocation fails for any cluster
      */
-    public void start(String datFile, String outputFile) throws TauModelException {
+    public void start(String datFile, String outputFile) throws VelocityModelLoadException {
+        lastOutputCatalogAbsolutePath = null;
         String catalogPathToUse = null;
         try {
             if (this.catalogFile == null || this.catalogFile.isEmpty()) {
@@ -540,34 +550,11 @@ public class HypoTripleDiff extends SolverBase {
                             boolean isLastIteration = (j == iterNum - 1);
                             boolean shouldCalcVar = calcVar && isLastStage && isLastIteration;
                             
-                            int currentNumTarget = 0;
-                            int maxTargIdx = -1;
-                            for (int idx : targMap) {
-                                if (idx >= 0) {
-                                    currentNumTarget++;
-                                    if (idx > maxTargIdx) {
-                                        maxTargIdx = idx;
-                                    }
-                                }
+                            // After ERR marking, targMap can have gaps (e.g. indices 0,2,3); matrix columns are 0..numTarget-1 only.
+                            if (targMapHasGaps(targMap)) {
+                                dm = null;
                             }
-                            numTarget = currentNumTarget;
-                            
-                            if (maxTargIdx >= 0 && maxTargIdx + 1 != currentNumTarget) {
-                                logger.warning("Cluster " + clusterId + ": targMap has gaps. maxTargIdx=" + maxTargIdx +
-                                             ", currentNumTarget=" + currentNumTarget + ". Using currentNumTarget.");
-                                SolverLogger.warning("TRD: Cluster " + clusterId + ": targMap has gaps, using currentNumTarget.");
-                                // DEBUG: list cluster point indices whose targMap value >= numTarget (cause of "index out of range" skips)
-                                java.util.List<String> gapPointIndices = new ArrayList<>();
-                                for (int ki = 0; ki < targMap.length; ki++) {
-                                    if (targMap[ki] >= numTarget) {
-                                        gapPointIndices.add(ki + "(targMap=" + targMap[ki] + ")");
-                                    }
-                                }
-                                if (!gapPointIndices.isEmpty()) {
-                                    logger.info("TRD DEBUG [cluster " + clusterId + ", stage " + (i + 1) + ", iter " + (j + 1) + "]: targMap gaps -> cluster point indices with targMap>=numTarget: " + String.join(", ", gapPointIndices.subList(0, Math.min(20, gapPointIndices.size()))) + (gapPointIndices.size() > 20 ? " ... (+" + (gapPointIndices.size() - 20) + " more)" : ""));
-                                    SolverLogger.info("TRD DEBUG: " + gapPointIndices.size() + " point(s) have targMap>=numTarget (triple-diffs referencing them will be skipped).");
-                                }
-                            }
+                            numTarget = compactTargMap(targMap);
                             
                             if (numTarget == 0) {
                                 logger.warning("Cluster " + clusterId + " has no valid target events after filtering, skipping remaining iterations");
@@ -581,11 +568,10 @@ public class HypoTripleDiff extends SolverBase {
                                 SolverLogger.info("TRD: Interrupted by user");
                                 throw new RuntimeException("Cancelled");
                             }
-                            int numTargetAfterPartial = 0;
-                            for (int ti = 0; ti < targMap.length; ti++) {
-                                if (targMap[ti] >= 0) numTargetAfterPartial++;
+                            if (targMapHasGaps(targMap)) {
+                                dm = null;
                             }
-                            numTarget = numTargetAfterPartial;
+                            numTarget = compactTargMap(targMap);
                             if (numTarget == 0) {
                                 logger.warning("Cluster " + clusterId + " has no valid target events after partial table, skipping remaining iterations");
                                 SolverLogger.warning("TRD: Cluster " + clusterId + " has no valid target events after partial table, skipping.");
@@ -822,6 +808,9 @@ public class HypoTripleDiff extends SolverBase {
                 
                 // Recompute final triple-difference residuals and set per-event RMS for relocated hypocenters
                 try {
+                    cluster = new Cluster<>();
+                    clusterPoints.forEach(cluster::addPoint);
+                    numTarget = compactTargMap(targMap);
                     double[] rmsPerEvent = computeFinalRmsPerEvent(cluster, tripDiff, targMap, numTarget);
                     for (int k = 0; k < clusterPoints.size(); k++) {
                         if (k < rmsPerEvent.length && !Double.isNaN(rmsPerEvent[k])) {
@@ -844,6 +833,7 @@ public class HypoTripleDiff extends SolverBase {
 
                 catalogWriter.flush();
             }
+            lastOutputCatalogAbsolutePath = outputCatalogPath;
             logger.info("Triple difference relocation completed. Output catalog: " + outputCatalogFile);
             SolverLogger.info("TRD: Completed. Output catalog: " + outputCatalogFile);
             
@@ -1131,10 +1121,42 @@ public class HypoTripleDiff extends SolverBase {
         return createPartialTblArray(cluster, null);
     }
     
-    /** Returns true if the throwable indicates depth-out-of-range or no ray arrivals (TauP model limit); such points are marked ERR and excluded. */
+    /**
+     * True if non-negative targMap entries are not exactly {@code 0 .. count-1}
+     * (e.g. after marking ERR without renumbering remaining targets).
+     */
+    private static boolean targMapHasGaps(int[] targMap) {
+        int maxT = -1;
+        int cnt = 0;
+        for (int v : targMap) {
+            if (v >= 0) {
+                cnt++;
+                if (v > maxT) {
+                    maxT = v;
+                }
+            }
+        }
+        return maxT >= 0 && maxT + 1 != cnt;
+    }
+
+    /**
+     * Renumbers {@code targMap} so target events are contiguous {@code 0 .. n-1};
+     * REF/ERR stay at {@code -1}. Returns the new target count {@code n}.
+     */
+    private static int compactTargMap(int[] targMap) {
+        int next = 0;
+        for (int i = 0; i < targMap.length; i++) {
+            if (targMap[i] >= 0) {
+                targMap[i] = next++;
+            }
+        }
+        return next;
+    }
+
+    /** Returns true if the throwable indicates depth-out-of-range or no valid ray (1D velocity model limit); such points are marked ERR and excluded. */
     private static boolean isDepthOrArrivalFailure(Throwable t) {
         if (t == null) return false;
-        if (t instanceof TauModelException) return true;
+        if (t instanceof VelocityModelLoadException) return true;
         String msg = t.getMessage();
         if (msg != null && (msg.contains("No ray arrivals") || msg.contains("Depth may be outside model range") || msg.contains("depth") && msg.contains("outside"))) return true;
         return isDepthOrArrivalFailure(t.getCause());
@@ -1185,7 +1207,7 @@ public class HypoTripleDiff extends SolverBase {
                     String pointInfo = String.format("point %d (time: %s, lat=%.6f, lon=%.6f, dep=%.3f km)",
                         i, point.getTime(), point.getLat(), point.getLon(), point.getDep());
                     if (depthOutOfRange) {
-                        logger.warning("TRD: " + pointInfo + " — depth outside TauP model range or no ray arrivals; marked ERR and excluded from relocation.");
+                        logger.warning("TRD: " + pointInfo + " — depth outside velocity model range or no ray arrivals; marked ERR and excluded from relocation.");
                         SolverLogger.warning("TRD: " + pointInfo + " — depth outside model range or no arrivals; marked ERR, excluded.");
                     } else {
                         String errorMsg = String.format(
@@ -1239,7 +1261,7 @@ public class HypoTripleDiff extends SolverBase {
                             String pointInfo = String.format("point %d (time: %s, lat=%.6f, lon=%.6f, dep=%.3f km)",
                                 eventIndex, point.getTime(), point.getLat(), point.getLon(), point.getDep());
                             if (depthOutOfRange) {
-                                logger.warning("TRD: " + pointInfo + " — depth outside TauP model range or no ray arrivals; marked ERR and excluded from relocation.");
+                                logger.warning("TRD: " + pointInfo + " — depth outside velocity model range or no ray arrivals; marked ERR and excluded from relocation.");
                                 SolverLogger.warning("TRD: " + pointInfo + " — depth outside model range or no arrivals; marked ERR, excluded.");
                             } else {
                                 String errorMsg = String.format(

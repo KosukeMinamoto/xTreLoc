@@ -1,6 +1,7 @@
 package com.treloc.xtreloc.app.gui.view;
 
 import com.treloc.xtreloc.io.AppConfig;
+import com.treloc.xtreloc.io.VelocityModelCatalog;
 import com.treloc.xtreloc.solver.HypoGridSearch;
 import com.treloc.xtreloc.util.ModeNameMapper;
 
@@ -59,13 +60,13 @@ public class ControlPanel extends JPanel {
         modeCombo.addActionListener(e -> updateParameterFields());
         modePanel.add(modeCombo, modeGbc);
         
-        // TauP model selection
+        // Velocity model for Raytrace1D
         modeGbc.gridx = 0; modeGbc.gridy = 1;
-        modePanel.add(new JLabel("TauP Model:"), modeGbc);
+        modePanel.add(new JLabel("Velocity Model:"), modeGbc);
         modeGbc.gridx = 1;
-        // Standard TauP models
-        taupModelCombo = new JComboBox<>(new String[]{"prem", "iasp91", "ak135", "ak135f"});
-        taupModelCombo.setSelectedItem("prem"); // Default
+        // Bundled .nd / .tvel names (config.taupFile)
+        taupModelCombo = new JComboBox<>(VelocityModelCatalog.comboModels());
+        taupModelCombo.setSelectedItem(VelocityModelCatalog.DEFAULT_MODEL);
         modePanel.add(taupModelCombo, modeGbc);
         
         // Parameter panel
@@ -139,7 +140,7 @@ public class ControlPanel extends JPanel {
         String displayName = (String) modeCombo.getSelectedItem();
         String mode = ModeNameMapper.getAbbreviation(displayName);
         
-        // Select TauP model and update config
+        // Selected name/path is stored in config.taupFile for HypoUtils / Raytrace1D.load
         String selectedModel = (String) taupModelCombo.getSelectedItem();
         if (config != null && selectedModel != null) {
             // Update taupFile with the selected model name (without extension)
@@ -220,16 +221,16 @@ public class ControlPanel extends JPanel {
                     } else {
                         publish("Unimplemented mode: " + mode);
                     }
-                } catch (edu.sc.seis.TauP.TauModelException e) {
-                    logger.severe("TauP model loading error: " + e.getMessage());
-                    String errorMsg = "Failed to load TauP model.\n" +
+                } catch (com.treloc.xtreloc.io.VelocityModelLoadException e) {
+                    logger.severe("Velocity model loading error: " + e.getMessage());
+                    String errorMsg = "Failed to load velocity model for Raytrace1D.\n" +
                         "Selected model: " + selectedModel + "\n" +
                         "Error: " + e.getMessage() + "\n\n" +
-                        "Available models: prem, iasp91, ak135, ak135f";
+                        "Available bundled models: prem.nd, pwdk.nd, 1066a.nd, 1066b.nd, ak135.tvel, iasp91.tvel";
                     publish(errorMsg);
                     SwingUtilities.invokeLater(() -> {
                         JOptionPane.showMessageDialog(ControlPanel.this, errorMsg,
-                            "TauP Model Error", JOptionPane.ERROR_MESSAGE);
+                            "Velocity Model Error", JOptionPane.ERROR_MESSAGE);
                     });
                 } catch (Exception e) {
                     logger.severe("Execution error: " + e.getMessage());

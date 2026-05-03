@@ -1,0 +1,67 @@
+{
+  "logLevel" : "INFO",
+  "numJobs" : 4,
+  "stationFile" : "/Users/kosukeminamoto/kminamoto/java/xTreLoc/demo/locating_example/station.tbl",
+  "taupFile" : "prem.nd",
+  "raytraceMethod" : "taup",
+  "hypBottom" : 40.0,
+  "threshold" : 0.0,
+  "io" : {
+    "TRD" : {
+      "datDirectory" : "/Users/kosukeminamoto/kminamoto/java/xTreLoc/demo/locating_example/dat-cls",
+      "outDirectory" : "/Users/kosukeminamoto/kminamoto/java/xTreLoc/demo/locating_example/dat-trd",
+      "catalogFile" : "/Users/kosukeminamoto/kminamoto/java/xTreLoc/demo/locating_example/dat-cls/catalog_syn_cls.csv"
+    }
+  },
+  "params" : {
+    "TRD" : {
+      "iterNum" : [ 5, 5 ],
+      "distKm" : [ 40, 20 ],
+      "dampFact" : [ 1, 1 ],
+      "maxTripleDiffCount" : 50000,
+      "showConvergenceLog" : true,
+      "lsqrAtol" : 1.0E-6,
+      "lsqrBtol" : 1.0E-6,
+      "lsqrConlim" : 1.0E8,
+      "lsqrIterLim" : 1000,
+      "lsqrShowLog" : true,
+      "lsqrCalcVar" : true
+    }
+  },
+  "solver" : {
+    "TRD" : {
+      "iterNum" : [ 5, 5 ],
+      "distKm" : [ 40, 20 ],
+      "dampFact" : [ 1, 1 ],
+      "maxTripleDiffCount" : 50000,
+      "showConvergenceLog" : true,
+      "lsqrAtol" : 1.0E-6,
+      "lsqrBtol" : 1.0E-6,
+      "lsqrConlim" : 1.0E8,
+      "lsqrIterLim" : 1000,
+      "lsqrShowLog" : true,
+      "lsqrCalcVar" : true
+    }
+  },
+  "modes" : {
+    "TRD" : {
+      "datDirectory" : "/Users/kosukeminamoto/kminamoto/java/xTreLoc/demo/locating_example/dat-cls",
+      "outDirectory" : "/Users/kosukeminamoto/kminamoto/java/xTreLoc/demo/locating_example/dat-trd",
+      "catalogFile" : "/Users/kosukeminamoto/kminamoto/java/xTreLoc/demo/locating_example/dat-cls/catalog_syn_cls.csv",
+      "randomSeed" : null,
+      "phsErr" : null,
+      "locErr" : null,
+      "minSelectRate" : null,
+      "maxSelectRate" : null,
+      "minPts" : null,
+      "eps" : null,
+      "epsPercentile" : null,
+      "useBinaryFormat" : null,
+      "rmsThreshold" : null,
+      "locErrThreshold" : null,
+      "doClustering" : null,
+      "calcTripleDiff" : null,
+      "maxTripleDiffCount" : 50000
+    }
+  }
+}

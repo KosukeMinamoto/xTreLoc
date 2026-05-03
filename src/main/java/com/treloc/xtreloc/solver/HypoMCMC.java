@@ -7,7 +7,7 @@ import com.treloc.xtreloc.io.AppConfig;
 import com.treloc.xtreloc.io.StationRepository;
 import com.treloc.xtreloc.util.SolverLogger;
 import com.fasterxml.jackson.databind.JsonNode;
-import edu.sc.seis.TauP.TauModelException;
+import com.treloc.xtreloc.io.VelocityModelLoadException;
 
 /**
  * Hypocenter location using Markov Chain Monte Carlo (MCMC) method.
@@ -40,9 +40,9 @@ public class HypoMCMC extends SolverBase {
      * Constructs a HypoMCMC object with the specified configuration.
      * 
      * @param appConfig the application configuration
-     * @throws TauModelException if there is an error loading the TauP model
+     * @throws VelocityModelLoadException if there is an error loading the velocity model
      */
-    public HypoMCMC(AppConfig appConfig) throws TauModelException {
+    public HypoMCMC(AppConfig appConfig) throws VelocityModelLoadException {
         super(appConfig);
         this.hypBottom = appConfig.hypBottom;
         initMcmcParams(appConfig);
@@ -51,7 +51,7 @@ public class HypoMCMC extends SolverBase {
     /**
      * Constructs with pre-loaded station data (for parallel batch to avoid concurrent file I/O).
      */
-    public HypoMCMC(AppConfig appConfig, StationRepository stationRepo) throws TauModelException {
+    public HypoMCMC(AppConfig appConfig, StationRepository stationRepo) throws VelocityModelLoadException {
         super(appConfig, stationRepo);
         this.hypBottom = appConfig.hypBottom;
         initMcmcParams(appConfig);
@@ -74,7 +74,7 @@ public class HypoMCMC extends SolverBase {
         }
         SolverLogger.info(String.format("MCMC: Parameters: nSamples=%d, burnIn=%d, stepSize=%.3f deg, stepSizeDepth=%.3f km, temperature=%.3f",
             nSamples, burnIn, stepSize, stepSizeDepth, temperature));
-        logger.info(String.format("MCMC parameters: nSamples=%d, burnIn=%d, stepSize=%.3f deg, stepSizeDepth=%.3f km, temperature=%.3f",
+        logger.fine(String.format("MCMC parameters: nSamples=%d, burnIn=%d, stepSize=%.3f, stepSizeDepth=%.3f, temperature=%.3f",
             nSamples, burnIn, stepSize, stepSizeDepth, temperature));
     }
 
@@ -84,13 +84,14 @@ public class HypoMCMC extends SolverBase {
      * 
      * @param datFile the input .dat file path
      * @param outFile the output .dat file path
-     * @throws TauModelException if there is an error in the Tau model
+     * @throws VelocityModelLoadException if there is an error in the velocity model
      * @throws RuntimeException if file I/O fails
      */
-    public void start(String datFile, String outFile) throws TauModelException {
+    public void start(String datFile, String outFile) throws VelocityModelLoadException {
+        SolverRunMetricsContext.clear();
         String fileName = new java.io.File(datFile).getName();
         SolverLogger.info("MCMC: Starting. File=" + fileName);
-        logger.info("Starting MCMC location for: " + fileName);
+        logger.fine("Starting MCMC location for: " + fileName);
         
         Point point;
         try {
@@ -107,6 +108,8 @@ public class HypoMCMC extends SolverBase {
             throw new RuntimeException("Failed to read dat file: " + datFile, e);
         }
         
+        long wallT0 = System.nanoTime();
+
         PointsHandler pointsHandler = new PointsHandler();
         pointsHandler.setMainPoint(point);
 
@@ -140,7 +143,7 @@ public class HypoMCMC extends SolverBase {
         for (int i = 0; i < nSamples; i++) {
             // Check for interruption periodically
             if (i % 100 == 0 && Thread.currentThread().isInterrupted()) {
-                logger.info("MCMC sampling interrupted by user");
+                logger.fine("MCMC sampling interrupted by user");
                 SolverLogger.info("MCMC: Interrupted by user");
                 throw new RuntimeException("MCMC sampling was interrupted");
             }
@@ -191,9 +194,9 @@ public class HypoMCMC extends SolverBase {
         }
         
         double acceptanceRate = (double) accepted / nSamples;
-        logger.info(String.format("MCMC acceptance rate: %.2f%%", acceptanceRate * 100));
-        logger.info(String.format("Stored %d samples (after burn-in of %d)", nEffective, burnIn));
-        
+        logger.fine(String.format("MCMC acceptance rate: %.2f%%, stored %d samples (burnIn=%d)",
+            acceptanceRate * 100, nEffective, burnIn));
+
         // Calculate statistics from samples (after burn-in)
         double meanLat = calculateMean(latSamples, nEffective);
         double meanLon = calculateMean(lonSamples, nEffective);
@@ -203,9 +206,9 @@ public class HypoMCMC extends SolverBase {
         double stdLon = calculateStd(lonSamples, meanLon, nEffective);
         double stdDep = calculateStd(depSamples, meanDep, nEffective);
         
-        logger.info(String.format("Sample statistics: mean=(%.6f, %.6f, %.3f), std=(%.6f, %.6f, %.3f)",
+        logger.fine(String.format("MCMC sample mean=(%.6f, %.6f, %.3f) std=(%.6f, %.6f, %.3f)",
             meanLat, meanLon, meanDep, stdLat, stdLon, stdDep));
-        
+
         // Find best sample (maximum likelihood)
         int bestIdx = 0;
         double bestLikelihood = likelihoodSamples[0];
@@ -221,9 +224,9 @@ public class HypoMCMC extends SolverBase {
         double finalLon = lonSamples[bestIdx];
         double finalDep = depSamples[bestIdx];
         
-        logger.info(String.format("Best sample (idx=%d): (%.6f, %.6f, %.3f), likelihood=%.3f",
+        logger.fine(String.format("MCMC best sample idx=%d (%.6f, %.6f, %.3f) likelihood=%.3f",
             bestIdx, finalLat, finalLon, finalDep, bestLikelihood));
-        
+
         // Calculate final residual
         Point finalPoint = new Point(point.getTime(), finalLat, finalLon, finalDep,
             0, 0, 0, 0, point.getFilePath(), "MCMC", point.getCid());
@@ -257,14 +260,12 @@ public class HypoMCMC extends SolverBase {
         // Update pointsHandler with the modified point (ensure reference is updated)
         pointsHandler.setMainPoint(point);
         
-        // Verify point values before writing
-        logger.info(String.format("Point values before write: lat=%.6f, lon=%.6f, dep=%.3f, elat=%.3f, elon=%.3f, edep=%.3f, res=%.3f",
-            point.getLat(), point.getLon(), point.getDep(), point.getElat(), point.getElon(), point.getEdep(), point.getRes()));
-        
         try {
             pointsHandler.writeDatFile(outFile, codeStrings);
+            long ms = (System.nanoTime() - wallT0) / 1_000_000L;
+            SolverRunMetricsContext.set(new SolverRunMetrics(nSamples, nSamples, ms, res));
             SolverLogger.info("MCMC: Completed. File=" + fileName);
-            logger.info("MCMC location completed for: " + fileName);
+            logger.fine("MCMC location completed for: " + fileName);
         } catch (IOException e) {
             StringBuilder errorMsg = new StringBuilder("Failed to write output file in MCMC mode:\n");
             errorMsg.append("  Output file: ").append(outFile).append("\n");
@@ -278,7 +279,8 @@ public class HypoMCMC extends SolverBase {
             throw new RuntimeException("Failed to write output file: " + outFile, e);
         }
 
-        logger.info(String.format("%s %.3f %.3f %.3f %.3f %.3f %.3f %.3f", 
+        // One-line numeric summary (aligned with LMO-style trailing log)
+        logger.info(String.format("%s %.3f %.3f %.3f %.3f %.3f %.3f %.3f",
             point.getTime(), finalLon, finalLat, finalDep, stdLon, stdLat, stdDep, res));
     }
 
@@ -308,8 +310,8 @@ public class HypoMCMC extends SolverBase {
             
             // Return negative sum (higher likelihood for smaller residuals)
             return -sumSqResidual;
-        } catch (TauModelException e) {
-            logger.warning("Failed to calculate travel time: " + e.getMessage());
+        } catch (Exception e) {
+            logger.fine("MCMC likelihood travel-time failure: " + e.getMessage());
             SolverLogger.warning("MCMC: Failed to calculate travel time.");
             return Double.NEGATIVE_INFINITY;
         }

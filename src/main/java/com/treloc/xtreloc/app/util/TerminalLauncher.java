@@ -41,13 +41,11 @@ public class TerminalLauncher {
      */
     private static boolean launchMacTerminal(String mode, String... args) {
         try {
-            // Get the JAR file path
             String jarPath = getJarPath();
             if (jarPath == null) {
                 return false;
             }
             
-            // Build the command
             StringBuilder command = new StringBuilder();
             command.append("cd '").append(new File(jarPath).getParent()).append("' && ");
             command.append("java -jar '").append(jarPath).append("'");
@@ -65,7 +63,6 @@ public class TerminalLauncher {
                 }
             }
             
-            // Use osascript to launch Terminal.app with the command
             String appleScript = String.format(
                 "tell application \"Terminal\"\n" +
                 "    activate\n" +
@@ -150,7 +147,6 @@ public class TerminalLauncher {
                 }
             }
             
-            // Try common terminal emulators
             String[] terminals = {"gnome-terminal", "xterm", "konsole", "x-terminal-emulator"};
             for (String terminal : terminals) {
                 try {
@@ -160,7 +156,6 @@ public class TerminalLauncher {
                     pb.start();
                     return true;
                 } catch (Exception e) {
-                    // Try next terminal
                 }
             }
             return false;
@@ -177,30 +172,25 @@ public class TerminalLauncher {
      * @return JAR file path, or null if not found
      */
     private static String getJarPath() {
-        // Try to get JAR path from classpath or code source
         try {
             String className = TerminalLauncher.class.getName().replace('.', '/') + ".class";
             java.net.URL url = TerminalLauncher.class.getClassLoader().getResource(className);
             if (url != null) {
                 String path = url.getPath();
                 
-                // Handle URL encoding
                 if (path.startsWith("file:")) {
                     path = path.substring(5);
                 }
                 
-                // Decode URL encoding
                 try {
                     path = java.net.URLDecoder.decode(path, "UTF-8");
                 } catch (Exception e) {
-                    // Ignore decoding errors
                 }
                 
                 if (path.contains("!")) {
                     path = path.substring(0, path.indexOf("!"));
                 }
                 
-                // Remove the class file path, get the JAR
                 if (path.endsWith(".jar")) {
                     File jarFile = new File(path);
                     if (jarFile.exists()) {
@@ -208,15 +198,11 @@ public class TerminalLauncher {
                     }
                 }
                 
-                // Check if we're in an app bundle
-                // App bundles have structure: AppName.app/Contents/Java/jarfile.jar
                 if (path.contains(".app/Contents")) {
-                    // Extract the app bundle path
                     int appIndex = path.indexOf(".app/Contents");
-                    String appPath = path.substring(0, appIndex + 4); // Include ".app"
+                    String appPath = path.substring(0, appIndex + 4);
                     File appDir = new File(appPath);
                     if (appDir.exists() && appDir.isDirectory()) {
-                        // Look for JAR in Contents/Java/
                         File javaDir = new File(appDir, "Contents/Java");
                         if (javaDir.exists()) {
                             File[] jars = javaDir.listFiles((dir, name) -> name.endsWith(".jar") && name.contains("xTreLoc"));
@@ -228,10 +214,8 @@ public class TerminalLauncher {
                 }
             }
         } catch (Exception e) {
-            // Fallback to checking classpath
         }
         
-        // Fallback: check java.class.path
         String classpath = System.getProperty("java.class.path");
         if (classpath != null && classpath.contains(".jar")) {
             String[] paths = classpath.split(File.pathSeparator);

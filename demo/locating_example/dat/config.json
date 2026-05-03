@@ -1,0 +1,13 @@
+{
+  "logLevel" : "INFO",
+  "numJobs" : 1,
+  "stationFile" : "/Users/kosukeminamoto/kminamoto/java/xTreLoc/demo/locating_example/station.tbl",
+  "taupFile" : "prem.nd",
+  "raytraceMethod" : "taup",
+  "hypBottom" : 100.0,
+  "threshold" : 0.0,
+  "io" : { },
+  "params" : { },
+  "solver" : { },
+  "modes" : { }
+}

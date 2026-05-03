@@ -7,6 +7,8 @@ import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.util.Locale;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 import com.treloc.xtreloc.app.gui.util.FileChooserHelper;
 import com.treloc.xtreloc.app.gui.view.MapView.ColorBarPanel;
@@ -16,6 +18,8 @@ import com.treloc.xtreloc.app.gui.view.MapView.ColorPalette;
  * Dialog for configuring color map settings and exporting color maps.
  */
 public class ColorMapSettingsDialog extends JDialog {
+	private static final Logger log = Logger.getLogger(ColorMapSettingsDialog.class.getName());
+
 	private ColorBarPanel colorBarPanel;
 	private JComboBox<ColorPalette> paletteCombo;
 	private JTextField minValueField;
@@ -210,14 +214,12 @@ public class ColorMapSettingsDialog extends JDialog {
 			if (newMin < newMax) {
 				colorBarPanel.setRange(newMin, newMax, colorBarPanel.getLabel());
 			} else {
-				JOptionPane.showMessageDialog(this, "Min value must be less than Max value", 
-					"Invalid Range", JOptionPane.ERROR_MESSAGE);
+				log.warning("Color map range: min must be less than max; reverted fields.");
 				minValueField.setText(String.format(Locale.US, "%.2f", colorBarPanel.getMinValue()));
 				maxValueField.setText(String.format(Locale.US, "%.2f", colorBarPanel.getMaxValue()));
 			}
 		} catch (NumberFormatException e) {
-			JOptionPane.showMessageDialog(this, "Invalid number format", 
-				"Error", JOptionPane.ERROR_MESSAGE);
+			log.log(Level.WARNING, "Color map range: invalid number format", e);
 			minValueField.setText(String.format(Locale.US, "%.2f", colorBarPanel.getMinValue()));
 			maxValueField.setText(String.format(Locale.US, "%.2f", colorBarPanel.getMaxValue()));
 		}
@@ -253,11 +255,9 @@ public class ColorMapSettingsDialog extends JDialog {
 			
 			try (FileWriter writer = new FileWriter(file)) {
 				writeCPTFile(writer);
-				JOptionPane.showMessageDialog(this, "CPT file exported successfully: " + file.getName(),
-					"Export Successful", JOptionPane.INFORMATION_MESSAGE);
+				log.info("Color map CPT exported: " + file.getAbsolutePath());
 			} catch (IOException e) {
-				JOptionPane.showMessageDialog(this, "Failed to export CPT file: " + e.getMessage(),
-					"Export Error", JOptionPane.ERROR_MESSAGE);
+				log.log(Level.WARNING, "Color map CPT export failed: " + file.getAbsolutePath(), e);
 			}
 		}
 	}
@@ -314,11 +314,9 @@ public class ColorMapSettingsDialog extends JDialog {
 			
 			try (FileWriter writer = new FileWriter(file)) {
 				writeJSONFile(writer);
-				JOptionPane.showMessageDialog(this, "JSON file exported successfully: " + file.getName(),
-					"Export Successful", JOptionPane.INFORMATION_MESSAGE);
+				log.info("Color map JSON exported: " + file.getAbsolutePath());
 			} catch (IOException e) {
-				JOptionPane.showMessageDialog(this, "Failed to export JSON file: " + e.getMessage(),
-					"Export Error", JOptionPane.ERROR_MESSAGE);
+				log.log(Level.WARNING, "Color map JSON export failed: " + file.getAbsolutePath(), e);
 			}
 		}
 	}
@@ -378,11 +376,9 @@ public class ColorMapSettingsDialog extends JDialog {
 			
 			try (FileWriter writer = new FileWriter(file)) {
 				writeCSVFile(writer);
-				JOptionPane.showMessageDialog(this, "CSV file exported successfully: " + file.getName(),
-					"Export Successful", JOptionPane.INFORMATION_MESSAGE);
+				log.info("Color map CSV exported: " + file.getAbsolutePath());
 			} catch (IOException e) {
-				JOptionPane.showMessageDialog(this, "Failed to export CSV file: " + e.getMessage(),
-					"Export Error", JOptionPane.ERROR_MESSAGE);
+				log.log(Level.WARNING, "Color map CSV export failed: " + file.getAbsolutePath(), e);
 			}
 		}
 	}

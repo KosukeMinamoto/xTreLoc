@@ -58,7 +58,8 @@ public final class AppLogFile {
 
     /**
      * Returns the list of log files in rotation order: current log first, then rotated
-     * files (xtreloc.log.1, xtreloc.log.2, ...) up to the count used by LogInitializer.
+     * files (xtreloc.log.1, xtreloc.log.2, …) up to {@code maxRotatedCount}
+     * (typically {@link com.treloc.xtreloc.app.gui.util.AppSettings#getLogCount()} or {@link LogRotationDefaults#DEFAULT_COUNT}).
      * Used when combining multiple files is desired.
      *
      * @param maxRotatedCount maximum number of rotated files to include (e.g. 5)

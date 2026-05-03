@@ -61,7 +61,7 @@
             <version>1.0.13</version>
         </dependency>
 
-        <!-- TauP -->
+        <!-- TauP: optional travel-time engine in HypoUtils (default: Raytrace1D layered 1D). -->
         <dependency>
             <groupId>edu.sc.seis</groupId>
             <artifactId>TauP</artifactId>
@@ -106,6 +106,10 @@
                     <groupId>org.jaitools</groupId>
                     <artifactId>jt-zonalstats</artifactId>
                 </exclusion>
+                <exclusion>
+                    <groupId>javax.media</groupId>
+                    <artifactId>jai_core</artifactId>
+                </exclusion>
             </exclusions>
         </dependency>
         <dependency>
@@ -116,6 +120,10 @@
                 <exclusion>
                     <groupId>org.jaitools</groupId>
                     <artifactId>jt-zonalstats</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>javax.media</groupId>
+                    <artifactId>jai_core</artifactId>
                 </exclusion>
             </exclusions>
         </dependency>
@@ -128,6 +136,10 @@
                     <groupId>org.jaitools</groupId>
                     <artifactId>jt-zonalstats</artifactId>
                 </exclusion>
+                <exclusion>
+                    <groupId>javax.media</groupId>
+                    <artifactId>jai_core</artifactId>
+                </exclusion>
             </exclusions>
         </dependency>
         <dependency>
@@ -138,6 +150,10 @@
                 <exclusion>
                     <groupId>org.jaitools</groupId>
                     <artifactId>jt-zonalstats</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>javax.media</groupId>
+                    <artifactId>jai_core</artifactId>
                 </exclusion>
             </exclusions>
         </dependency>
@@ -150,6 +166,10 @@
                     <groupId>org.jaitools</groupId>
                     <artifactId>jt-zonalstats</artifactId>
                 </exclusion>
+                <exclusion>
+                    <groupId>javax.media</groupId>
+                    <artifactId>jai_core</artifactId>
+                </exclusion>
             </exclusions>
         </dependency>
         <dependency>
@@ -160,6 +180,10 @@
                 <exclusion>
                     <groupId>org.jaitools</groupId>
                     <artifactId>jt-zonalstats</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>javax.media</groupId>
+                    <artifactId>jai_core</artifactId>
                 </exclusion>
             </exclusions>
         </dependency>
@@ -172,6 +196,10 @@
                     <groupId>org.jaitools</groupId>
                     <artifactId>jt-zonalstats</artifactId>
                 </exclusion>
+                <exclusion>
+                    <groupId>javax.media</groupId>
+                    <artifactId>jai_core</artifactId>
+                </exclusion>
             </exclusions>
         </dependency>
         <dependency>
@@ -182,6 +210,10 @@
                 <exclusion>
                     <groupId>org.jaitools</groupId>
                     <artifactId>jt-zonalstats</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>javax.media</groupId>
+                    <artifactId>jai_core</artifactId>
                 </exclusion>
             </exclusions>
         </dependency>
@@ -214,6 +246,12 @@
                     <target>20</target>
                     <release>20</release>
                     <encoding>UTF-8</encoding>
+                    <fork>true</fork>
+                    <meminitial>256m</meminitial>
+                    <maxmem>1g</maxmem>
+                    <compilerArgs>
+                        <arg>-parameters</arg>
+                    </compilerArgs>
                 </configuration>
             </plugin>
 
@@ -227,23 +265,61 @@
                 </configuration>
             </plugin>
 
-            <!-- Maven Shade Plugin for creating fat JARs -->
+            <!--
+              Fat JARs aligned with Gradle (build.gradle):
+                ./gradlew jar              -> target/xTreLoc-${project.version}.jar  (Main: XTreLoc)
+                ./gradlew guiJar           -> target/xTreLoc-GUI-${project.version}.jar
+                ./gradlew cliJar           -> target/xTreLoc-CLI-${project.version}.jar (no GeoTools / GUI deps / gui classes)
+                ./gradlew tuiJar           -> target/xTreLoc-TUI-${project.version}.jar (same slimming as CLI)
+            -->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-shade-plugin</artifactId>
                 <version>3.5.0</version>
                 <executions>
-                    <!-- GUI JAR -->
                     <execution>
-                        <id>gui-jar</id>
+                        <id>xTreLoc-launcher</id>
                         <phase>package</phase>
                         <goals>
                             <goal>shade</goal>
                         </goals>
                         <configuration>
+                            <shadedArtifactAttached>false</shadedArtifactAttached>
+                            <finalName>xTreLoc-${project.version}</finalName>
+                            <createDependencyReducedPom>false</createDependencyReducedPom>
+                            <transformers>
+                                <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
+                                <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
+                                    <mainClass>com.treloc.xtreloc.app.XTreLoc</mainClass>
+                                    <manifestEntries>
+                                        <Implementation-Version>${project.version}</Implementation-Version>
+                                    </manifestEntries>
+                                </transformer>
+                            </transformers>
+                            <filters>
+                                <filter>
+                                    <artifact>*:*</artifact>
+                                    <excludes>
+                                        <exclude>META-INF/*.SF</exclude>
+                                        <exclude>META-INF/*.DSA</exclude>
+                                        <exclude>META-INF/*.RSA</exclude>
+                                    </excludes>
+                                </filter>
+                            </filters>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>xTreLoc-gui</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>shade</goal>
+                        </goals>
+                        <configuration>
+                            <shadedArtifactAttached>false</shadedArtifactAttached>
                             <finalName>xTreLoc-GUI-${project.version}</finalName>
                             <createDependencyReducedPom>false</createDependencyReducedPom>
                             <transformers>
+                                <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
                                 <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
                                     <mainClass>com.treloc.xtreloc.app.gui.XTreLocGUI</mainClass>
                                     <manifestEntries>
@@ -263,16 +339,24 @@
                             </filters>
                         </configuration>
                     </execution>
-                    <!-- CLI JAR -->
                     <execution>
-                        <id>cli-jar</id>
+                        <id>xTreLoc-cli</id>
                         <phase>package</phase>
                         <goals>
                             <goal>shade</goal>
                         </goals>
                         <configuration>
+                            <shadedArtifactAttached>false</shadedArtifactAttached>
                             <finalName>xTreLoc-CLI-${project.version}</finalName>
                             <createDependencyReducedPom>false</createDependencyReducedPom>
+                            <artifactSet>
+                                <excludes>
+                                    <exclude>org.geotools:*</exclude>
+                                    <exclude>org.locationtech.jts:jts-core</exclude>
+                                    <exclude>com.formdev:flatlaf</exclude>
+                                    <exclude>jfree:jfreechart</exclude>
+                                </excludes>
+                            </artifactSet>
                             <transformers>
                                 <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
                                     <mainClass>com.treloc.xtreloc.app.cli.XTreLocCLI</mainClass>
@@ -283,6 +367,12 @@
                             </transformers>
                             <filters>
                                 <filter>
+                                    <artifact>com.treloc:xtreloc</artifact>
+                                    <excludes>
+                                        <exclude>com/treloc/xtreloc/app/gui/**</exclude>
+                                    </excludes>
+                                </filter>
+                                <filter>
                                     <artifact>*:*</artifact>
                                     <excludes>
                                         <exclude>META-INF/*.SF</exclude>
@@ -292,39 +382,53 @@
                                 </filter>
                             </filters>
                         </configuration>
-                            </execution>
-                            <!-- TUI JAR -->
-                            <execution>
-                                <id>tui-jar</id>
-                                <phase>package</phase>
-                                <goals>
-                                    <goal>shade</goal>
-                                </goals>
-                                <configuration>
-                                    <finalName>xTreLoc-TUI-${project.version}</finalName>
-                                    <createDependencyReducedPom>false</createDependencyReducedPom>
-                                    <transformers>
-                                        <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
-                                            <mainClass>com.treloc.xtreloc.app.tui.XTreLocTUI</mainClass>
-                                            <manifestEntries>
-                                                <Implementation-Version>${project.version}</Implementation-Version>
-                                            </manifestEntries>
-                                        </transformer>
-                                    </transformers>
-                                    <filters>
-                                        <filter>
-                                            <artifact>*:*</artifact>
-                                            <excludes>
-                                                <exclude>META-INF/*.SF</exclude>
-                                                <exclude>META-INF/*.DSA</exclude>
-                                                <exclude>META-INF/*.RSA</exclude>
-                                            </excludes>
-                                        </filter>
-                                    </filters>
-                                </configuration>
-                            </execution>
-                        </executions>
-                    </plugin>
+                    </execution>
+                    <execution>
+                        <id>xTreLoc-tui</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>shade</goal>
+                        </goals>
+                        <configuration>
+                            <shadedArtifactAttached>false</shadedArtifactAttached>
+                            <finalName>xTreLoc-TUI-${project.version}</finalName>
+                            <createDependencyReducedPom>false</createDependencyReducedPom>
+                            <artifactSet>
+                                <excludes>
+                                    <exclude>org.geotools:*</exclude>
+                                    <exclude>org.locationtech.jts:jts-core</exclude>
+                                    <exclude>com.formdev:flatlaf</exclude>
+                                    <exclude>jfree:jfreechart</exclude>
+                                </excludes>
+                            </artifactSet>
+                            <transformers>
+                                <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
+                                    <mainClass>com.treloc.xtreloc.app.tui.XTreLocTUI</mainClass>
+                                    <manifestEntries>
+                                        <Implementation-Version>${project.version}</Implementation-Version>
+                                    </manifestEntries>
+                                </transformer>
+                            </transformers>
+                            <filters>
+                                <filter>
+                                    <artifact>com.treloc:xtreloc</artifact>
+                                    <excludes>
+                                        <exclude>com/treloc/xtreloc/app/gui/**</exclude>
+                                    </excludes>
+                                </filter>
+                                <filter>
+                                    <artifact>*:*</artifact>
+                                    <excludes>
+                                        <exclude>META-INF/*.SF</exclude>
+                                        <exclude>META-INF/*.DSA</exclude>
+                                        <exclude>META-INF/*.RSA</exclude>
+                                    </excludes>
+                                </filter>
+                            </filters>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
 
             <!-- Surefire Plugin for tests -->
             <plugin>
@@ -411,7 +515,7 @@
                                         <argument>--name</argument>
                                         <argument>xTreLoc</argument>
                                         <argument>--main-jar</argument>
-                                        <argument>${project.build.finalName}.jar</argument>
+                                        <argument>xTreLoc-${project.version}.jar</argument>
                                         <argument>--main-class</argument>
                                         <argument>com.treloc.xtreloc.app.XTreLoc</argument>
                                         <argument>--dest</argument>
@@ -459,7 +563,7 @@
                                         <argument>--name</argument>
                                         <argument>xTreLoc</argument>
                                         <argument>--main-jar</argument>
-                                        <argument>${project.build.finalName}.jar</argument>
+                                        <argument>xTreLoc-${project.version}.jar</argument>
                                         <argument>--main-class</argument>
                                         <argument>com.treloc.xtreloc.app.XTreLoc</argument>
                                         <argument>--dest</argument>
@@ -477,90 +581,6 @@
                                         <argument>--mac-package-name</argument>
                                         <argument>xTreLoc</argument>
                                     </arguments>
-                                </configuration>
-                            </execution>
-                        </executions>
-                    </plugin>
-                </plugins>
-            </build>
-        </profile>
-
-        <!-- Profile for building only GUI JAR -->
-        <profile>
-            <id>gui</id>
-            <build>
-                <plugins>
-                    <plugin>
-                        <groupId>org.apache.maven.plugins</groupId>
-                        <artifactId>maven-shade-plugin</artifactId>
-                        <version>3.5.0</version>
-                        <executions>
-                            <execution>
-                                <id>gui-jar</id>
-                                <phase>package</phase>
-                                <goals>
-                                    <goal>shade</goal>
-                                </goals>
-                                <configuration>
-                                    <finalName>xTreLoc-GUI-${project.version}</finalName>
-                                    <createDependencyReducedPom>false</createDependencyReducedPom>
-                                    <transformers>
-                                        <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
-                                            <mainClass>com.treloc.xtreloc.app.gui.XTreLocGUI</mainClass>
-                                        </transformer>
-                                    </transformers>
-                                    <filters>
-                                        <filter>
-                                            <artifact>*:*</artifact>
-                                            <excludes>
-                                                <exclude>META-INF/*.SF</exclude>
-                                                <exclude>META-INF/*.DSA</exclude>
-                                                <exclude>META-INF/*.RSA</exclude>
-                                            </excludes>
-                                        </filter>
-                                    </filters>
-                                </configuration>
-                            </execution>
-                        </executions>
-                    </plugin>
-                </plugins>
-            </build>
-        </profile>
-
-        <!-- Profile for building only CLI JAR -->
-        <profile>
-            <id>cli</id>
-            <build>
-                <plugins>
-                    <plugin>
-                        <groupId>org.apache.maven.plugins</groupId>
-                        <artifactId>maven-shade-plugin</artifactId>
-                        <version>3.5.0</version>
-                        <executions>
-                            <execution>
-                                <id>cli-jar</id>
-                                <phase>package</phase>
-                                <goals>
-                                    <goal>shade</goal>
-                                </goals>
-                                <configuration>
-                                    <finalName>xTreLoc-CLI-${project.version}</finalName>
-                                    <createDependencyReducedPom>false</createDependencyReducedPom>
-                                    <transformers>
-                                        <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
-                                            <mainClass>com.treloc.xtreloc.app.cli.XTreLocCLI</mainClass>
-                                        </transformer>
-                                    </transformers>
-                                    <filters>
-                                        <filter>
-                                            <artifact>*:*</artifact>
-                                            <excludes>
-                                                <exclude>META-INF/*.SF</exclude>
-                                                <exclude>META-INF/*.DSA</exclude>
-                                                <exclude>META-INF/*.RSA</exclude>
-                                            </excludes>
-                                        </filter>
-                                    </filters>
                                 </configuration>
                             </execution>
                         </executions>

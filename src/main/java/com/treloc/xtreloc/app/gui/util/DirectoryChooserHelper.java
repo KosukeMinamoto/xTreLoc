@@ -30,7 +30,6 @@ public class DirectoryChooserHelper {
         try {
             System.setProperty("apple.awt.fileDialogForDirectories", "false");
         } catch (Exception e) {
-            // Ignore on non-macOS systems
         }
         
         if (currentDirectory != null && currentDirectory.exists()) {

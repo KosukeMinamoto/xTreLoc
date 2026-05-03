@@ -197,7 +197,6 @@ public class XTreLoc {
                     scanner.close();
                 }
             } catch (Exception e) {
-                // Ignore
             }
         }
     }

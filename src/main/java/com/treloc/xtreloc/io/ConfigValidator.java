@@ -70,7 +70,6 @@ public final class ConfigValidator {
                         if (parent == null || !Files.exists(parent)) {
                             errors.add("io." + mode + ".outDirectory: No such file or directory (parent missing): " + p);
                         }
-                        // else: output dir can be created, no error
                     } else if (!Files.isDirectory(p)) {
                         errors.add("io." + mode + ".outDirectory: Not a directory: " + p);
                     }
@@ -101,6 +100,9 @@ public final class ConfigValidator {
         StringBuilder sb = new StringBuilder();
         sb.append("  stationFile: ").append(config.stationFile != null ? config.stationFile : "(not set)").append("\n");
         sb.append("  taupFile: ").append(config.taupFile != null ? config.taupFile : "(not set)").append("\n");
+        sb.append("  raytraceMethod: ")
+            .append(config.raytraceMethod != null && !config.raytraceMethod.isEmpty()
+                ? config.raytraceMethod : "layered").append("\n");
         if (config.io != null) {
             for (Map.Entry<String, AppConfig.ModeIOConfig> e : config.io.entrySet()) {
                 String mode = e.getKey();
@@ -118,8 +120,6 @@ public final class ConfigValidator {
     }
 
     private static boolean isBuiltinTaupModel(String name) {
-        if (name == null || name.isEmpty()) return false;
-        String n = name.trim().toLowerCase();
-        return "prem".equals(n) || "iasp91".equals(n) || "ak135".equals(n) || "ak135f".equals(n);
+        return VelocityModelCatalog.isBundledModelName(name);
     }
 }

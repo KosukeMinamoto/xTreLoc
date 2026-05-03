@@ -1,5 +1,7 @@
 package com.treloc.xtreloc.app.gui.view;
 
+import com.treloc.xtreloc.app.gui.util.UiFonts;
+
 import javax.swing.*;
 import javax.swing.plaf.basic.BasicTabbedPaneUI;
 import java.awt.*;
@@ -45,14 +47,7 @@ public class MicrosoftStyleTabbedPane extends JTabbedPane {
     }
 
     private static Font resolveUiFont() {
-        String[] names = { "Segoe UI", "Segoe UI Variable", Font.SANS_SERIF };
-        for (String name : names) {
-            Font f = new Font(name, Font.PLAIN, 13);
-            if (!f.getFamily().equals(Font.DIALOG)) {
-                return f;
-            }
-        }
-        return new Font(Font.SANS_SERIF, Font.PLAIN, 13);
+        return UiFonts.uiPlain(13f);
     }
 
     private static class WindowsTabUI extends BasicTabbedPaneUI {

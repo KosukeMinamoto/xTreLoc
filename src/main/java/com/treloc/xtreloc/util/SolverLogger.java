@@ -15,6 +15,8 @@ public final class SolverLogger {
     private static boolean logToConsole = false;
     private static boolean useCallback = false;
     private static java.util.function.BiConsumer<String, Level> callback;
+    /** When true, {@code INFO} (and below) are not forwarded to the callback (GUI); file/console unchanged. */
+    private static volatile boolean suppressInfoInCallback = false;
 
     private SolverLogger() {
     }
@@ -27,6 +29,18 @@ public final class SolverLogger {
 
     public static void setCallback(java.util.function.BiConsumer<String, Level> cb) {
         callback = cb;
+    }
+
+    /**
+     * When {@code true}, {@link #log} does not invoke the GUI callback for {@link Level#INFO}, {@link Level#CONFIG},
+     * {@link Level#FINE}, etc. Warnings and errors are still forwarded. Used for multi-event batch runs.
+     */
+    public static void setSuppressInfoInCallback(boolean suppress) {
+        suppressInfoInCallback = suppress;
+    }
+
+    public static boolean isSuppressInfoInCallback() {
+        return suppressInfoInCallback;
     }
 
     public static void fine(String msg) {
@@ -63,6 +77,9 @@ public final class SolverLogger {
             System.out.println("[" + level.getName() + "] " + msg);
         }
         if (useCallback && callback != null) {
+            if (suppressInfoInCallback && level.intValue() <= Level.INFO.intValue()) {
+                return;
+            }
             callback.accept(msg, level);
         }
     }

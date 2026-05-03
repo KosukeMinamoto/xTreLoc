@@ -7,6 +7,7 @@ import com.treloc.xtreloc.app.gui.service.CsvExporter;
 import javax.swing.*;
 import javax.swing.border.TitledBorder;
 import java.awt.*;
+import java.awt.geom.AffineTransform;
 import java.awt.image.BufferedImage;
 import java.awt.RenderingHints;
 import java.io.File;
@@ -446,6 +447,25 @@ public class ReportPanel extends JPanel {
         
         return sb.toString();
     }
+
+    private static void drawRotatedYAxisLabel(Graphics2D g2, String text, Font font, Color color, int cx, int cy) {
+        Font prevF = g2.getFont();
+        Color prevC = g2.getColor();
+        AffineTransform prevTx = g2.getTransform();
+        try {
+            g2.setFont(font);
+            g2.setColor(color);
+            FontMetrics fm = g2.getFontMetrics();
+            g2.translate(cx, cy);
+            g2.rotate(-Math.PI / 2);
+            int tw = fm.stringWidth(text);
+            g2.drawString(text, -tw / 2, fm.getAscent() / 2);
+        } finally {
+            g2.setTransform(prevTx);
+            g2.setFont(prevF);
+            g2.setColor(prevC);
+        }
+    }
     
     private void drawHistogram(Graphics g) {
         if (hypocenters == null || hypocenters.isEmpty() || selectedColumns.isEmpty()) {
@@ -578,6 +598,24 @@ public class ReportPanel extends JPanel {
             int y = margin + chartHeight - (chartHeight * i / 5) + fm.getAscent() / 2;
             g.drawString(label, margin - fm.stringWidth(label) - 5, y);
         }
+
+        Font axisLabelFont = new Font(Font.SANS_SERIF, Font.PLAIN, 11);
+        g.setFont(axisLabelFont);
+        g.setColor(Color.BLACK);
+        FontMetrics afm = g.getFontMetrics();
+        String xAxisLabel;
+        if (selectedColumns.size() == 1) {
+            xAxisLabel = columnNames[selectedColumns.iterator().next()];
+        } else {
+            xAxisLabel = "Value";
+        }
+        String yAxisLabel = "Count";
+        int xLabW = afm.stringWidth(xAxisLabel);
+        g.drawString(xAxisLabel, (width - xLabW) / 2, margin + chartHeight + 42);
+        if (g instanceof Graphics2D) {
+            drawRotatedYAxisLabel((Graphics2D) g, yAxisLabel, axisLabelFont, Color.BLACK,
+                Math.max(14, margin / 3), margin + chartHeight / 2);
+        }
         
         // Title and legend
         StringBuilder title = new StringBuilder();
@@ -588,7 +626,8 @@ public class ReportPanel extends JPanel {
         title.append(" Histogram");
         
         g.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 12));
-        int titleWidth = fm.stringWidth(title.toString());
+        FontMetrics titleFm = g.getFontMetrics();
+        int titleWidth = titleFm.stringWidth(title.toString());
         g.drawString(title.toString(), (width - titleWidth) / 2, 20);
         
         // Draw legend

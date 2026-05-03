@@ -35,6 +35,12 @@ public class AppConfig {
     /* ---------- common ---------- */
     public String stationFile;
     public String taupFile;
+    /**
+     * Travel-time engine: {@code layered} (default, {@link com.treloc.xtreloc.solver.Raytrace1D}) or
+     * {@code taup} (spherical TauP, same velocity file when supported by TauModelLoader).
+     * The synonym {@code legacy} is accepted when reading configs for compatibility.
+     */
+    public String raytraceMethod = "layered";
     public double hypBottom = 100.0;
     public double threshold = 0.0;
 
@@ -48,6 +54,7 @@ public class AppConfig {
     public int getNumJobs() { return numJobs; }
     public String getStationFile() { return stationFile; }
     public String getTaupFile() { return taupFile; }
+    public String getRaytraceMethod() { return raytraceMethod; }
     public double getHypBottom() { return hypBottom; }
     public double getThreshold() { return threshold; }
     public Map<String, ModeIOConfig> getIO() { return io; }

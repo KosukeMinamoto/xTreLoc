@@ -14,7 +14,7 @@ import com.treloc.xtreloc.io.StationRepository;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.treloc.xtreloc.util.BatchExecutorFactory;
 import com.treloc.xtreloc.util.SolverLogger;
-import edu.sc.seis.TauP.TauModelException;
+import com.treloc.xtreloc.io.VelocityModelLoadException;
 
 /**
  * HypoGridSearch
@@ -42,7 +42,7 @@ public class HypoGridSearch extends SolverBase {
         this.convergenceCallback = callback;
     }
 
-    public HypoGridSearch(AppConfig appConfig) throws TauModelException {
+    public HypoGridSearch(AppConfig appConfig) throws VelocityModelLoadException {
         super(appConfig);
         this.hypBottom = appConfig.hypBottom;
         initGrdParams(appConfig);
@@ -51,7 +51,7 @@ public class HypoGridSearch extends SolverBase {
     /**
      * Constructs with pre-loaded station data (for parallel batch to avoid concurrent file I/O).
      */
-    public HypoGridSearch(AppConfig appConfig, StationRepository stationRepo) throws TauModelException {
+    public HypoGridSearch(AppConfig appConfig, StationRepository stationRepo) throws VelocityModelLoadException {
         super(appConfig, stationRepo);
         this.hypBottom = appConfig.hypBottom;
         initGrdParams(appConfig);
@@ -92,9 +92,10 @@ public class HypoGridSearch extends SolverBase {
      * Start the grid search algorithm.
      * @param datFile the input data file
      * @param outFile the output data file
-     * @throws TauModelException if an error occurs during the calculation
+     * @throws VelocityModelLoadException if an error occurs during the calculation
      */
-    public void start(String datFile, String outFile) throws TauModelException {
+    public void start(String datFile, String outFile) throws VelocityModelLoadException {
+        SolverRunMetricsContext.clear();
         String fileName = new java.io.File(datFile).getName();
         SolverLogger.info("GRD: Starting. File=" + fileName);
         
@@ -112,6 +113,8 @@ public class HypoGridSearch extends SolverBase {
             throw new RuntimeException("Failed to read dat file: " + datFile, e);
         }
         
+        long wallT0 = System.nanoTime();
+
         PointsHandler dataHandler = new PointsHandler();
         dataHandler.setMainPoint(point);
         double[][] lagTable = point.getLagTable();
@@ -143,7 +146,7 @@ public class HypoGridSearch extends SolverBase {
             SolverLogger.fine(String.format("Initial residual calculated: %.6f (input res was %.6f, using calculated value)", res, point.getRes()));
         }
         if (convergenceCallback != null) {
-            convergenceCallback.onResidualUpdate(0, res);
+            convergenceCallback.onIterationUpdate(0, 1, res, null);
         }
         int nThreads = Math.max(1, Math.min(4, Runtime.getRuntime().availableProcessors()));
         ExecutorService executor = BatchExecutorFactory.newFixedThreadPoolBounded(
@@ -221,7 +224,8 @@ public class HypoGridSearch extends SolverBase {
                     lon = row[2];
                     dep = row[3];
                     if (convergenceCallback != null) {
-                        convergenceCallback.onResidualUpdate(focus * gridsPerFocus + (int) row[4], res);
+                        int gridIdx = focus * gridsPerFocus + (int) row[4];
+                        convergenceCallback.onIterationUpdate(gridIdx, gridIdx + 1, res, null);
                     }
                 }
             }
@@ -249,6 +253,8 @@ public class HypoGridSearch extends SolverBase {
         
         try {
             dataHandler.writeDatFile(outFile, codeStrings);
+            long ms = (System.nanoTime() - wallT0) / 1_000_000L;
+            SolverRunMetricsContext.set(new SolverRunMetrics(totalGrids, totalGrids, ms, res));
             SolverLogger.info("GRD: Completed. File=" + fileName);
         } catch (IOException e) {
             StringBuilder errorMsg = new StringBuilder("Failed to write output file in GRD mode:\n");
