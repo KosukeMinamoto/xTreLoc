@@ -28,7 +28,7 @@ public class CommonInfoPanel extends JPanel {
         
         add(Box.createHorizontalStrut(20));
         
-        taupFileLabel = new JLabel("Velocity Structure: Not Set");
+        taupFileLabel = new JLabel("Travel time: Not Set");
         taupFileLabel.setForeground(Color.GRAY);
         add(taupFileLabel);
         
@@ -48,21 +48,9 @@ public class CommonInfoPanel extends JPanel {
             stationFileLabel.setForeground(Color.BLACK);
         }
         
-        SharedFileManager.getInstance().addTaupFileListener(file -> {
-            if (file != null && !file.isEmpty()) {
-                taupFileLabel.setText("Velocity Structure: " + file);
-                taupFileLabel.setForeground(Color.BLACK);
-            } else {
-                taupFileLabel.setText("Velocity Structure: Not Set");
-                taupFileLabel.setForeground(Color.GRAY);
-            }
-        });
+        SharedFileManager.getInstance().addTaupFileListener(file -> applyTaupLabel(file));
         
-        String existingTaupFile = SharedFileManager.getInstance().getTaupFile();
-        if (existingTaupFile != null && !existingTaupFile.isEmpty()) {
-            taupFileLabel.setText("Velocity Structure: " + existingTaupFile);
-            taupFileLabel.setForeground(Color.BLACK);
-        }
+        applyTaupLabel(SharedFileManager.getInstance().getTaupFile());
     }
     
     /**
@@ -71,14 +59,21 @@ public class CommonInfoPanel extends JPanel {
      * @param taupFile the velocity structure file name
      */
     public void setTaupFile(String taupFile) {
+        applyTaupLabel(taupFile);
         if (taupFile != null && !taupFile.isEmpty()) {
-            taupFileLabel.setText("Velocity Structure: " + taupFile);
-            taupFileLabel.setForeground(Color.BLACK);
             SharedFileManager.getInstance().setTaupFile(taupFile);
-        } else {
-            taupFileLabel.setText("Velocity Structure: Not Set");
-            taupFileLabel.setForeground(Color.GRAY);
         }
+    }
+
+    private void applyTaupLabel(String file) {
+        if (file == null || file.isEmpty()) {
+            taupFileLabel.setText("Travel time: Not Set");
+            taupFileLabel.setForeground(Color.GRAY);
+            return;
+        }
+        boolean table = com.treloc.xtreloc.solver.table.TravelTimeTables.isTableSpec(file);
+        taupFileLabel.setText((table ? "Travel-time table: " : "Velocity model: ") + file);
+        taupFileLabel.setForeground(Color.BLACK);
     }
 }
 

@@ -230,9 +230,8 @@ public class HypoMCMC extends SolverBase {
         // Calculate final residual
         Point finalPoint = new Point(point.getTime(), finalLat, finalLon, finalDep,
             0, 0, 0, 0, point.getFilePath(), "MCMC", point.getCid());
-        double[] sWaveTravelTime = travelTime(stationTable, usedIdx, finalPoint);
-        double[] travelTimeResidual = differentialTravelTimeResidual(lagTable, sWaveTravelTime);
-        double res = HypoUtils.standardDeviation(travelTimeResidual);
+        double[] travelTimeResidual = pairResiduals(stationTable, usedIdx, finalPoint, lagTable);
+        double res = HypoUtils.weightedRms(travelTimeResidual, lagTable, pWeight);
         
         // Calculate weights from residuals (inverse of absolute residual)
         double[] weight = HypoUtils.residual2weight(travelTimeResidual);
@@ -256,6 +255,7 @@ public class HypoMCMC extends SolverBase {
         point.setEdep(stdDep); // stdDep is already in km
         point.setRes(res);
         point.setType("MCMC");
+        markIfOutOfRange(point);
         
         // Update pointsHandler with the modified point (ensure reference is updated)
         pointsHandler.setMainPoint(point);
@@ -299,40 +299,17 @@ public class HypoMCMC extends SolverBase {
                                       double[][] lagTable, int[] usedIdx) {
         try {
             Point testPoint = new Point("", lat, lon, dep, 0, 0, 0, 0, "", "", -999);
-            double[] sWaveTravelTime = travelTime(stationTable, usedIdx, testPoint);
-            double[] residual = differentialTravelTimeResidual(lagTable, sWaveTravelTime);
-            
-            // Calculate sum of squared residuals
-            double sumSqResidual = 0.0;
-            for (double r : residual) {
-                sumSqResidual += r * r;
+            double[] residual = pairResiduals(stationTable, usedIdx, testPoint, lagTable);
+            double sumSqResidual = HypoUtils.weightedSumSq(residual, lagTable, pWeight);
+            if (!Double.isFinite(sumSqResidual)) {
+                return Double.NEGATIVE_INFINITY;
             }
-            
-            // Return negative sum (higher likelihood for smaller residuals)
             return -sumSqResidual;
         } catch (Exception e) {
             logger.fine("MCMC likelihood travel-time failure: " + e.getMessage());
             SolverLogger.warning("MCMC: Failed to calculate travel time.");
             return Double.NEGATIVE_INFINITY;
         }
-    }
-
-    /**
-     * Calculates the differential travel time residual between observed and calculated travel times.
-     * 
-     * @param lagTable the lag table containing the observed travel times
-     * @param sWaveTravelTime the calculated travel times
-     * @return an array containing the differential travel time residuals
-     */
-    private static double[] differentialTravelTimeResidual(double[][] lagTable, double[] sWaveTravelTime) {
-        double[] diffTime = new double[lagTable.length];
-        for (int i = 0; i < lagTable.length; i++) {
-            double sTimeK = sWaveTravelTime[(int) lagTable[i][0]];
-            double sTimeL = sWaveTravelTime[(int) lagTable[i][1]];
-            double calcTime = sTimeL - sTimeK;
-            diffTime[i] = lagTable[i][2] - calcTime; // O-C time
-        }
-        return diffTime;
     }
 
     /**

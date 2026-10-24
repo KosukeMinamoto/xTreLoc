@@ -5,7 +5,7 @@ import com.treloc.xtreloc.app.gui.util.AppSettings;
 import com.treloc.xtreloc.app.gui.util.GuiExecutionLog;
 import com.treloc.xtreloc.app.gui.util.MainWindowSizePresets;
 import com.treloc.xtreloc.app.gui.util.UiFonts;
-import com.treloc.xtreloc.app.gui.util.VersionInfo;
+import com.treloc.xtreloc.util.VersionInfo;
 
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
@@ -35,6 +35,7 @@ public class SettingsPanel extends JPanel {
     private JComboBox<String> logLevelCombo;
     private JSpinner logHistorySpinner;
     private JTextField homeDirectoryField;
+    private JTextField eventWaveformPatternField;
     private JButton browseHomeDirButton;
     private JComboBox<String> themeCombo;
     private JSpinner zoomWindowSpinner;
@@ -48,6 +49,11 @@ public class SettingsPanel extends JPanel {
     private JSpinner gridlineWidthSpinner;
     private JComboBox<String> gridlineStyleCombo;
     private JTextField defaultSymbolColorField;
+    private JComboBox<String> dateFormatCombo;
+    private JComboBox<String> timeFormatCombo;
+    private JComboBox<String> dateTimeSeparatorCombo;
+    private JComboBox<String> colorBarTimeLabelCombo;
+    private JLabel dateFormatPreviewLabel;
     private JCheckBox confirmBeforeOverwriteCheckBox;
     private JSpinner recentFilesCountSpinner;
     private JComboBox<String> mainWindowPresetCombo;
@@ -57,6 +63,7 @@ public class SettingsPanel extends JPanel {
     private JLabel mainWindowHeightLabel;
     private JLabel mainWindowSizeSummaryLabel;
     private JButton mainWindowFitScreenButton;
+    private JComboBox<String> launcherModeCombo;
     /** Avoid preset ↔ spinner feedback loops. */
     private boolean mainWindowSizeUiSync;
     private JCheckBox autoUpdateCheckBox;
@@ -116,7 +123,7 @@ public class SettingsPanel extends JPanel {
         detailCardsPanel.add(wrapCardTopLeft(buildLoggingPanel()), CARD_LOGGING);
         detailCardsPanel.add(wrapCardTopLeft(buildGeneralPanel()), CARD_GENERAL);
         detailCardsPanel.add(wrapCardTopLeft(buildSolverPanel()), CARD_SOLVER);
-        detailCardsPanel.add(wrapCardTopLeft(buildChartPanel()), CARD_CHART);
+        detailCardsPanel.add(scrollCard(buildChartPanel()), CARD_CHART);
         detailCardsPanel.add(wrapCardTopLeft(buildPickingPanel()), CARD_PICKING);
         detailCardsPanel.add(wrapCardTopLeft(buildAboutPanel()), CARD_ABOUT);
 
@@ -153,7 +160,7 @@ public class SettingsPanel extends JPanel {
         if (c instanceof JPanel) {
             ((JPanel) c).setBackground(AppPanelStyle.getPanelBg());
         }
-        if (c instanceof JLabel) {
+        if (c instanceof JLabel && !Boolean.TRUE.equals(((JLabel) c).getClientProperty("settings.keepColor"))) {
             ((JLabel) c).setForeground(AppPanelStyle.getContentTextColor());
         }
         if (c instanceof JCheckBox) {
@@ -180,7 +187,8 @@ public class SettingsPanel extends JPanel {
         for (Component child : c.getComponents()) {
             if (child instanceof Container) {
                 applyContentThemeTo((Container) child);
-            } else if (child instanceof JLabel) {
+            } else if (child instanceof JLabel
+                && !Boolean.TRUE.equals(((JLabel) child).getClientProperty("settings.keepColor"))) {
                 ((JLabel) child).setForeground(AppPanelStyle.getContentTextColor());
             } else if (child instanceof JCheckBox) {
                 ((JCheckBox) child).setForeground(AppPanelStyle.getContentTextColor());
@@ -201,7 +209,7 @@ public class SettingsPanel extends JPanel {
         c.anchor = GridBagConstraints.NORTHWEST;
         c.weightx = 1.0;
         c.weighty = 0.0;
-        c.fill = GridBagConstraints.NONE;
+        c.fill = GridBagConstraints.HORIZONTAL;
         c.insets = new Insets(0, 0, 0, 0);
         wrapper.add(content, c);
         c.gridy = 1;
@@ -220,7 +228,7 @@ public class SettingsPanel extends JPanel {
         gbc.gridx = 0; gbc.gridy = 0;
         p.add(new JLabel("Log Level:"), gbc);
         gbc.gridx = 1;
-        logLevelCombo = new JComboBox<>(new String[]{"INFO", "FINE", "FINER", "DEBUG", "WARNING", "SEVERE"});
+        logLevelCombo = new JComboBox<>(new String[]{"INFO", "FINE", "FINER", "WARNING", "SEVERE"});
         p.add(logLevelCombo, gbc);
 
         gbc.gridx = 0; gbc.gridy = 1;
@@ -345,10 +353,45 @@ public class SettingsPanel extends JPanel {
 
         gbc.gridx = 0; gbc.gridy = 10;
         gbc.weightx = 0;
+        gbc.gridwidth = 1;
         p.add(new JLabel("Recent files count:"), gbc);
         gbc.gridx = 1;
         recentFilesCountSpinner = new JSpinner(new SpinnerNumberModel(10, 1, 50, 1));
         p.add(recentFilesCountSpinner, gbc);
+
+        gbc.gridx = 0; gbc.gridy = 11;
+        gbc.gridwidth = 1;
+        gbc.weightx = 0;
+        p.add(new JLabel("Startup (terminal, no args):"), gbc);
+        gbc.gridx = 1;
+        gbc.gridwidth = 3;
+        gbc.weightx = 1.0;
+        launcherModeCombo = new JComboBox<>(new String[] {
+            "Terminal menu — ASCII logo then 0 / 1 / 2",
+            "Open CLI immediately",
+            "Open TUI immediately",
+            "Open GUI immediately"
+        });
+        launcherModeCombo.setToolTipText("Saved as launcherMode in ~/.xtreloc/settings.json. Applies the next time you run xtreloc without flags.");
+        AppPanelStyle.styleComboBox(launcherModeCombo);
+        p.add(launcherModeCombo, gbc);
+
+        gbc.gridx = 0; gbc.gridy = 12;
+        gbc.gridwidth = 4;
+        gbc.weightx = 1.0;
+        p.add(new JLabel("<html><i>In the terminal menu: <b>0</b> = CLI prompts, "
+            + "<b>1</b> = TUI, <b>2</b> = GUI, <b>q</b> = exit. "
+            + "Direct CLI / TUI / GUI options skip this menu.</i></html>"), gbc);
+
+        gbc.gridx = 0; gbc.gridy = 13;
+        gbc.gridwidth = 1;
+        gbc.weightx = 0;
+        p.add(new JLabel("UI font:"), gbc);
+        gbc.gridx = 1;
+        gbc.gridwidth = 3;
+        gbc.weightx = 1.0;
+        fontCombo = new JComboBox<>(new String[]{"default", "Sans Serif", "Serif", "Monospaced"});
+        p.add(fontCombo, gbc);
 
         refreshMainWindowSizeUi();
 
@@ -365,7 +408,7 @@ public class SettingsPanel extends JPanel {
         gbc.weightx = 1.0;
         gbc.gridx = 0;
         gbc.gridy = 0;
-        p.add(new JLabel("Travel-time engine:"), gbc);
+        p.add(new JLabel("Travel-time engine (1-D fallback):"), gbc);
         gbc.gridx = 1;
         raytraceMethodCombo = new JComboBox<>(new String[] {
             "Layered 1D — fastest S (default)",
@@ -377,8 +420,9 @@ public class SettingsPanel extends JPanel {
         gbc.gridy = 1;
         gbc.gridwidth = 2;
         p.add(new JLabel(
-            "<html><i>Same velocity file as the main window (e.g. prem.nd). "
-                + "TauP mode uses finite differences for location derivatives (slower).</i></html>"), gbc);
+            "<html><i>Used only when no travel-time table or NonLinLoc grid is loaded. "
+                + "Tables and grids ignore this. For a 1-D velocity file (e.g. prem.nd), "
+                + "Layered 1D is Raytrace1D; TauP is slower (finite-difference derivatives).</i></html>"), gbc);
         return p;
     }
 
@@ -455,98 +499,172 @@ public class SettingsPanel extends JPanel {
         refreshMainWindowSizeUi();
     }
 
+    private static JComponent scrollCard(JPanel content) {
+        JScrollPane scroll = new JScrollPane(wrapCardTopLeft(content));
+        scroll.setBorder(null);
+        scroll.setHorizontalScrollBarPolicy(ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER);
+        scroll.getVerticalScrollBar().setUnitIncrement(16);
+        AppPanelStyle.styleScrollPane(scroll);
+        return scroll;
+    }
+
+    private static JLabel settingsSectionLabel(String text) {
+        JLabel l = new JLabel(text);
+        l.setFont(AppPanelStyle.getSectionTitleFont());
+        l.setForeground(AppPanelStyle.getTitleColor());
+        l.putClientProperty("settings.keepColor", Boolean.TRUE);
+        return l;
+    }
+
+    private static JLabel settingsFieldLabel(String text) {
+        JLabel l = new JLabel(text);
+        l.setFont(UiFonts.getLabelFont());
+        l.setForeground(AppPanelStyle.getContentTextColor());
+        return l;
+    }
+
     private JPanel buildChartPanel() {
         JPanel p = new JPanel(new GridBagLayout());
         AppPanelStyle.setPanelBackground(p);
         GridBagConstraints gbc = new GridBagConstraints();
-        gbc.insets = new Insets(5, 5, 5, 5);
-        gbc.anchor = GridBagConstraints.NORTHWEST;
+        gbc.insets = new Insets(4, 6, 4, 6);
+        gbc.anchor = GridBagConstraints.WEST;
+        int row = 0;
 
-        gbc.gridx = 0; gbc.gridy = 0;
-        p.add(new JLabel("Font:"), gbc);
-        gbc.gridx = 1;
-        fontCombo = new JComboBox<>(new String[]{"default", "Sans Serif", "Serif", "Monospaced"});
-        p.add(fontCombo, gbc);
-
-        gbc.gridx = 0; gbc.gridy = 1;
-        p.add(new JLabel("Symbol size (map):"), gbc);
-        gbc.gridx = 1;
+        row = chartSection(p, gbc, row, "Map");
         symbolSizeSpinner = new JSpinner(new SpinnerNumberModel(10, 1, 50, 1));
-        p.add(symbolSizeSpinner, gbc);
-
-        gbc.gridx = 0; gbc.gridy = 2;
-        p.add(new JLabel("Default color palette (map):"), gbc);
-        gbc.gridx = 1;
+        row = chartField(p, gbc, row, "Symbol size", symbolSizeSpinner);
         defaultPaletteCombo = new JComboBox<>(new String[]{
-            "Blue to Red", "Viridis", "Plasma", "Cool to Warm", "Rainbow", "Grayscale"
+            "Blue to Red", "Viridis", "Plasma", "Cool to Warm", "Rainbow", "Grayscale",
+            "Seismic (Red to Blue)"
         });
-        p.add(defaultPaletteCombo, gbc);
-        gbc.gridx = 0; gbc.gridy = 3;
-        p.add(new JLabel("Default symbol color (map, hex):"), gbc);
-        gbc.gridx = 1;
+        row = chartField(p, gbc, row, "Default color palette", defaultPaletteCombo);
         defaultSymbolColorField = new JTextField(10);
         defaultSymbolColorField.setToolTipText("e.g. #000000");
-        p.add(defaultSymbolColorField, gbc);
+        row = chartField(p, gbc, row, "Default symbol color (hex)", defaultSymbolColorField);
 
-        gbc.gridx = 0; gbc.gridy = 4; gbc.gridwidth = 2;
-        p.add(new JLabel("<html><i>— Chart / Hist / Scatter</i></html>"), gbc);
+        row = chartSection(p, gbc, row, "Plot (Hist / Scatter / Residual)");
+        backgroundColorField = new JTextField(10);
+        backgroundColorField.setToolTipText("e.g. #1e1e28. Leave blank to use the UI theme background.");
+        row = chartField(p, gbc, row, "Plot background (hex, blank = theme)", backgroundColorField);
+        gridlineColorField = new JTextField(10);
+        row = chartField(p, gbc, row, "Grid line color (hex)", gridlineColorField);
+        gridlineWidthSpinner = new JSpinner(new SpinnerNumberModel(1.0, 0.25, 5.0, 0.25));
+        row = chartField(p, gbc, row, "Grid line width", gridlineWidthSpinner);
+        gridlineStyleCombo = new JComboBox<>(new String[] {"solid", "dash", "dot"});
+        row = chartField(p, gbc, row, "Grid line style", gridlineStyleCombo);
+        chartTitleFontSizeSpinner = new JSpinner(new SpinnerNumberModel(14, 8, 24, 1));
+        row = chartField(p, gbc, row, "Title font size", chartTitleFontSizeSpinner);
+        chartAxisLabelFontSizeSpinner = new JSpinner(new SpinnerNumberModel(12, 8, 20, 1));
+        row = chartField(p, gbc, row, "Axis label font size", chartAxisLabelFontSizeSpinner);
+        chartTickLabelFontSizeSpinner = new JSpinner(new SpinnerNumberModel(10, 8, 16, 1));
+        row = chartField(p, gbc, row, "Tick label font size", chartTickLabelFontSizeSpinner);
+        chartLineWidthSpinner = new JSpinner(new SpinnerNumberModel(2.0, 0.5, 5.0, 0.5));
+        chartLineWidthSpinner.setToolTipText("Series line width on Hist, Scatter, Residual, and k-distance plots.");
+        row = chartField(p, gbc, row, "Line width", chartLineWidthSpinner);
+
+        row = chartSection(p, gbc, row, "Residual");
+        chartConvergenceRepaintThrottleSpinner = new JSpinner(new SpinnerNumberModel(350, 80, 10000, 50));
+        chartConvergenceRepaintThrottleSpinner.setToolTipText(
+            "Minimum milliseconds between Residual / likelihood redraws during Run. Higher = lighter GUI.");
+        row = chartField(p, gbc, row, "Redraw interval (ms)", chartConvergenceRepaintThrottleSpinner);
+
+        row = chartSection(p, gbc, row, "Date / time");
+        JLabel dateHint = settingsFieldLabel("Catalog table, map color bar, Scatter Time");
+        dateHint.setForeground(AppPanelStyle.getMutedTextColor());
+        dateHint.putClientProperty("settings.keepColor", Boolean.TRUE);
+        gbc.gridx = 0;
+        gbc.gridy = row++;
+        gbc.gridwidth = 2;
+        gbc.weightx = 1.0;
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+        p.add(dateHint, gbc);
         gbc.gridwidth = 1;
 
-        gbc.gridx = 0; gbc.gridy = 5;
-        p.add(new JLabel("Background color (hex):"), gbc);
-        gbc.gridx = 1;
-        backgroundColorField = new JTextField(10);
-        backgroundColorField.setToolTipText("e.g. #FFFFFF");
-        p.add(backgroundColorField, gbc);
-        gbc.gridx = 0; gbc.gridy = 6;
-        p.add(new JLabel("Grid line color (hex):"), gbc);
-        gbc.gridx = 1;
-        gridlineColorField = new JTextField(10);
-        p.add(gridlineColorField, gbc);
-        gbc.gridx = 0; gbc.gridy = 7;
-        p.add(new JLabel("Grid line width:"), gbc);
-        gbc.gridx = 1;
-        gridlineWidthSpinner = new JSpinner(new SpinnerNumberModel(1.0, 0.25, 5.0, 0.25));
-        p.add(gridlineWidthSpinner, gbc);
-        gbc.gridx = 0; gbc.gridy = 8;
-        p.add(new JLabel("Grid line style:"), gbc);
-        gbc.gridx = 1;
-        gridlineStyleCombo = new JComboBox<>(new String[]{"solid", "dash", "dot"});
-        p.add(gridlineStyleCombo, gbc);
+        dateFormatCombo = new JComboBox<>(new String[]{
+            "yyyy-MM-dd", "yyyy/MM/dd", "dd/MM/yyyy", "MM/dd/yyyy", "yyyyMMdd", "dd MMM yyyy", "yy-MM-dd"});
+        dateFormatCombo.setEditable(true);
+        dateFormatCombo.setToolTipText("Java DateTimeFormatter pattern, e.g. yyyy-MM-dd. Display only.");
+        row = chartField(p, gbc, row, "Date format", dateFormatCombo);
+        timeFormatCombo = new JComboBox<>(new String[]{"HH:mm:ss", "HH:mm", "HH:mm:ss.SSS", "hh:mm:ss a"});
+        timeFormatCombo.setEditable(true);
+        timeFormatCombo.setToolTipText("Java DateTimeFormatter pattern, e.g. HH:mm:ss");
+        row = chartField(p, gbc, row, "Time format", timeFormatCombo);
+        dateTimeSeparatorCombo = new JComboBox<>(new String[]{"T", "space"});
+        row = chartField(p, gbc, row, "Date / time separator (table)", dateTimeSeparatorCombo);
+        colorBarTimeLabelCombo = new JComboBox<>(new String[]{
+            com.treloc.xtreloc.util.TimeFormatConverter.COLORBAR_AUTO,
+            com.treloc.xtreloc.util.TimeFormatConverter.COLORBAR_DATE,
+            com.treloc.xtreloc.util.TimeFormatConverter.COLORBAR_DATE_TIME,
+            com.treloc.xtreloc.util.TimeFormatConverter.COLORBAR_TIME});
+        colorBarTimeLabelCombo.setToolTipText("Auto: date for ranges of 2 days or more, time for a range inside one day.");
+        row = chartField(p, gbc, row, "Color bar time labels", colorBarTimeLabelCombo);
+        dateFormatPreviewLabel = settingsFieldLabel(" ");
+        chartField(p, gbc, row, "Preview", dateFormatPreviewLabel);
 
-        gbc.gridx = 0; gbc.gridy = 9;
-        p.add(new JLabel("Title font size:"), gbc);
-        gbc.gridx = 1;
-        chartTitleFontSizeSpinner = new JSpinner(new SpinnerNumberModel(14, 8, 24, 1));
-        p.add(chartTitleFontSizeSpinner, gbc);
-        gbc.gridx = 0; gbc.gridy = 10;
-        p.add(new JLabel("Axis label font size:"), gbc);
-        gbc.gridx = 1;
-        chartAxisLabelFontSizeSpinner = new JSpinner(new SpinnerNumberModel(12, 8, 20, 1));
-        p.add(chartAxisLabelFontSizeSpinner, gbc);
-        gbc.gridx = 0; gbc.gridy = 11;
-        p.add(new JLabel("Tick label font size:"), gbc);
-        gbc.gridx = 1;
-        chartTickLabelFontSizeSpinner = new JSpinner(new SpinnerNumberModel(10, 8, 16, 1));
-        p.add(chartTickLabelFontSizeSpinner, gbc);
-        gbc.gridx = 0; gbc.gridy = 12;
-        p.add(new JLabel("Line width:"), gbc);
-        gbc.gridx = 1;
-        chartLineWidthSpinner = new JSpinner(new SpinnerNumberModel(2.0, 0.5, 5.0, 0.5));
-        p.add(chartLineWidthSpinner, gbc);
-        gbc.gridx = 0; gbc.gridy = 13;
-        p.add(new JLabel("Convergence plot repaint min interval (ms, 0=off):"), gbc);
-        gbc.gridx = 1;
-        chartConvergenceRepaintThrottleSpinner = new JSpinner(new SpinnerNumberModel(350, 0, 10000, 50));
-        chartConvergenceRepaintThrottleSpinner.setToolTipText(
-            "Solver residual / likelihood chart: minimum milliseconds between repaints. Higher = lighter GUI.");
-        p.add(chartConvergenceRepaintThrottleSpinner, gbc);
+        java.awt.event.ActionListener previewUpdater = e -> updateDateFormatPreview();
+        dateFormatCombo.addActionListener(previewUpdater);
+        timeFormatCombo.addActionListener(previewUpdater);
+        dateTimeSeparatorCombo.addActionListener(previewUpdater);
+        colorBarTimeLabelCombo.addActionListener(previewUpdater);
         return p;
+    }
+
+    private static int chartSection(JPanel p, GridBagConstraints gbc, int row, String title) {
+        gbc.gridx = 0;
+        gbc.gridy = row;
+        gbc.gridwidth = 2;
+        gbc.weightx = 1.0;
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+        gbc.insets = new Insets(row == 0 ? 4 : 12, 6, 4, 6);
+        p.add(settingsSectionLabel(title), gbc);
+        gbc.gridwidth = 1;
+        gbc.insets = new Insets(4, 6, 4, 6);
+        return row + 1;
+    }
+
+    private static int chartField(JPanel p, GridBagConstraints gbc, int row, String label, JComponent field) {
+        gbc.gridx = 0;
+        gbc.gridy = row;
+        gbc.gridwidth = 1;
+        gbc.weightx = 0;
+        gbc.fill = GridBagConstraints.NONE;
+        p.add(settingsFieldLabel(label), gbc);
+        gbc.gridx = 1;
+        gbc.weightx = 1.0;
+        gbc.fill = GridBagConstraints.HORIZONTAL;
+        p.add(field, gbc);
+        return row + 1;
+    }
+
+    private static String selectedText(JComboBox<String> combo) {
+        Object o = combo.isEditable() && combo.getEditor() != null ? combo.getEditor().getItem() : combo.getSelectedItem();
+        return o != null ? o.toString() : "";
+    }
+
+    private String separatorValue() {
+        return "space".equals(dateTimeSeparatorCombo.getSelectedItem()) ? " " : "T";
+    }
+
+    private void updateDateFormatPreview() {
+        if (dateFormatPreviewLabel == null) return;
+        String dp = selectedText(dateFormatCombo);
+        String tp = selectedText(timeFormatCombo);
+        boolean ok = com.treloc.xtreloc.util.TimeFormatConverter.isValidPattern(dp)
+            && com.treloc.xtreloc.util.TimeFormatConverter.isValidPattern(tp);
+        if (!ok) {
+            dateFormatPreviewLabel.setText("Invalid pattern (defaults are used)");
+            return;
+        }
+        java.time.LocalDateTime sample = java.time.LocalDateTime.of(2007, 12, 22, 21, 29, 0);
+        java.time.format.DateTimeFormatter df = java.time.format.DateTimeFormatter.ofPattern(dp.trim(), java.util.Locale.US);
+        java.time.format.DateTimeFormatter tf = java.time.format.DateTimeFormatter.ofPattern(tp.trim(), java.util.Locale.US);
+        dateFormatPreviewLabel.setText("Table: " + sample.format(df) + separatorValue() + sample.format(tf)
+            + "   Color bar (date+time): " + sample.format(df) + " " + sample.format(tf));
     }
 
     private static final String[] MOUSE_BUTTONS = { "Left", "Right", "Middle" };
     private static final String[] PICKING_KEYS = { "None", "P", "S", "1", "2" };
-
     private JPanel buildPickingPanel() {
         JPanel p = new JPanel(new GridBagLayout());
         AppPanelStyle.setPanelBackground(p);
@@ -554,47 +672,56 @@ public class SettingsPanel extends JPanel {
         gbc.insets = new Insets(5, 5, 5, 5);
         gbc.anchor = GridBagConstraints.NORTHWEST;
 
-        gbc.gridx = 0; gbc.gridy = 0;
+        gbc.gridx = 0; gbc.gridy = 1;
         p.add(new JLabel("Zoom Window (seconds):"), gbc);
         gbc.gridx = 1;
         zoomWindowSpinner = new JSpinner(new SpinnerNumberModel(10.0, 0.1, 60.0, 0.5));
         p.add(zoomWindowSpinner, gbc);
 
-        gbc.gridx = 0; gbc.gridy = 1; gbc.gridwidth = 2;
-        p.add(new JLabel("<html><i>Half-width of zoom window in waveform picking (±seconds).</i></html>"), gbc);
+        gbc.gridx = 0; gbc.gridy = 2; gbc.gridwidth = 2;
+        p.add(new JLabel("<html><i>Half-width of zoom window in <b>manual</b> picking (±seconds).</i></html>"), gbc);
 
-        gbc.gridy = 2; gbc.gridwidth = 1;
+        gbc.gridy = 3; gbc.gridwidth = 1;
         p.add(new JLabel("P wave — mouse button:"), gbc);
         gbc.gridx = 1;
         pickingMousePCombo = new JComboBox<>(MOUSE_BUTTONS);
         p.add(pickingMousePCombo, gbc);
 
-        gbc.gridx = 0; gbc.gridy = 3;
+        gbc.gridx = 0; gbc.gridy = 4;
         p.add(new JLabel("S wave — mouse button:"), gbc);
         gbc.gridx = 1;
         pickingMouseSCombo = new JComboBox<>(MOUSE_BUTTONS);
         p.add(pickingMouseSCombo, gbc);
 
-        gbc.gridx = 0; gbc.gridy = 4;
+        gbc.gridx = 0; gbc.gridy = 5;
         p.add(new JLabel("Context menu — mouse button:"), gbc);
         gbc.gridx = 1;
         pickingMouseContextCombo = new JComboBox<>(MOUSE_BUTTONS);
         p.add(pickingMouseContextCombo, gbc);
 
-        gbc.gridx = 0; gbc.gridy = 5;
+        gbc.gridx = 0; gbc.gridy = 6;
         p.add(new JLabel("P wave — key (hold + click):"), gbc);
         gbc.gridx = 1;
         pickingKeyPCombo = new JComboBox<>(PICKING_KEYS);
         p.add(pickingKeyPCombo, gbc);
 
-        gbc.gridx = 0; gbc.gridy = 6;
+        gbc.gridx = 0; gbc.gridy = 7;
         p.add(new JLabel("S wave — key (hold + click):"), gbc);
         gbc.gridx = 1;
         pickingKeySCombo = new JComboBox<>(PICKING_KEYS);
         p.add(pickingKeySCombo, gbc);
 
-        gbc.gridx = 0; gbc.gridy = 7; gbc.gridwidth = 2;
-        p.add(new JLabel("<html><i>Mouse: which button picks P/S or opens context menu. Key: hold key then click to pick P or S.</i></html>"), gbc);
+        gbc.gridx = 0; gbc.gridy = 8; gbc.gridwidth = 2;
+        p.add(new JLabel("<html><i>Mouse/key options apply to <b>manual</b> picking only.</i></html>"), gbc);
+
+        gbc.gridx = 0; gbc.gridy = 9; gbc.gridwidth = 1;
+        p.add(new JLabel("Event waveform folder:"), gbc);
+        gbc.gridx = 1;
+        eventWaveformPatternField = new JTextField(28);
+        eventWaveformPatternField.setToolTipText("Folder of one event, e.g. /data/sac/{yyMMdd.HHmmss}");
+        p.add(eventWaveformPatternField, gbc);
+        gbc.gridx = 0; gbc.gridy = 10; gbc.gridwidth = 2;
+        p.add(new JLabel("<html><i>Used by <b>Open in Seismic</b> on the map. Placeholders: {yyyy} {yy} {MM} {dd} {HH} {mm} {ss} {yyyyMMdd} {yyMMdd.HHmmss} {catalog}; * and ? allowed in the last folder name.</i></html>"), gbc);
         return p;
     }
 
@@ -632,7 +759,13 @@ public class SettingsPanel extends JPanel {
         if (fontCombo != null) fontCombo.setSelectedItem(currentSettings.getFont());
         if (symbolSizeSpinner != null) symbolSizeSpinner.setValue(currentSettings.getSymbolSize());
         if (defaultPaletteCombo != null) defaultPaletteCombo.setSelectedItem(currentSettings.getDefaultPalette());
-        if (logLevelCombo != null) logLevelCombo.setSelectedItem(currentSettings.getLogLevel());
+        if (logLevelCombo != null) {
+            String lv = currentSettings.getLogLevel();
+            if ("DEBUG".equalsIgnoreCase(lv)) {
+                lv = "FINE";
+            }
+            logLevelCombo.setSelectedItem(lv);
+        }
         if (logHistorySpinner != null) logHistorySpinner.setValue(currentSettings.getHistoryLines());
         if (homeDirectoryField != null) homeDirectoryField.setText(currentSettings.getHomeDirectory());
         if (themeCombo != null) {
@@ -642,6 +775,14 @@ public class SettingsPanel extends JPanel {
         if (zoomWindowSpinner != null) zoomWindowSpinner.setValue(currentSettings.getZoomWindowSeconds());
         if (confirmBeforeOverwriteCheckBox != null) confirmBeforeOverwriteCheckBox.setSelected(currentSettings.isConfirmBeforeOverwrite());
         if (recentFilesCountSpinner != null) recentFilesCountSpinner.setValue(currentSettings.getRecentFilesCount());
+        if (launcherModeCombo != null) {
+            String lm = currentSettings.getLauncherMode();
+            int lx = 0;
+            if ("cli".equals(lm)) lx = 1;
+            else if ("tui".equals(lm)) lx = 2;
+            else if ("gui".equals(lm)) lx = 3;
+            launcherModeCombo.setSelectedIndex(lx);
+        }
         if (mainWindowWidthSpinner != null && mainWindowHeightSpinner != null && mainWindowPresetCombo != null) {
             mainWindowSizeUiSync = true;
             try {
@@ -662,6 +803,7 @@ public class SettingsPanel extends JPanel {
         if (pickingMouseContextCombo != null) pickingMouseContextCombo.setSelectedItem(currentSettings.getPickingMouseContext());
         if (pickingKeyPCombo != null) pickingKeyPCombo.setSelectedItem(currentSettings.getPickingKeyP());
         if (pickingKeySCombo != null) pickingKeySCombo.setSelectedItem(currentSettings.getPickingKeyS());
+        if (eventWaveformPatternField != null) eventWaveformPatternField.setText(currentSettings.getEventWaveformPattern());
         if (raytraceMethodCombo != null) {
             raytraceMethodCombo.setSelectedIndex("taup".equalsIgnoreCase(currentSettings.getRaytraceMethod()) ? 1 : 0);
         }
@@ -671,13 +813,21 @@ public class SettingsPanel extends JPanel {
         if (chartTickLabelFontSizeSpinner != null) chartTickLabelFontSizeSpinner.setValue(chart.getTickLabelFontSize());
         if (chartLineWidthSpinner != null) chartLineWidthSpinner.setValue((double) chart.getLineWidth());
         if (chartConvergenceRepaintThrottleSpinner != null) {
-            chartConvergenceRepaintThrottleSpinner.setValue(chart.getConvergenceRepaintThrottleMs());
+            int throttle = Math.max(80, chart.getConvergenceRepaintThrottleMs());
+            chartConvergenceRepaintThrottleSpinner.setValue(throttle);
         }
         if (backgroundColorField != null) backgroundColorField.setText(chart.getBackgroundColor());
         if (gridlineColorField != null) gridlineColorField.setText(chart.getGridlineColor());
         if (gridlineWidthSpinner != null) gridlineWidthSpinner.setValue((double) chart.getGridlineWidth());
         if (gridlineStyleCombo != null) gridlineStyleCombo.setSelectedItem(chart.getGridlineStyle());
         if (defaultSymbolColorField != null) defaultSymbolColorField.setText(currentSettings.getDefaultSymbolColor());
+        if (dateFormatCombo != null) dateFormatCombo.setSelectedItem(currentSettings.getDateFormat());
+        if (timeFormatCombo != null) timeFormatCombo.setSelectedItem(currentSettings.getTimeFormat());
+        if (dateTimeSeparatorCombo != null) {
+            dateTimeSeparatorCombo.setSelectedItem(" ".equals(currentSettings.getDateTimeSeparator()) ? "space" : "T");
+        }
+        if (colorBarTimeLabelCombo != null) colorBarTimeLabelCombo.setSelectedItem(currentSettings.getColorBarTimeLabel());
+        updateDateFormatPreview();
     }
 
     private void browseHomeDirectory() {
@@ -703,6 +853,23 @@ public class SettingsPanel extends JPanel {
         currentSettings.setZoomWindowSeconds(((Number) zoomWindowSpinner.getValue()).doubleValue());
         currentSettings.setConfirmBeforeOverwrite(confirmBeforeOverwriteCheckBox.isSelected());
         currentSettings.setRecentFilesCount((Integer) recentFilesCountSpinner.getValue());
+        if (launcherModeCombo != null) {
+            int lx = launcherModeCombo.getSelectedIndex();
+            switch (lx) {
+                case 1:
+                    currentSettings.setLauncherMode("cli");
+                    break;
+                case 2:
+                    currentSettings.setLauncherMode("tui");
+                    break;
+                case 3:
+                    currentSettings.setLauncherMode("gui");
+                    break;
+                default:
+                    currentSettings.setLauncherMode("select");
+                    break;
+            }
+        }
         if (mainWindowWidthSpinner != null && mainWindowHeightSpinner != null) {
             currentSettings.setMainWindowWidth(((Number) mainWindowWidthSpinner.getValue()).intValue());
             currentSettings.setMainWindowHeight(((Number) mainWindowHeightSpinner.getValue()).intValue());
@@ -715,6 +882,7 @@ public class SettingsPanel extends JPanel {
         currentSettings.setPickingMouseContext((String) pickingMouseContextCombo.getSelectedItem());
         currentSettings.setPickingKeyP((String) pickingKeyPCombo.getSelectedItem());
         currentSettings.setPickingKeyS((String) pickingKeySCombo.getSelectedItem());
+        currentSettings.setEventWaveformPattern(eventWaveformPatternField.getText());
         if (raytraceMethodCombo != null) {
             currentSettings.setRaytraceMethod(raytraceMethodCombo.getSelectedIndex() == 1 ? "taup" : "layered");
         }
@@ -726,11 +894,24 @@ public class SettingsPanel extends JPanel {
         if (chartConvergenceRepaintThrottleSpinner != null) {
             chart.setConvergenceRepaintThrottleMs(((Number) chartConvergenceRepaintThrottleSpinner.getValue()).intValue());
         }
-        chart.setBackgroundColor(backgroundColorField.getText().trim().isEmpty() ? "#FFFFFF" : backgroundColorField.getText().trim());
+        String plotBg = backgroundColorField.getText().trim();
+        chart.setBackgroundColor(plotBg);
+        String chartFamily = chartFontFamily(currentSettings.getFont());
+        chart.setTitleFontName(chartFamily);
+        chart.setAxisLabelFontName(chartFamily);
+        chart.setTickLabelFontName(chartFamily);
+        chart.setLegendFontName(chartFamily);
         chart.setGridlineColor(gridlineColorField.getText().trim().isEmpty() ? "#E0E0E0" : gridlineColorField.getText().trim());
         chart.setGridlineWidth(((Number) gridlineWidthSpinner.getValue()).floatValue());
         chart.setGridlineStyle((String) gridlineStyleCombo.getSelectedItem());
         currentSettings.setDefaultSymbolColor(defaultSymbolColorField.getText().trim().isEmpty() ? "#000000" : defaultSymbolColorField.getText().trim());
+
+        if (dateFormatCombo != null) currentSettings.setDateFormat(selectedText(dateFormatCombo));
+        if (timeFormatCombo != null) currentSettings.setTimeFormat(selectedText(timeFormatCombo));
+        if (dateTimeSeparatorCombo != null) currentSettings.setDateTimeSeparator(separatorValue());
+        if (colorBarTimeLabelCombo != null) {
+            currentSettings.setColorBarTimeLabel((String) colorBarTimeLabelCombo.getSelectedItem());
+        }
 
         currentSettings.save();
         GuiExecutionLog.info("Settings: values saved to disk.");
@@ -739,9 +920,31 @@ public class SettingsPanel extends JPanel {
         applySymbolSize(currentSettings.getSymbolSize());
         applyDefaultPalette(currentSettings.getDefaultPalette());
         applyLogLevel(currentSettings.getLogLevel());
+        applyTimeDisplayFormat();
 
-        GuiExecutionLog.info("Settings saved. If you changed theme, main window size, or similar, restart the application manually for those to apply.");
+        GuiExecutionLog.info("Settings saved. Launcher preference applies on next xtreloc launch (no-args). Restart manually if you changed theme, window size, or similar.");
         logger.info("Settings saved to disk (restart manually if theme or window size changed).");
+    }
+
+    private void applyTimeDisplayFormat() {
+        currentSettings.applyTimeDisplayFormat();
+        if (mapView != null) mapView.refreshTimeLabels();
+        for (java.awt.Window w : java.awt.Window.getWindows()) {
+            if (w.isShowing()) w.repaint();
+        }
+    }
+
+    private static String chartFontFamily(String uiFont) {
+        if (uiFont == null || uiFont.isBlank() || "default".equalsIgnoreCase(uiFont) || "Sans Serif".equalsIgnoreCase(uiFont)) {
+            return "SansSerif";
+        }
+        if ("Serif".equalsIgnoreCase(uiFont)) {
+            return "Serif";
+        }
+        if ("Monospaced".equalsIgnoreCase(uiFont)) {
+            return "Monospaced";
+        }
+        return "SansSerif";
     }
 
     private void applyFont(String font) {
@@ -791,20 +994,6 @@ public class SettingsPanel extends JPanel {
             themes.add("GTK+");
         }
         return themes.toArray(new String[0]);
-    }
-
-    private void applyTheme(String themeName) {
-        try {
-            String lafClassName = getLookAndFeelClassName(themeName);
-            if (lafClassName != null) UIManager.setLookAndFeel(lafClassName);
-        } catch (Exception e) {
-            logger.log(Level.FINE, "Theme failed, falling back to system L&F: " + e.getMessage());
-            try {
-                UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
-            } catch (Exception ex) {
-                logger.log(Level.WARNING, "System LookAndFeel also failed: " + ex.getMessage());
-            }
-        }
     }
 
     private String getLookAndFeelClassName(String themeName) {

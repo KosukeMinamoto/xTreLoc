@@ -36,17 +36,7 @@ public final class ConfigValidator {
             }
         }
 
-        if (config.taupFile != null && !config.taupFile.trim().isEmpty()) {
-            String taupPath = config.taupFile.trim();
-            if (!isBuiltinTaupModel(taupPath)) {
-                Path p = Paths.get(taupPath);
-                if (!Files.exists(p)) {
-                    errors.add("taupFile: No such file or directory: " + config.taupFile);
-                } else if (!Files.isRegularFile(p)) {
-                    errors.add("taupFile: Not a regular file: " + config.taupFile);
-                }
-            }
-        }
+        addTaupFileErrors(errors, config.taupFile, false);
 
         if (config.io != null) {
             for (Map.Entry<String, AppConfig.ModeIOConfig> e : config.io.entrySet()) {
@@ -102,7 +92,8 @@ public final class ConfigValidator {
         sb.append("  taupFile: ").append(config.taupFile != null ? config.taupFile : "(not set)").append("\n");
         sb.append("  raytraceMethod: ")
             .append(config.raytraceMethod != null && !config.raytraceMethod.isEmpty()
-                ? config.raytraceMethod : "layered").append("\n");
+                ? config.raytraceMethod : "layered")
+            .append(" (1-D models only; tables/grids ignore this)").append("\n");
         if (config.io != null) {
             for (Map.Entry<String, AppConfig.ModeIOConfig> e : config.io.entrySet()) {
                 String mode = e.getKey();
@@ -119,7 +110,42 @@ public final class ConfigValidator {
         return sb.toString();
     }
 
-    private static boolean isBuiltinTaupModel(String name) {
-        return VelocityModelCatalog.isBundledModelName(name);
+    /**
+     * Validates {@code taupFile}: bundled 1-D name, on-disk {@code .nd}/{@code .tvel} (Vp and Vs),
+     * WIN / hypomh structure ({@code .aob}, {@code struct.tbl}), or NonLinLoc travel-time grid directory.
+     *
+     * @param required when true, a missing value is an error (TUI execute); load-time validation is not required
+     */
+    public static void addTaupFileErrors(List<String> errors, String spec, boolean required) {
+        if (spec == null || spec.isBlank()) {
+            if (required) {
+                errors.add("taupFile is required: a velocity model (1-D .nd/.tvel with Vp and Vs) OR a travel-time table (*.time.hdr).");
+            }
+            return;
+        }
+        String taupPath = spec.trim();
+        if (VelocityModelCatalog.isBundledModelName(taupPath)
+                || com.treloc.xtreloc.solver.table.TravelTimeTables.isTableSpec(taupPath)) {
+            return;
+        }
+        Path p = Paths.get(taupPath);
+        if (!Files.exists(p)) {
+            errors.add("taupFile: No such file or directory: " + spec);
+            return;
+        }
+        if (Files.isDirectory(p)) {
+            errors.add("taupFile: Directory is not a travel-time grid (*.time.hdr): " + spec);
+            return;
+        }
+        if (!Files.isRegularFile(p)) {
+            errors.add("taupFile: Not a regular file: " + spec);
+            return;
+        }
+        String name = p.getFileName().toString().toLowerCase();
+        if (!name.endsWith(".nd") && !name.endsWith(".tvel") && !name.endsWith(".taup")
+                && !name.endsWith(".time.hdr") && !name.endsWith(".aob") && !name.endsWith(".tbl")
+                && !name.endsWith(".win") && !name.contains("struct")) {
+            errors.add("taupFile: Expected .nd/.tvel (Vp and Vs), WIN struct (.aob/.tbl), or a grid directory (*.time.hdr): " + spec);
+        }
     }
 }

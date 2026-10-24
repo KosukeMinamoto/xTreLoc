@@ -1,120 +1,112 @@
+/*
+ * Decompiled with CFR 0.152.
+ */
 package com.treloc.xtreloc.app.gui;
 
-import com.treloc.xtreloc.app.gui.view.MapView;
-import com.treloc.xtreloc.app.gui.view.ViewerStatusBar;
 import com.treloc.xtreloc.app.gui.controller.MapController;
-
-import javax.swing.*;
-import java.awt.*;
-import java.awt.event.*;
-import java.awt.geom.AffineTransform;
-import java.io.File;
-import java.util.Arrays;
-import java.util.logging.Level;
-import java.util.logging.Logger;
-
-import org.geotools.swing.JMapFrame;
-
+import com.treloc.xtreloc.app.gui.controller.WorkingRelocationController;
+import com.treloc.xtreloc.app.gui.model.CatalogInfo;
+import com.treloc.xtreloc.app.gui.model.EventKey;
+import com.treloc.xtreloc.app.gui.model.Hypocenter;
+import com.treloc.xtreloc.app.gui.service.AssociationModel;
+import com.treloc.xtreloc.app.gui.service.RealResultWriter;
+import com.treloc.xtreloc.app.gui.service.UpdateChecker;
 import com.treloc.xtreloc.app.gui.util.AppPanelStyle;
+import com.treloc.xtreloc.app.gui.util.AppSettings;
+import com.treloc.xtreloc.app.gui.util.AppSettingsCache;
 import com.treloc.xtreloc.app.gui.util.BundledImageLoader;
-import com.treloc.xtreloc.app.gui.util.MainWindowSizePresets;
-import com.treloc.xtreloc.app.gui.util.UiFonts;
-import com.treloc.xtreloc.app.gui.util.GuiExecutionLog;
 import com.treloc.xtreloc.app.gui.util.ChartAppearanceSettings;
 import com.treloc.xtreloc.app.gui.util.ChartImageExport;
+import com.treloc.xtreloc.app.gui.util.ChartPlotOptions;
 import com.treloc.xtreloc.app.gui.util.ColorScaleUtils;
+import com.treloc.xtreloc.app.gui.util.GuiExecutionLog;
+import com.treloc.xtreloc.app.gui.util.LogHistoryManager;
+import com.treloc.xtreloc.app.gui.util.MainWindowSizePresets;
+import com.treloc.xtreloc.app.gui.util.UiFonts;
+import com.treloc.xtreloc.app.gui.util.UpdateInfo;
+import com.treloc.xtreloc.app.gui.util.WorkingLayer;
+import com.treloc.xtreloc.app.gui.view.AbsoluteExportPanel;
+import com.treloc.xtreloc.app.gui.view.AppMenuBar;
+import com.treloc.xtreloc.app.gui.view.AssociatePanel;
+import com.treloc.xtreloc.app.gui.view.AssociationResultPanel;
+import com.treloc.xtreloc.app.gui.view.CatalogTablePanel;
+import com.treloc.xtreloc.app.gui.view.ChartCatalogColorCard;
+import com.treloc.xtreloc.app.gui.view.HypocenterLocationPanel;
+import com.treloc.xtreloc.app.gui.view.MainCommands;
+import com.treloc.xtreloc.app.gui.view.MainStatusBar;
+import com.treloc.xtreloc.app.gui.view.Map2DPanel;
+import com.treloc.xtreloc.app.gui.view.MapView;
+import com.treloc.xtreloc.app.gui.view.ModelSetupPanel;
+import com.treloc.xtreloc.app.gui.view.NavigationPanel;
+import com.treloc.xtreloc.app.gui.view.PageToolBar;
+import com.treloc.xtreloc.app.gui.view.PickViewerPanel;
+import com.treloc.xtreloc.app.gui.view.ReportPanel;
+import com.treloc.xtreloc.app.gui.view.SacWorkbenchPanel;
+import com.treloc.xtreloc.app.gui.view.SettingsPanel;
+import com.treloc.xtreloc.app.gui.view.TraceProcessingPanel;
+import com.treloc.xtreloc.app.gui.view.UpdateDialog;
+import com.treloc.xtreloc.app.gui.view.VelocityViewerPanel;
+import com.treloc.xtreloc.app.gui.view.ViewerSideChrome;
+import com.treloc.xtreloc.app.gui.view.ViewerStatusBar;
+import com.treloc.xtreloc.app.gui.volume3d.Map3DIcons;
+import com.treloc.xtreloc.io.AppConfig;
+import com.treloc.xtreloc.io.ConfigLoader;
+import com.treloc.xtreloc.util.LogInitializer;
+import com.treloc.xtreloc.util.TimeFormatConverter;
+import com.treloc.xtreloc.util.VersionInfo;
+import java.awt.BasicStroke;
+import java.awt.BorderLayout;
+import java.awt.Color;
+import java.awt.Component;
+import java.awt.Dimension;
+import java.awt.FlowLayout;
+import java.awt.Font;
+import java.awt.FontMetrics;
+import java.awt.Frame;
+import java.awt.Graphics;
+import java.awt.Graphics2D;
+import java.awt.Image;
+import java.awt.Rectangle;
+import java.awt.Stroke;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
+import java.awt.event.WindowAdapter;
+import java.awt.event.WindowEvent;
+import java.awt.geom.AffineTransform;
+import java.io.File;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.function.Consumer;
+import java.util.function.Supplier;
+import java.util.logging.Level;
+import java.util.logging.Logger;
+import java.util.prefs.Preferences;
+import javax.swing.BorderFactory;
+import javax.swing.Box;
+import javax.swing.BoxLayout;
+import javax.swing.JButton;
+import javax.swing.JCheckBox;
+import javax.swing.JComboBox;
+import javax.swing.JComponent;
+import javax.swing.JDialog;
+import javax.swing.JFrame;
+import javax.swing.JLabel;
+import javax.swing.JOptionPane;
+import javax.swing.JPanel;
+import javax.swing.JSplitPane;
+import javax.swing.JTabbedPane;
+import javax.swing.SwingUtilities;
+import javax.swing.Timer;
+import javax.swing.UIManager;
 
 public class XTreLocGUI {
-
     private static final Logger logger = Logger.getLogger(XTreLocGUI.class.getName());
     private static final int REPAINT_DEBOUNCE_MS = 100;
-    /** Right pane background on Solver tab (matches convergence log dock; avoids a light strip under the log). */
-    private static final Color SOLVER_RIGHT_PANE_BG = new Color(20, 20, 30);
-    /** Vertical icon strip width (pixels), excluding split divider. */
-    private static final int MAIN_NAV_STRIP_WIDTH = 54;
-    private static final int MAIN_NAV_ICON_SIZE = 26;
+    private static final int NAVIGATOR_WIDTH = 170;
 
-    private static boolean isMainViewerTabSelected(JTabbedPane mainTabs) {
-        int i = mainTabs.getSelectedIndex();
-        return i >= 0 && "Viewer".equalsIgnoreCase(mainTabs.getTitleAt(i));
-    }
-
-    private static boolean isViewerSynMapOnly(JTabbedPane mainTabs,
-            com.treloc.xtreloc.app.gui.view.HypocenterLocationPanel locPanel) {
-        if (!isMainViewerTabSelected(mainTabs)) {
-            return false;
-        }
-        return locPanel != null && "SYN".equals(locPanel.getSolverModeAbbreviation());
-    }
-
-    /**
-     * When Viewer is active and solver mode is SYN (Create Synthetic data), hides catalog/shapefile pane
-     * and Hist/Scatter so only the map remains. Restores when leaving that state.
-     */
-    private static void updateViewerSynMapOnlyUi(
-            com.treloc.xtreloc.app.gui.view.HypocenterLocationPanel locationPanel,
-            JTabbedPane mainTabbedPane,
-            JPanel leftPanelContainer,
-            JComponent excelPane,
-            JTabbedPane viewerRightTabs,
-            JPanel histogramPanel,
-            JPanel scatterPanel,
-            JSplitPane mainSplit,
-            int[] dividerLocationByTab,
-            int[] synMainSplitBackup,
-            int[] defaultMainSplitDividerSize) {
-        boolean want = isViewerSynMapOnly(mainTabbedPane, locationPanel);
-        if (!want) {
-            if (viewerRightTabs != null && viewerRightTabs.getTabCount() == 1
-                    && histogramPanel != null && scatterPanel != null) {
-                viewerRightTabs.addTab("Hist", histogramPanel);
-                viewerRightTabs.addTab("Scatter", scatterPanel);
-            }
-            if (leftPanelContainer != null && excelPane != null && isMainViewerTabSelected(mainTabbedPane)) {
-                if (leftPanelContainer.getComponentCount() != 1
-                        || leftPanelContainer.getComponent(0) != excelPane) {
-                    leftPanelContainer.removeAll();
-                    leftPanelContainer.add(excelPane, BorderLayout.CENTER);
-                    leftPanelContainer.revalidate();
-                    leftPanelContainer.repaint();
-                }
-            }
-            if (mainSplit != null) {
-                int divSz = defaultMainSplitDividerSize[0] > 0 ? defaultMainSplitDividerSize[0] : 5;
-                mainSplit.setDividerSize(divSz);
-            }
-            if (synMainSplitBackup[0] >= 50) {
-                dividerLocationByTab[1] = synMainSplitBackup[0];
-                synMainSplitBackup[0] = -1;
-            }
-            return;
-        }
-        if (leftPanelContainer != null) {
-            if (leftPanelContainer.getComponentCount() > 0) {
-                leftPanelContainer.removeAll();
-                leftPanelContainer.revalidate();
-                leftPanelContainer.repaint();
-            }
-        }
-        if (viewerRightTabs != null) {
-            while (viewerRightTabs.getTabCount() > 1) {
-                viewerRightTabs.removeTabAt(viewerRightTabs.getTabCount() - 1);
-            }
-            viewerRightTabs.setSelectedIndex(0);
-        }
-        if (mainSplit != null) {
-            if (mainSplit.getDividerSize() > 0) {
-                defaultMainSplitDividerSize[0] = mainSplit.getDividerSize();
-            }
-            int loc = mainSplit.getDividerLocation();
-            if (loc > 30) {
-                synMainSplitBackup[0] = loc;
-            }
-            mainSplit.setDividerSize(0);
-            mainSplit.setDividerLocation(0);
-        }
-    }
-    
     /**
      * Debounces repaint for one or more panels (at most once per {@link #REPAINT_DEBOUNCE_MS}).
      */
@@ -146,388 +138,506 @@ public class XTreLocGUI {
         };
     }
 
-    /**
-     * Narrow vertical strip with main section icons; drives {@code mainTabbedPane} indices (tabs stay off-screen).
-     */
-    private static JPanel createMainNavigationStrip(
-            com.treloc.xtreloc.app.gui.view.MicrosoftStyleTabbedPane mainTabbedPane) {
-        JPanel strip = new JPanel();
-        strip.setLayout(new BoxLayout(strip, BoxLayout.Y_AXIS));
-        strip.setOpaque(true);
-        AppPanelStyle.setPanelBackground(strip);
-        strip.setBorder(BorderFactory.createMatteBorder(0, 0, 0, 1, new Color(55, 55, 68)));
-        Dimension wdim = new Dimension(MAIN_NAV_STRIP_WIDTH, 0);
-        strip.setMinimumSize(wdim);
-        strip.setPreferredSize(new Dimension(MAIN_NAV_STRIP_WIDTH, 320));
-        strip.setMaximumSize(new Dimension(MAIN_NAV_STRIP_WIDTH, Integer.MAX_VALUE));
-
-        ButtonGroup navGroup = new ButtonGroup();
-        String[][] items = {
-            {"Solver.png", "Solver"},
-            {"Viewer.png", "Viewer"},
-            {"Picking.png", "Picking"},
-            {"Settings.png", "Settings"},
-        };
-        strip.add(Box.createVerticalStrut(10));
-        JToggleButton firstNav = null;
-        for (int i = 0; i < items.length; i++) {
-            ImageIcon raw = BundledImageLoader.loadImageIcon(items[i][0]);
-            Icon icon = raw;
-            if (raw != null && raw.getIconWidth() > 0) {
-                Image img = raw.getImage().getScaledInstance(
-                    MAIN_NAV_ICON_SIZE, MAIN_NAV_ICON_SIZE, Image.SCALE_SMOOTH);
-                icon = new ImageIcon(img);
-            }
-            JToggleButton b = new JToggleButton(icon);
-            b.setToolTipText(items[i][1]);
-            b.setHorizontalAlignment(SwingConstants.CENTER);
-            b.setFocusPainted(false);
-            b.setAlignmentX(Component.CENTER_ALIGNMENT);
-            int ph = MAIN_NAV_ICON_SIZE + 16;
-            b.setPreferredSize(new Dimension(MAIN_NAV_STRIP_WIDTH, ph));
-            b.setMaximumSize(new Dimension(MAIN_NAV_STRIP_WIDTH, ph));
-            b.setMargin(new Insets(6, 4, 6, 4));
-            final int tabIndex = i;
-            b.addActionListener(ev -> {
-                if (!b.isSelected()) {
-                    b.setSelected(true);
-                }
-                mainTabbedPane.setSelectedIndex(tabIndex);
-            });
-            navGroup.add(b);
-            strip.add(b);
-            if (firstNav == null) {
-                firstNav = b;
-            }
-            if (i < items.length - 1) {
-                strip.add(Box.createVerticalStrut(6));
-            }
-        }
-        strip.add(Box.createVerticalGlue());
-        mainTabbedPane.setSelectedIndex(0);
-        if (firstNav != null) {
-            firstNav.setSelected(true);
-        }
-        return strip;
-    }
-
     public static void main(String[] args) throws Exception {
-        com.treloc.xtreloc.app.gui.util.AppSettings appSettings = null;
+        AppSettings appSettings = null;
         try {
-            appSettings = com.treloc.xtreloc.app.gui.util.AppSettings.load();
-        } catch (Exception e) {
+            appSettings = AppSettings.load();
+        }
+        catch (Exception e) {
             logger.log(Level.FINE, "Could not load settings, using defaults: " + e.getMessage());
         }
         try {
-            File logFile = com.treloc.xtreloc.app.gui.util.LogHistoryManager.getLogFile();
+            File logFile = LogHistoryManager.getLogFile();
             if (appSettings != null) {
-                com.treloc.xtreloc.util.LogInitializer.setup(
-                    logFile.getAbsolutePath(),
-                    java.util.logging.Level.INFO,
-                    appSettings.getLogLimitBytes(),
-                    appSettings.getLogCount()
-                );
+                LogInitializer.setup(logFile.getAbsolutePath(), Level.INFO, appSettings.getLogLimitBytes(), appSettings.getLogCount());
             } else {
-                com.treloc.xtreloc.util.LogInitializer.setup(
-                    logFile.getAbsolutePath(),
-                    java.util.logging.Level.INFO
-                );
+                LogInitializer.setup(logFile.getAbsolutePath(), Level.INFO);
             }
-            java.util.logging.Logger logger = java.util.logging.Logger.getLogger("com.treloc.xtreloc");
+            Logger logger = Logger.getLogger("com.treloc.xtreloc");
             logger.info("========================================");
             logger.info("xTreLoc application started");
             logger.info("Log file: " + logFile.getAbsolutePath());
             logger.info("========================================");
-        } catch (Exception e) {
+        }
+        catch (Exception e) {
             logger.log(Level.SEVERE, "Failed to initialize logging: " + e.getMessage(), e);
         }
-        
-        final com.treloc.xtreloc.app.gui.util.AppSettings appSettingsForUI =
-            (appSettings != null) ? appSettings : com.treloc.xtreloc.app.gui.util.AppSettings.load();
+        AppSettings appSettingsForUI = appSettings != null ? appSettings : AppSettings.load();
         String theme = appSettingsForUI.getTheme();
         if (theme != null) {
-            applyTheme(theme);
+            XTreLocGUI.applyTheme(theme);
         }
-
         SwingUtilities.invokeLater(() -> {
             try {
-                String version = com.treloc.xtreloc.app.gui.util.VersionInfo.getVersion();
-                JFrame mainFrame = new JFrame("xTreLoc " + version);
-                mainFrame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+                String oneLine;
+                String version = VersionInfo.getVersion();
+                final JFrame mainFrame = new JFrame("xTreLoc " + version);
+                mainFrame.setDefaultCloseOperation(0);
                 mainFrame.setLayout(new BorderLayout());
-                
                 try {
-                    java.awt.Image logoImg = com.treloc.xtreloc.app.gui.util.BundledImageLoader.loadImage("logo.png");
+                    Image logoImg = BundledImageLoader.loadImage("logo.png");
                     if (logoImg != null) {
                         mainFrame.setIconImage(logoImg);
                     }
-                } catch (Exception e) {
+                }
+                catch (Exception e) {
                     logger.log(Level.WARNING, "Failed to load logo: " + e.getMessage(), e);
                 }
-                
                 MapView view = new MapView();
                 MapController ctrl = new MapController(view);
-                
-                applyAppSettings(appSettingsForUI, mainFrame, view);
-                checkForUpdatesAsync(appSettingsForUI, mainFrame);
-                
-                com.treloc.xtreloc.io.AppConfig config = null;
-                Throwable startupConfigLoadFailure = null;
+                XTreLocGUI.applyAppSettings(appSettingsForUI, mainFrame, view);
+                XTreLocGUI.checkForUpdatesAsync(appSettingsForUI, mainFrame);
+                AppConfig config = null;
+                Exception startupConfigLoadFailure = null;
                 try {
-                    com.treloc.xtreloc.io.ConfigLoader loader =
-                        new com.treloc.xtreloc.io.ConfigLoader("config.json");
+                    ConfigLoader loader = new ConfigLoader("config.json");
                     config = loader.getConfig();
-                } catch (Exception e) {
+                }
+                catch (Exception e) {
                     startupConfigLoadFailure = e;
                     logger.log(Level.FINE, "Startup config.json not loaded (GUI continues without default file).", e);
-                    String oneLine = e.getMessage() != null
-                        ? e.getMessage().replace('\n', ' ').trim()
-                        : e.toString();
-                    logger.log(Level.INFO, "Startup: could not load config.json — " + oneLine);
+                    oneLine = e.getMessage() != null ? e.getMessage().replace('\n', ' ').trim() : e.toString();
+                    logger.log(Level.INFO, "Startup: could not load config.json \u2014 " + oneLine);
                 }
-
-                com.treloc.xtreloc.app.gui.view.HypocenterLocationPanel locationPanel =
-                    new com.treloc.xtreloc.app.gui.view.HypocenterLocationPanel(view);
+                final HypocenterLocationPanel locationPanel = new HypocenterLocationPanel(view);
                 GuiExecutionLog.setSink(locationPanel::appendExecutionLog);
                 if (startupConfigLoadFailure != null) {
-                    String oneLine = startupConfigLoadFailure.getMessage() != null
-                        ? startupConfigLoadFailure.getMessage().replace('\n', ' ').trim()
-                        : startupConfigLoadFailure.toString();
+                    oneLine = startupConfigLoadFailure.getMessage() != null ? startupConfigLoadFailure.getMessage().replace('\n', ' ').trim() : startupConfigLoadFailure.toString();
                     GuiExecutionLog.warning("Startup: default config.json was not loaded. " + oneLine);
                 }
                 if (config != null) {
                     locationPanel.setConfig(config);
                 }
-                javax.swing.JComponent solverLeftPanel = locationPanel.getLeftPanel();
-                
-                com.treloc.xtreloc.app.gui.view.DataViewPanel dataViewPanel = 
-                    new com.treloc.xtreloc.app.gui.view.DataViewPanel(view, ctrl);
-                JTabbedPane excelPane = dataViewPanel.getTabbedPane();
-                JMapFrame mapFrame = view.getFrame();
-                
-                com.treloc.xtreloc.app.gui.view.TravelTimeDataPanel travelTimeDataPanel = 
-                    new com.treloc.xtreloc.app.gui.view.TravelTimeDataPanel();
-                
-                com.treloc.xtreloc.app.gui.view.CatalogTablePanel catalogPanel = 
-                    dataViewPanel.getCatalogPanel();
-                catalogPanel.setTravelTimeDataPanel(travelTimeDataPanel);
+                JComponent solverLeftPanel = locationPanel.getLeftPanel();
+                ReportPanel reportPanel = new ReportPanel(view);
+                final TraceProcessingPanel traceProcessingPanel = new TraceProcessingPanel();
+                PickViewerPanel pickViewerPanel = new PickViewerPanel();
+                SacWorkbenchPanel sacWorkbenchPanel = new SacWorkbenchPanel(pickViewerPanel, traceProcessingPanel, false);
+                AssociationModel associationModel = new AssociationModel();
+                AssociatePanel associatePanel = new AssociatePanel(pickViewerPanel.pickPool(), associationModel, Preferences.userNodeForPackage(AssociatePanel.class));
+                AssociationResultPanel resultPanel = new AssociationResultPanel(associationModel);
+                AbsoluteExportPanel exportPanel = new AbsoluteExportPanel(pickViewerPanel.pickPool(), associationModel);
+                VelocityViewerPanel velocityViewerPanel = new VelocityViewerPanel(view);
+                ModelSetupPanel modelSetupPanel = new ModelSetupPanel(view, ctrl, velocityViewerPanel);
+                CatalogTablePanel catalogPanel = modelSetupPanel.getCatalogPanel();
                 locationPanel.setSolverResultCatalogPanel(catalogPanel);
-                
-                com.treloc.xtreloc.app.gui.view.ReportPanel reportPanel = 
-                    new com.treloc.xtreloc.app.gui.view.ReportPanel(view);
-                
-                com.treloc.xtreloc.app.gui.view.SettingsPanel settingsPanel =
-                    new com.treloc.xtreloc.app.gui.view.SettingsPanel(view);
-                
-                com.treloc.xtreloc.app.gui.view.WaveformPickingPanel pickingPanel = 
-                    new com.treloc.xtreloc.app.gui.view.WaveformPickingPanel();
-                
-                catalogPanel.addCatalogLoadListener(hypocenters -> {
-                    reportPanel.setHypocenters(hypocenters);
-                });
-                
+                catalogPanel.addCatalogLoadListener(hypocenters -> reportPanel.setHypocenters(hypocenters));
+                modelSetupPanel.insertSolverTab(solverLeftPanel);
+                Map2DPanel map2dPanel = new Map2DPanel(view, velocityViewerPanel);
+                velocityViewerPanel.addVolumeListener(map2dPanel::syncVolume);
                 JTabbedPane viewerRightTabs = new JTabbedPane();
                 viewerRightTabs.setBackground(AppPanelStyle.getPanelBg());
                 viewerRightTabs.setForeground(AppPanelStyle.getContentTextColor());
-                viewerRightTabs.setMinimumSize(new java.awt.Dimension(0, 0));
-                JPanel mapTabContent = new JPanel(new BorderLayout());
-                AppPanelStyle.setPanelBackground(mapTabContent);
-                mapTabContent.add(view.getMapTopPanel(), BorderLayout.NORTH);
-                mapTabContent.add(mapFrame.getContentPane(), BorderLayout.CENTER);
-                viewerRightTabs.addTab("Map", mapTabContent);
-                
-                JPanel histogramPanel = createHistogramPanel(catalogPanel, view);
+                viewerRightTabs.setMinimumSize(new Dimension(0, 0));
+                viewerRightTabs.addTab("2D map", map2dPanel.getComponent());
+                viewerRightTabs.addTab("3D map", velocityViewerPanel.getComponent());
+                viewerRightTabs.addChangeListener(ev -> {
+                    Component sel = viewerRightTabs.getSelectedComponent();
+                    if (sel == velocityViewerPanel.getComponent() || sel == map2dPanel.getComponent()) {
+                        velocityViewerPanel.ensureLoaded();
+                    }
+                });
+                JPanel histogramPanel = XTreLocGUI.createHistogramPanel(catalogPanel, view);
                 viewerRightTabs.addTab("Hist", histogramPanel);
-                
-                JPanel scatterPanel = createScatterPanel(catalogPanel, view);
+                JPanel scatterPanel = XTreLocGUI.createScatterPanel(catalogPanel, view);
                 viewerRightTabs.addTab("Scatter", scatterPanel);
-                
-                Runnable screeningRepaint = debouncedRepaint(histogramPanel, scatterPanel);
-                catalogPanel.addScreeningChangeListener(screeningRepaint);
-                
-                JPanel viewerRightPanel = new JPanel(new BorderLayout());
-                AppPanelStyle.setPanelBackground(viewerRightPanel);
-                viewerRightPanel.add(viewerRightTabs, BorderLayout.CENTER);
-                viewerRightPanel.setMinimumSize(new java.awt.Dimension(0, 0));
-                
-                com.treloc.xtreloc.app.gui.view.MicrosoftStyleTabbedPane mainTabbedPane = 
-                    new com.treloc.xtreloc.app.gui.view.MicrosoftStyleTabbedPane();
-                
                 JPanel solverLogPanel = locationPanel.getLogPanel();
                 JPanel solverConvergencePanel = locationPanel.getConvergenceDockPanel();
-                
+                JComponent residualChrome = XTreLocGUI.wrapResidualChrome(solverConvergencePanel, locationPanel);
+                viewerRightTabs.addTab("Residual", residualChrome);
+                Runnable screeningRepaint = XTreLocGUI.debouncedRepaint(histogramPanel, scatterPanel);
+                catalogPanel.addScreeningChangeListener(screeningRepaint);
+                JPanel viewerRightPanel = new JPanel(new BorderLayout());
+                AppPanelStyle.setPanelBackground(viewerRightPanel);
+                viewerRightPanel.add((Component)viewerRightTabs, "Center");
+                viewerRightPanel.setMinimumSize(new Dimension(0, 0));
                 JPanel executionDock = new JPanel(new BorderLayout());
                 AppPanelStyle.setPanelBackground(executionDock);
-                executionDock.add(solverLogPanel, BorderLayout.CENTER);
-                executionDock.setPreferredSize(new java.awt.Dimension(0, 220));
-                
+                executionDock.add((Component)solverLogPanel, "Center");
+                executionDock.setPreferredSize(new Dimension(0, 220));
                 JPanel leftPanelContainer = new JPanel(new BorderLayout());
                 AppPanelStyle.setPanelBackground(leftPanelContainer);
-                leftPanelContainer.add(solverLeftPanel, BorderLayout.CENTER);
-                
+                leftPanelContainer.add((Component)modelSetupPanel, "Center");
                 JPanel rightPanelContainer = new JPanel(new BorderLayout());
-                rightPanelContainer.setOpaque(true);
-                rightPanelContainer.setBackground(SOLVER_RIGHT_PANE_BG);
-                rightPanelContainer.add(solverConvergencePanel, BorderLayout.CENTER);
-                rightPanelContainer.setMinimumSize(new java.awt.Dimension(280, 0));
-                
-                mainTabbedPane.addTab("Solver", new JPanel());
-                mainTabbedPane.addTab("Viewer", new JPanel());
-                mainTabbedPane.addTab("Picking", new JPanel());
-                mainTabbedPane.addTab("Settings", new JPanel());
-                
+                AppPanelStyle.setPanelBackground(rightPanelContainer);
+                rightPanelContainer.add((Component)viewerRightPanel, "Center");
+                rightPanelContainer.setMinimumSize(new Dimension(280, 0));
                 JPanel leftSidePanel = new JPanel(new BorderLayout());
                 AppPanelStyle.setPanelBackground(leftSidePanel);
-                leftSidePanel.add(leftPanelContainer, BorderLayout.CENTER);
-                leftSidePanel.setMinimumSize(new java.awt.Dimension(200, 0));
-                
-                JSplitPane mainSplit = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT,
-                    leftSidePanel, rightPanelContainer);
+                leftSidePanel.add((Component)leftPanelContainer, "Center");
+                leftSidePanel.setMinimumSize(new Dimension(200, 0));
+                JSplitPane mainSplit = new JSplitPane(1, leftSidePanel, rightPanelContainer);
                 mainSplit.setResizeWeight(0.3);
                 mainSplit.setOneTouchExpandable(true);
                 mainSplit.setDividerLocation(500);
                 mainSplit.setBackground(AppPanelStyle.getPanelBg());
-
-                JPanel navStrip = createMainNavigationStrip(mainTabbedPane);
-                JSplitPane iconSplit = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT, navStrip, mainSplit);
-                iconSplit.setResizeWeight(0.0);
-                iconSplit.setContinuousLayout(true);
-                iconSplit.setEnabled(false);
-                iconSplit.setOneTouchExpandable(false);
-                iconSplit.setDividerSize(0);
-                iconSplit.setBackground(AppPanelStyle.getPanelBg());
-                
-                final JSplitPane rootVertical = new JSplitPane(JSplitPane.VERTICAL_SPLIT, iconSplit, executionDock);
+                NavigationPanel navigator = new NavigationPanel();
+                for (String waveformPage : NavigationPanel.PAGES) {
+                    if (!NavigationPanel.isWaveformPage(waveformPage)) continue;
+                    navigator.setContext(waveformPage, pickViewerPanel.getBrowserPanel());
+                }
+                JSplitPane navSplit = new JSplitPane(1, navigator, mainSplit);
+                navSplit.setResizeWeight(0.0);
+                navSplit.setContinuousLayout(true);
+                navSplit.setOneTouchExpandable(true);
+                navSplit.setBackground(AppPanelStyle.getPanelBg());
+                JSplitPane rootVertical = new JSplitPane(0, navSplit, executionDock);
                 rootVertical.setResizeWeight(0.82);
                 rootVertical.setOneTouchExpandable(true);
                 rootVertical.setBackground(AppPanelStyle.getPanelBg());
-                final int[] dividerLocationByTab = { 500, 500, 500 };
-                final int[] previousTabIndex = { 0 };
-                final int[] synMainSplitBackup = { -1 };
-                final int[] defaultMainSplitDividerSize = { 5 };
-                {
-                    int ds0 = UIManager.getInt("SplitPane.dividerSize");
-                    if (ds0 > 0) {
-                        defaultMainSplitDividerSize[0] = ds0;
+                MainCommands commands = new MainCommands();
+                PageToolBar pageToolBar = new PageToolBar();
+                MainStatusBar statusBar = new MainStatusBar();
+                JPanel centerHost = new JPanel(new BorderLayout());
+                AppPanelStyle.setPanelBackground(centerHost);
+                int[] layoutState = new int[]{170, -1};
+                boolean[] visible = new boolean[]{true, true};
+                Runnable rebuildCenter = () -> {
+                    JSplitPane upper;
+                    if (navSplit.getDividerLocation() > 20 && visible[0]) {
+                        layoutState[0] = navSplit.getDividerLocation();
                     }
-                }
-
-                mainTabbedPane.addChangeListener(e -> {
-                    int selectedIndex = mainTabbedPane.getSelectedIndex();
-                    String selectedTitle = selectedIndex >= 0 ? mainTabbedPane.getTitleAt(selectedIndex) : "";
-                    int prev = previousTabIndex[0];
-
-                    if (prev >= 0 && prev <= 2) {
-                        if (prev == 1) {
-                            int loc = mainSplit.getDividerLocation();
-                            if (loc >= 50) {
-                                dividerLocationByTab[1] = loc;
-                            }
-                        } else {
-                            dividerLocationByTab[prev] = mainSplit.getDividerLocation();
-                        }
+                    if (visible[1] && rootVertical.getHeight() > 100) {
+                        layoutState[1] = rootVertical.getDividerLocation();
                     }
-                    previousTabIndex[0] = selectedIndex;
-
-                    if ("Settings".equalsIgnoreCase(selectedTitle)) {
-                        mainSplit.setDividerLocation(1.0);
+                    centerHost.removeAll();
+                    if (visible[0]) {
+                        navSplit.setLeftComponent(navigator);
+                        navSplit.setRightComponent(mainSplit);
+                        upper = navSplit;
                     } else {
-                        final int saved = (selectedIndex >= 0 && selectedIndex <= 2) ? dividerLocationByTab[selectedIndex] : 500;
-                        SwingUtilities.invokeLater(() -> {
-                            updateViewerSynMapOnlyUi(locationPanel, mainTabbedPane, leftPanelContainer, excelPane,
-                                viewerRightTabs, histogramPanel, scatterPanel, mainSplit, dividerLocationByTab,
-                                synMainSplitBackup, defaultMainSplitDividerSize);
-                            if (isViewerSynMapOnly(mainTabbedPane, locationPanel)) {
-                                return;
-                            }
-                            int maxLoc = Math.max(200, mainSplit.getSize().width - 50);
-                            mainSplit.setDividerLocation(Math.min(Math.max(200, saved), maxLoc));
-                        });
+                        navSplit.remove(mainSplit);
+                        upper = mainSplit;
                     }
-
-                    leftPanelContainer.removeAll();
-                    if ("Solver".equalsIgnoreCase(selectedTitle)) {
-                        leftPanelContainer.add(solverLeftPanel, BorderLayout.CENTER);
-                    } else if ("Viewer".equalsIgnoreCase(selectedTitle)) {
-                        leftPanelContainer.add(excelPane, BorderLayout.CENTER);
-                    } else if ("Picking".equalsIgnoreCase(selectedTitle)) {
-                        leftPanelContainer.add(pickingPanel.getLeftPanel(), BorderLayout.CENTER);
-                    } else if ("Settings".equalsIgnoreCase(selectedTitle)) {
-                        JPanel settingsWrapper = new JPanel(new BorderLayout());
-                        AppPanelStyle.setPanelBackground(settingsWrapper);
-                        settingsWrapper.add(settingsPanel, BorderLayout.CENTER);
-                        leftPanelContainer.add(settingsWrapper, BorderLayout.CENTER);
+                    if (visible[1]) {
+                        rootVertical.setTopComponent(upper);
+                        rootVertical.setBottomComponent(executionDock);
+                        centerHost.add((Component)rootVertical, "Center");
+                    } else {
+                        rootVertical.remove(upper);
+                        centerHost.add((Component)upper, "Center");
                     }
-                    leftPanelContainer.revalidate();
-                    leftPanelContainer.repaint();
-                    
-                    rightPanelContainer.removeAll();
-                    if ("Solver".equalsIgnoreCase(selectedTitle)) {
-                        rightPanelContainer.setOpaque(true);
-                        rightPanelContainer.setBackground(SOLVER_RIGHT_PANE_BG);
-                        rightPanelContainer.add(solverConvergencePanel, BorderLayout.CENTER);
-                    } else if ("Viewer".equalsIgnoreCase(selectedTitle)) {
-                        AppPanelStyle.setPanelBackground(rightPanelContainer);
-                        rightPanelContainer.add(viewerRightPanel, BorderLayout.CENTER);
-                    } else if ("Picking".equalsIgnoreCase(selectedTitle)) {
-                        AppPanelStyle.setPanelBackground(rightPanelContainer);
-                        rightPanelContainer.add(pickingPanel.getRightPanel(), BorderLayout.CENTER);
-                    } else if ("Settings".equalsIgnoreCase(selectedTitle)) {
-                        AppPanelStyle.setPanelBackground(rightPanelContainer);
-                        rightPanelContainer.add(createThemedPanel(), BorderLayout.CENTER);
-                    }
-                    rightPanelContainer.revalidate();
-                    rightPanelContainer.repaint();
-                });
-
-                locationPanel.addSolverModeChangeListener(() -> {
-                    if (!isMainViewerTabSelected(mainTabbedPane)) {
-                        return;
-                    }
+                    centerHost.revalidate();
+                    centerHost.repaint();
                     SwingUtilities.invokeLater(() -> {
-                        updateViewerSynMapOnlyUi(locationPanel, mainTabbedPane, leftPanelContainer, excelPane,
-                            viewerRightTabs, histogramPanel, scatterPanel, mainSplit, dividerLocationByTab,
-                            synMainSplitBackup, defaultMainSplitDividerSize);
-                        if (isViewerSynMapOnly(mainTabbedPane, locationPanel)) {
-                            return;
+                        if (visible[0]) {
+                            navSplit.setDividerLocation(layoutState[0]);
                         }
+                        if (visible[1] && layoutState[1] > 0) {
+                            rootVertical.setDividerLocation(layoutState[1]);
+                        }
+                    });
+                };
+                Supplier<List<CatalogInfo>> loadedCatalogs = catalogPanel::getCatalogInfos;
+                pickViewerPanel.setCatalogsSupplier(loadedCatalogs);
+                pickViewerPanel.setRelocateHandler(new WorkingRelocationController(locationPanel::buildSolverConfig, locationPanel::getSolverModeAbbreviation, loadedCatalogs, WorkingLayer.getInstance()));
+                centerHost.add((Component)rootVertical, "Center");
+                mainFrame.setJMenuBar(AppMenuBar.create(commands));
+                mainFrame.add((Component)pageToolBar, "North");
+                mainFrame.add((Component)centerHost, "Center");
+                mainFrame.add((Component)statusBar, "South");
+                ViewerStatusBar.setRootFrame(mainFrame);
+                String modelPage = "Model";
+                String pickPage = "Pick";
+                pageToolBar.addButton(modelPage, commands.openCatalog);
+                pageToolBar.addButton(pickPage, commands.openSacFolder);
+                pageToolBar.addButton(pickPage, commands.exportPicks);
+                pageToolBar.addSeparator(pickPage);
+                JComboBox<String> toolbarMethod = new JComboBox<String>(pickViewerPanel.autoMethodModel());
+                toolbarMethod.setFocusable(false);
+                toolbarMethod.setToolTipText("Auto-pick method");
+                pageToolBar.addLabeledCombo(pickPage, "Auto-pick", toolbarMethod);
+                pageToolBar.addButton(pickPage, commands.runAutoPick);
+                pageToolBar.addButton(pickPage, commands.pickAllToPool);
+                pageToolBar.addButton(pickPage, commands.applyAll);
+                pageToolBar.addButton(pickPage, commands.discard);
+                pageToolBar.addSeparator(pickPage);
+                pageToolBar.addButton(pickPage, commands.undo);
+                pageToolBar.addButton(pickPage, commands.redo);
+                pageToolBar.addSeparator(pickPage);
+                pageToolBar.addButton(pickPage, commands.relocate);
+                pageToolBar.addButton("Associate", commands.runAssociate);
+                pageToolBar.addButton("Associate", commands.addToMap);
+                pageToolBar.addButton("Export", commands.exportAbsolute);
+                pageToolBar.addButton("Function", commands.openSacFolder);
+                pageToolBar.addButton("Xcorr", commands.openSacFolder);
+                pageToolBar.addGlobalButton(commands.openSettings);
+                String[] currentPage = new String[]{modelPage};
+                HashMap<String, Integer> dividerOfPage = new HashMap<>();
+                Consumer<String> showPage = page -> {
+                    JPanel left;
+                    dividerOfPage.put(currentPage[0], mainSplit.getDividerLocation());
+                    currentPage[0] = page;
+                    int saved = dividerOfPage.getOrDefault(page, 500);
+                    SwingUtilities.invokeLater(() -> {
                         int maxLoc = Math.max(200, mainSplit.getSize().width - 50);
-                        int saved = dividerLocationByTab[1];
                         mainSplit.setDividerLocation(Math.min(Math.max(200, saved), maxLoc));
                     });
+                    JPanel right = switch (page) {
+                        case "Pick" -> {
+                            pickViewerPanel.setMode(PickViewerPanel.Mode.ABSOLUTE);
+                            left = sacWorkbenchPanel;
+                            yield pickViewerPanel.getRightPanel();
+                        }
+                        case "Function", "Xcorr" -> {
+                            pickViewerPanel.setMode(PickViewerPanel.Mode.CORRELATION);
+                            pickViewerPanel.showCorrelationTab("Xcorr".equals(page));
+                            left = sacWorkbenchPanel;
+                            yield pickViewerPanel.getRightPanel();
+                        }
+                        case "Associate" -> {
+                            left = associatePanel;
+                            yield resultPanel;
+                        }
+                        case "Export" -> {
+                            left = exportPanel;
+                            yield resultPanel;
+                        }
+                        default -> {
+                            left = modelSetupPanel;
+                            yield viewerRightPanel;
+                        }
+                    };
+                    leftPanelContainer.removeAll();
+                    leftPanelContainer.add((Component)left, "Center");
+                    leftPanelContainer.revalidate();
+                    leftPanelContainer.repaint();
+                    rightPanelContainer.removeAll();
+                    rightPanelContainer.add((Component)right, "Center");
+                    rightPanelContainer.revalidate();
+                    rightPanelContainer.repaint();
+                    String group = NavigationPanel.groupOf(page);
+                    navigator.selectPage((String)page);
+                    commands.showPage((String)page, pickViewerPanel);
+                    pageToolBar.showPage((String)page);
+                    statusBar.setPage((String)(group == null ? page : group + " \u203a " + page));
+                };
+                navigator.setPageListener(showPage);
+                map2dPanel.setSeismicOpener((focus, folders, others) -> {
+                    showPage.accept("Pick");
+                    pickViewerPanel.openEvent(focus, folders, others);
                 });
-                
-                mainFrame.add(rootVertical, BorderLayout.CENTER);
-                ViewerStatusBar.setRootFrame(mainFrame);
-
+                Runnable syncPickState = () -> {
+                    commands.showPage(currentPage[0], pickViewerPanel);
+                    int[] n = pickViewerPanel.pickCounts();
+                    statusBar.setPicks(n[0], n[1]);
+                    EventKey ev = pickViewerPanel.getCurrentEvent();
+                    statusBar.setEvent(ev == null ? null : ev.time());
+                };
+                pickViewerPanel.addStateListener(syncPickState);
+                pickViewerPanel.addStatusListener(statusBar::setMessage);
+                commands.pages.forEach((name, command) -> command.on(() -> showPage.accept((String)name)));
+                associatePanel.setStatusSink(statusBar::setMessage);
+                exportPanel.setStatusSink(statusBar::setMessage);
+                associatePanel.setBusyListener(() -> SwingUtilities.invokeLater(() -> commands.runAssociate.setEnabled(!associatePanel.isBusy())));
+                commands.runAssociate.on(associatePanel::runNow);
+                commands.exportAbsolute.on(exportPanel::exportNow);
+                commands.addToMap.on(resultPanel::addToMap);
+                resultPanel.setMapHandler(events -> {
+                    catalogPanel.addCatalogFromHypocenters(RealResultWriter.toHypocenters(events), "REAL", null);
+                    showPage.accept(modelPage);
+                });
+                associationModel.addListener(m -> SwingUtilities.invokeLater(() -> commands.addToMap.setEnabled(!m.events().isEmpty())));
+                JDialog[] settingsWindow = new JDialog[]{null};
+                commands.openSettings.on(() -> {
+                    if (settingsWindow[0] == null) {
+                        JDialog d = new JDialog((Frame)mainFrame, "Settings");
+                        d.setContentPane(new SettingsPanel(view));
+                        d.setDefaultCloseOperation(1);
+                        d.pack();
+                        d.setSize(Math.max(d.getWidth(), 820), Math.max(d.getHeight(), 600));
+                        d.setLocationRelativeTo(mainFrame);
+                        settingsWindow[0] = d;
+                    }
+                    settingsWindow[0].setVisible(true);
+                    settingsWindow[0].toFront();
+                });
+                WorkingLayer workingLayer = WorkingLayer.getInstance();
+                commands.clearWorking.on(workingLayer::clear);
+                workingLayer.addListener(layer -> SwingUtilities.invokeLater(() -> commands.clearWorking.setEnabled(layer.size() > 0)));
+                commands.clearWorking.setEnabled(workingLayer.size() > 0);
+                commands.openSacFolder.on(pickViewerPanel::chooseInputRoot);
+                commands.openCatalog.on(() -> {
+                    showPage.accept(modelPage);
+                    catalogPanel.selectCatalogFile();
+                });
+                commands.exportPicks.on(pickViewerPanel::exportPicksNow);
+                commands.exit.on(() -> mainFrame.dispatchEvent(new WindowEvent(mainFrame, 201)));
+                commands.undo.on(pickViewerPanel::undoPick);
+                commands.redo.on(pickViewerPanel::redoPick);
+                commands.applyAll.on(pickViewerPanel::applyAllProposalsNow);
+                commands.discard.on(pickViewerPanel::discardProposalsNow);
+                commands.runAutoPick.on(pickViewerPanel::runAutoPickNow);
+                commands.pickAllToPool.on(pickViewerPanel::pickAllToPoolNow);
+                commands.relocate.on(pickViewerPanel::relocateNow);
+                commands.toggleNavigator.on(() -> {
+                    visible[0] = Boolean.TRUE.equals(commands.toggleNavigator.getValue("SwingSelectedKey"));
+                    rebuildCenter.run();
+                });
+                commands.toggleOutput.on(() -> {
+                    visible[1] = Boolean.TRUE.equals(commands.toggleOutput.getValue("SwingSelectedKey"));
+                    rebuildCenter.run();
+                });
+                commands.toggleStatusBar.on(() -> statusBar.setVisible(Boolean.TRUE.equals(commands.toggleStatusBar.getValue("SwingSelectedKey"))));
+                commands.resetLayout.on(() -> {
+                    visible[0] = true;
+                    visible[1] = true;
+                    layoutState[0] = 170;
+                    layoutState[1] = -1;
+                    commands.toggleNavigator.putValue("SwingSelectedKey", Boolean.TRUE);
+                    commands.toggleOutput.putValue("SwingSelectedKey", Boolean.TRUE);
+                    commands.toggleStatusBar.putValue("SwingSelectedKey", Boolean.TRUE);
+                    statusBar.setVisible(true);
+                    rebuildCenter.run();
+                    SwingUtilities.invokeLater(() -> {
+                        mainSplit.setDividerLocation(500);
+                        int rh = rootVertical.getHeight();
+                        if (rh > 100) {
+                            rootVertical.setDividerLocation((int)((double)rh * 0.78));
+                        }
+                    });
+                });
+                commands.checkUpdates.on(() -> XTreLocGUI.checkForUpdatesNow(mainFrame));
+                commands.about.on(() -> JOptionPane.showMessageDialog(mainFrame, "xTreLoc " + VersionInfo.getVersion(), "About xTreLoc", 1));
+                syncPickState.run();
+                showPage.accept(modelPage);
                 mainFrame.pack();
-                mainFrame.setSize(
-                    MainWindowSizePresets.clampWidth(appSettingsForUI.getMainWindowWidth()),
-                    MainWindowSizePresets.clampHeight(appSettingsForUI.getMainWindowHeight()));
+                mainFrame.setSize(MainWindowSizePresets.clampWidth(appSettingsForUI.getMainWindowWidth()), MainWindowSizePresets.clampHeight(appSettingsForUI.getMainWindowHeight()));
                 mainFrame.setLocationRelativeTo(null);
                 mainFrame.setVisible(true);
-                
                 SwingUtilities.invokeLater(() -> {
-                    iconSplit.setDividerLocation(MAIN_NAV_STRIP_WIDTH);
+                    navSplit.setDividerLocation(170);
                     mainSplit.setDividerLocation(500);
                     int rh = rootVertical.getHeight();
                     if (rh > 100) {
-                        rootVertical.setDividerLocation((int) (rh * 0.78));
+                        rootVertical.setDividerLocation((int)((double)rh * 0.78));
                     }
                 });
-                
-                mainFrame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+                mainFrame.setDefaultCloseOperation(0);
+                mainFrame.addWindowListener(new WindowAdapter(){
 
-            } catch (Exception e) {
+                    @Override
+                    public void windowClosing(WindowEvent e) {
+                        int choice;
+                        ArrayList<String> running = new ArrayList<String>();
+                        if (locationPanel.isBusy()) {
+                            running.add("Solver");
+                        }
+                        if (traceProcessingPanel.isBusy()) {
+                            running.add("Cross-corr pick");
+                        }
+                        if (!running.isEmpty() && (choice = JOptionPane.showConfirmDialog(mainFrame, "A process is still running (" + String.join((CharSequence)", ", running) + ").\nClosing the window will abort it. Do you want to quit anyway?", "Confirm Exit", 0, 2)) != 0) {
+                            return;
+                        }
+                        mainFrame.dispose();
+                        System.exit(0);
+                    }
+                });
+            }
+            catch (Exception e) {
                 logger.log(Level.SEVERE, "Error initializing GUI: " + e.getMessage(), e);
-                JOptionPane.showMessageDialog(null,
-                    "An error occurred: " + e.getMessage(),
-                    "Error",
-                    JOptionPane.ERROR_MESSAGE);
+                JOptionPane.showMessageDialog(null, "An error occurred: " + e.getMessage(), "Error", 0);
             }
         });
     }
-    
+
+    private static JPanel chartViewCard(ChartPlotOptions opt, Runnable repaint) {
+        JPanel p = new JPanel();
+        p.setLayout(new BoxLayout(p, BoxLayout.Y_AXIS));
+        p.setBackground(AppPanelStyle.getPanelBg());
+        p.setBorder(BorderFactory.createEmptyBorder(8, 10, 10, 10));
+        JCheckBox title = new JCheckBox("Title", opt.showTitle);
+        JCheckBox grid = new JCheckBox("Grid", opt.showGrid);
+        for (JCheckBox cb : new JCheckBox[] {title, grid}) {
+            cb.setBackground(AppPanelStyle.getPanelBg());
+            cb.setAlignmentX(Component.LEFT_ALIGNMENT);
+            p.add(cb);
+        }
+        title.addActionListener(e -> { opt.showTitle = title.isSelected(); repaint.run(); });
+        grid.addActionListener(e -> { opt.showGrid = grid.isSelected(); repaint.run(); });
+        return p;
+    }
+
+    private static JPanel chartToolsCard(ChartPlotOptions opt, Runnable repaint) {
+        JPanel p = new JPanel();
+        p.setLayout(new BoxLayout(p, BoxLayout.Y_AXIS));
+        p.setBackground(AppPanelStyle.getPanelBg());
+        p.setBorder(BorderFactory.createEmptyBorder(8, 10, 10, 10));
+        JCheckBox legend = new JCheckBox("Legend", opt.showLegend);
+        legend.setBackground(AppPanelStyle.getPanelBg());
+        legend.setAlignmentX(Component.LEFT_ALIGNMENT);
+        legend.addActionListener(e -> { opt.showLegend = legend.isSelected(); repaint.run(); });
+        p.add(legend);
+        return p;
+    }
+
+    private static JPanel chartExportCard(JPanel plot, JPanel dialogParent, Runnable resetZoom, String fileName) {
+        JPanel p = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 4));
+        p.setBackground(AppPanelStyle.getPanelBg());
+        JButton save = new JButton("Save PNG...");
+        save.addActionListener(e -> ChartImageExport.exportPanelToImage(plot, dialogParent, fileName));
+        JButton copy = new JButton("Copy");
+        copy.addActionListener(e -> ChartImageExport.copyPanelToClipboard(plot, dialogParent));
+        JButton reset = new JButton("Reset zoom");
+        reset.addActionListener(e -> resetZoom.run());
+        p.add(save);
+        p.add(copy);
+        p.add(reset);
+        return p;
+    }
+
+    private static JComponent wrapResidualChrome(JPanel residualHost,
+            com.treloc.xtreloc.app.gui.view.HypocenterLocationPanel locationPanel) {
+        JPanel view = new JPanel();
+        view.setLayout(new BoxLayout(view, BoxLayout.Y_AXIS));
+        view.setBackground(AppPanelStyle.getPanelBg());
+        view.setBorder(BorderFactory.createEmptyBorder(8, 10, 10, 10));
+        JCheckBox auto = new JCheckBox("Auto scale", true);
+        auto.setBackground(AppPanelStyle.getPanelBg());
+        auto.addActionListener(e -> {
+            if (locationPanel.getResidualPlotPanel() != null) {
+                locationPanel.getResidualPlotPanel().setAutoScale(auto.isSelected());
+            }
+        });
+        JButton clear = new JButton("Clear");
+        clear.addActionListener(e -> {
+            if (locationPanel.getResidualPlotPanel() != null) {
+                locationPanel.getResidualPlotPanel().clearData();
+            }
+        });
+        view.add(auto);
+        view.add(Box.createVerticalStrut(6));
+        view.add(clear);
+        JPanel tools = new JPanel();
+        tools.setLayout(new BoxLayout(tools, BoxLayout.Y_AXIS));
+        tools.setBackground(AppPanelStyle.getPanelBg());
+        tools.setBorder(BorderFactory.createEmptyBorder(8, 10, 10, 10));
+        JCheckBox legend = new JCheckBox("Legend", true);
+        legend.setBackground(AppPanelStyle.getPanelBg());
+        legend.addActionListener(e -> {
+            if (locationPanel.getResidualPlotPanel() != null) {
+                locationPanel.getResidualPlotPanel().setShowLegend(legend.isSelected());
+            }
+        });
+        tools.add(legend);
+        JPanel export = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 4));
+        export.setBackground(AppPanelStyle.getPanelBg());
+        JButton save = new JButton("Save PNG...");
+        save.addActionListener(e -> {
+            if (locationPanel.getResidualPlotPanel() != null) {
+                locationPanel.getResidualPlotPanel().exportChartImage();
+            }
+        });
+        export.add(save);
+        return com.treloc.xtreloc.app.gui.view.ViewerSideChrome.wrap(residualHost,
+            new com.treloc.xtreloc.app.gui.view.ViewerSideChrome.Item(
+                "View", com.treloc.xtreloc.app.gui.volume3d.Map3DIcons.Kind.VIEW, "Scale and clear", view),
+            new com.treloc.xtreloc.app.gui.view.ViewerSideChrome.Item(
+                "Tools", com.treloc.xtreloc.app.gui.volume3d.Map3DIcons.Kind.TOOLS, "Legend", tools),
+            new com.treloc.xtreloc.app.gui.view.ViewerSideChrome.Item(
+                "Export", com.treloc.xtreloc.app.gui.volume3d.Map3DIcons.Kind.EXPORT, "Export the plot", export));
+    }
+
     /**
      * Creates histogram panel (supports catalog comparison)
      */
@@ -536,6 +646,7 @@ public class XTreLocGUI {
         com.treloc.xtreloc.app.gui.util.AppPanelStyle.setPanelBackground(histogramPanelWrapper);
         histogramPanelWrapper.setBorder(com.treloc.xtreloc.app.gui.util.AppPanelStyle.createTitledSectionBorder("Histogram"));
         
+        final ChartPlotOptions plotOpt = new ChartPlotOptions();
         final Double[] zoomMin = { null }, zoomMax = { null };
         final HistChartBounds histBounds = new HistChartBounds();
         final int[] dragStart = { -1, -1 }, dragEnd = { -1, -1 };
@@ -544,7 +655,10 @@ public class XTreLocGUI {
             @Override
             protected void paintComponent(Graphics g) {
                 super.paintComponent(g);
-                drawHistogram(g, catalogPanel, mapView, zoomMin[0], zoomMax[0], histBounds);
+                ChartAppearanceSettings chart = AppSettingsCache.chartAppearance();
+                g.setColor(histScatterBackground(chart));
+                g.fillRect(0, 0, getWidth(), getHeight());
+                drawHistogram(g, catalogPanel, mapView, zoomMin[0], zoomMax[0], histBounds, plotOpt);
                 if (dragStart[0] >= 0 && dragEnd[0] >= 0 && g instanceof Graphics2D) {
                     Graphics2D g2 = (Graphics2D) g;
                     int x1 = Math.min(dragStart[0], dragEnd[0]);
@@ -640,8 +754,19 @@ public class XTreLocGUI {
         catalogPanel.addViewerChartChangeListener(histRepaint);
 
         histogramPanelWrapper.add(histogramPanel, BorderLayout.CENTER);
-        
-        return histogramPanelWrapper;
+        return (JPanel) com.treloc.xtreloc.app.gui.view.ViewerSideChrome.wrap(histogramPanelWrapper,
+            new com.treloc.xtreloc.app.gui.view.ViewerSideChrome.Item(
+                "View", com.treloc.xtreloc.app.gui.volume3d.Map3DIcons.Kind.VIEW, "Title and grid",
+                chartViewCard(plotOpt, histRepaint)),
+            new com.treloc.xtreloc.app.gui.view.ViewerSideChrome.Item(
+                "Style", com.treloc.xtreloc.app.gui.volume3d.Map3DIcons.Kind.TABLE, "Catalog colours",
+                new com.treloc.xtreloc.app.gui.view.ChartCatalogColorCard(catalogPanel, mapView, histRepaint)),
+            new com.treloc.xtreloc.app.gui.view.ViewerSideChrome.Item(
+                "Tools", com.treloc.xtreloc.app.gui.volume3d.Map3DIcons.Kind.TOOLS, "Legend",
+                chartToolsCard(plotOpt, histRepaint)),
+            new com.treloc.xtreloc.app.gui.view.ViewerSideChrome.Item(
+                "Export", com.treloc.xtreloc.app.gui.volume3d.Map3DIcons.Kind.EXPORT, "Save or copy",
+                chartExportCard(histogramPanel, histogramPanelWrapper, resetHistZoom, "histogram.png")));
     }
     
     /** Draws a vertical (90° CCW) axis label centered at (cx, cy). */
@@ -673,6 +798,22 @@ public class XTreLocGUI {
             return Color.BLACK;
         }
     }
+
+    /** Theme panel background unless the user set a custom Hist/Scatter plot color. */
+    private static Color histScatterBackground(ChartAppearanceSettings chart) {
+        if (chart == null) {
+            return AppPanelStyle.getPanelBg();
+        }
+        String hex = chart.getBackgroundColor();
+        if (hex == null) {
+            return AppPanelStyle.getPanelBg();
+        }
+        String t = hex.trim();
+        if (t.isEmpty() || "#FFFFFF".equalsIgnoreCase(t) || "#FFF".equalsIgnoreCase(t)) {
+            return AppPanelStyle.getPanelBg();
+        }
+        return parseChartColor(t);
+    }
     
     private static java.awt.Stroke gridStroke(ChartAppearanceSettings chart) {
         float w = chart.getGridlineWidth();
@@ -701,7 +842,8 @@ public class XTreLocGUI {
     }
     
     private static void drawHistogram(Graphics g, com.treloc.xtreloc.app.gui.view.CatalogTablePanel catalogPanel,
-                                     MapView mapView, Double zoomMin, Double zoomMax, HistChartBounds outBounds) {
+                                     MapView mapView, Double zoomMin, Double zoomMax, HistChartBounds outBounds,
+                                     ChartPlotOptions plotOpt) {
         if (outBounds != null) outBounds.chartWidth = 0;
         try {
             java.awt.Rectangle clip0 = g.getClipBounds();
@@ -756,7 +898,7 @@ public class XTreLocGUI {
             int chartHeight = height - 2 * margin - 60;
             
             Color gridColor = parseChartColor(chart.getGridlineColor());
-            if (g instanceof Graphics2D) {
+            if (plotOpt != null && plotOpt.showGrid && g instanceof Graphics2D) {
                 Graphics2D g2 = (Graphics2D) g;
                 java.awt.Stroke prev = g2.getStroke();
                 g2.setStroke(gridStroke(chart));
@@ -933,31 +1075,35 @@ public class XTreLocGUI {
                     Math.max(14, margin / 3), margin + chartHeight / 2);
             }
             
-            String title = selectedColumnName + " Histogram";
-            g.setFont(titleFont);
-            FontMetrics titleFm = g.getFontMetrics();
-            int titleWidth = titleFm.stringWidth(title);
-            g.drawString(title, (width - titleWidth) / 2, 20);
-            
-            g.setFont(legendFont);
-            int legendY = margin + chartHeight + 50;
-            int legendX = margin;
-            int legendItemHeight = 15;
-            
-            for (int i = 0; i < catalogInfoForValues.size(); i++) {
-                com.treloc.xtreloc.app.gui.model.CatalogInfo info = catalogInfoForValues.get(i);
-                Color catalogColor = catalogDrawColor(info);
-                
-                g.setColor(catalogColor);
-                g.fillRect(legendX, legendY, 15, 10);
-                
-                g.setColor(axisColor);
-                g.drawString(info.getName(), legendX + 20, legendY + 8);
-                
-                legendX += 120;
-                if (legendX + 120 > width - margin) {
-                    legendX = margin;
-                    legendY += legendItemHeight;
+            if (plotOpt == null || plotOpt.showTitle) {
+                String title = selectedColumnName + " Histogram";
+                g.setFont(titleFont);
+                FontMetrics titleFm = g.getFontMetrics();
+                int titleWidth = titleFm.stringWidth(title);
+                g.drawString(title, (width - titleWidth) / 2, 20);
+            }
+
+            if (plotOpt == null || plotOpt.showLegend) {
+                g.setFont(legendFont);
+                int legendY = margin + chartHeight + 50;
+                int legendX = margin;
+                int legendItemHeight = 15;
+
+                for (int i = 0; i < catalogInfoForValues.size(); i++) {
+                    com.treloc.xtreloc.app.gui.model.CatalogInfo info = catalogInfoForValues.get(i);
+                    Color catalogColor = catalogDrawColor(info);
+
+                    g.setColor(catalogColor);
+                    g.fillRect(legendX, legendY, 15, 10);
+
+                    g.setColor(axisColor);
+                    g.drawString(info.getName(), legendX + 20, legendY + 8);
+
+                    legendX += 120;
+                    if (legendX + 120 > width - margin) {
+                        legendX = margin;
+                        legendY += legendItemHeight;
+                    }
                 }
             }
             
@@ -1027,6 +1173,7 @@ public class XTreLocGUI {
         scatterHint.setForeground(com.treloc.xtreloc.app.gui.util.AppPanelStyle.getContentTextColor());
         controlPanel.add(scatterHint);
         
+        final ChartPlotOptions plotOpt = new ChartPlotOptions();
         final Double[] zoomXMin = { null }, zoomXMax = { null }, zoomYMin = { null }, zoomYMax = { null };
         final ScatterChartBounds scatterBounds = new ScatterChartBounds();
         final int[] dragStart = { -1, -1 }, dragEnd = { -1, -1 };
@@ -1035,8 +1182,11 @@ public class XTreLocGUI {
             @Override
             protected void paintComponent(Graphics g) {
                 super.paintComponent(g);
+                ChartAppearanceSettings chart = AppSettingsCache.chartAppearance();
+                g.setColor(histScatterBackground(chart));
+                g.fillRect(0, 0, getWidth(), getHeight());
                 drawScatterPlot(g, catalogPanel, mapView,
-                    zoomXMin[0], zoomXMax[0], zoomYMin[0], zoomYMax[0], scatterBounds);
+                    zoomXMin[0], zoomXMax[0], zoomYMin[0], zoomYMax[0], scatterBounds, plotOpt);
                 if (dragStart[0] >= 0 && dragEnd[0] >= 0 && g instanceof Graphics2D) {
                     Graphics2D g2 = (Graphics2D) g;
                     int x1 = Math.min(dragStart[0], dragEnd[0]);
@@ -1139,14 +1289,26 @@ public class XTreLocGUI {
             mapView.addCatalogVisibilityChangeListener(plotRepaint);
         }
         catalogPanel.addViewerChartChangeListener(plotRepaint);
-        
-        return scatterPanel;
+
+        return (JPanel) com.treloc.xtreloc.app.gui.view.ViewerSideChrome.wrap(scatterPanel,
+            new com.treloc.xtreloc.app.gui.view.ViewerSideChrome.Item(
+                "View", com.treloc.xtreloc.app.gui.volume3d.Map3DIcons.Kind.VIEW, "Title and grid",
+                chartViewCard(plotOpt, plotRepaint)),
+            new com.treloc.xtreloc.app.gui.view.ViewerSideChrome.Item(
+                "Style", com.treloc.xtreloc.app.gui.volume3d.Map3DIcons.Kind.TABLE, "Catalog colours",
+                new com.treloc.xtreloc.app.gui.view.ChartCatalogColorCard(catalogPanel, mapView, plotRepaint)),
+            new com.treloc.xtreloc.app.gui.view.ViewerSideChrome.Item(
+                "Tools", com.treloc.xtreloc.app.gui.volume3d.Map3DIcons.Kind.TOOLS, "Legend",
+                chartToolsCard(plotOpt, plotRepaint)),
+            new com.treloc.xtreloc.app.gui.view.ViewerSideChrome.Item(
+                "Export", com.treloc.xtreloc.app.gui.volume3d.Map3DIcons.Kind.EXPORT, "Save or copy",
+                chartExportCard(plotPanel, scatterPanel, resetScatterZoom, "scatter.png")));
     }
     
     private static void drawScatterPlot(Graphics g, com.treloc.xtreloc.app.gui.view.CatalogTablePanel catalogPanel,
                                        MapView mapView,
                                        Double zoomXMin, Double zoomXMax, Double zoomYMin, Double zoomYMax,
-                                       ScatterChartBounds outBounds) {
+                                       ScatterChartBounds outBounds, ChartPlotOptions plotOpt) {
         if (outBounds != null) outBounds.chartWidth = 0;
         try {
             java.awt.Rectangle clip0 = g.getClipBounds();
@@ -1162,11 +1324,11 @@ public class XTreLocGUI {
             int yCol = catalogPanel != null ? catalogPanel.getScatterYColumnModelIndex() : -1;
             String xAxisName = (catalogPanel != null && xCol >= 0) ? catalogPanel.getDataColumnName(xCol) : null;
             String yAxisName = (catalogPanel != null && yCol >= 0) ? catalogPanel.getDataColumnName(yCol) : null;
-            if (xAxisName == null || yAxisName == null || xCol < 2 || xCol > 8 || yCol < 2 || yCol > 8) {
+            if (xAxisName == null || yAxisName == null || xCol < 1 || xCol > 8 || yCol < 2 || yCol > 8) {
                 g.setColor(axisColor);
                 g.setFont(tickFont);
                 FontMetrics fm = g.getFontMetrics();
-                String message = "Right-click a catalog column header: set Scatter X and Y (Latitude … rms)";
+                String message = "Right-click a catalog column header: set Scatter X and Y (Time, Latitude … rms)";
                 int x = Math.max(8, (panelW - fm.stringWidth(message)) / 2);
                 int y = panelH / 2;
                 g.drawString(message, x, y);
@@ -1271,12 +1433,13 @@ public class XTreLocGUI {
             
             int width = panelW;
             int height = panelH;
-            int margin = 60;
+            boolean timeX = "Time".equals(xAxisName);
+            int margin = timeX ? 72 : 60;
             int chartWidth = width - 2 * margin;
-            int chartHeight = height - 2 * margin - 60;
+            int chartHeight = height - 2 * margin - (timeX ? 80 : 60);
             
             Color gridColor = parseChartColor(chart.getGridlineColor());
-            if (g instanceof Graphics2D) {
+            if (plotOpt != null && plotOpt.showGrid && g instanceof Graphics2D) {
                 Graphics2D g2 = (Graphics2D) g;
                 java.awt.Stroke prev = g2.getStroke();
                 g2.setStroke(gridStroke(chart));
@@ -1323,7 +1486,9 @@ public class XTreLocGUI {
             
             for (int i = 0; i <= 5; i++) {
                 double value = displayXMin + (displayXRange * i / 5);
-                String label = String.format("%.2f", value);
+                String label = timeX
+                    ? com.treloc.xtreloc.util.TimeFormatConverter.formatColorBarTime(value, displayXMin, displayXMax)
+                    : String.format("%.2f", value);
                 int x = margin + (int) (chartWidth * i / 5) - fm.stringWidth(label) / 2;
                 g.drawString(label, x, margin + chartHeight + 20);
             }
@@ -1348,31 +1513,35 @@ public class XTreLocGUI {
                     Math.max(18, margin / 3), margin + chartHeight / 2);
             }
             
-            g.setFont(titleFont);
-            String title = yAxisName + " vs " + xAxisName;
-            FontMetrics titleFm = g.getFontMetrics();
-            int titleWidth = titleFm.stringWidth(title);
-            g.drawString(title, (width - titleWidth) / 2, 20);
-            
-            g.setFont(legendFont);
-            int legendY = margin + chartHeight + 50;
-            int legendX = margin;
-            int legendItemHeight = 15;
-            
-            for (int i = 0; i < catalogInfoForValues.size(); i++) {
-                com.treloc.xtreloc.app.gui.model.CatalogInfo info = catalogInfoForValues.get(i);
-                Color catalogColor = catalogDrawColor(info);
-                
-                g.setColor(catalogColor);
-                g.fillOval(legendX, legendY, 8, 8);
-                
-                g.setColor(axisColor);
-                g.drawString(info.getName(), legendX + 12, legendY + 8);
-                
-                legendX += 120;
-                if (legendX + 120 > width - margin) {
-                    legendX = margin;
-                    legendY += legendItemHeight;
+            if (plotOpt == null || plotOpt.showTitle) {
+                g.setFont(titleFont);
+                String title = yAxisName + " vs " + xAxisName;
+                FontMetrics titleFm = g.getFontMetrics();
+                int titleWidth = titleFm.stringWidth(title);
+                g.drawString(title, (width - titleWidth) / 2, 20);
+            }
+
+            if (plotOpt == null || plotOpt.showLegend) {
+                g.setFont(legendFont);
+                int legendY = margin + chartHeight + 50;
+                int legendX = margin;
+                int legendItemHeight = 15;
+
+                for (int i = 0; i < catalogInfoForValues.size(); i++) {
+                    com.treloc.xtreloc.app.gui.model.CatalogInfo info = catalogInfoForValues.get(i);
+                    Color catalogColor = catalogDrawColor(info);
+
+                    g.setColor(catalogColor);
+                    g.fillOval(legendX, legendY, 8, 8);
+
+                    g.setColor(axisColor);
+                    g.drawString(info.getName(), legendX + 12, legendY + 8);
+
+                    legendX += 120;
+                    if (legendX + 120 > width - margin) {
+                        legendX = margin;
+                        legendY += legendItemHeight;
+                    }
                 }
             }
             
@@ -1400,6 +1569,9 @@ public class XTreLocGUI {
     
     private static double getValueForColumn(com.treloc.xtreloc.app.gui.model.Hypocenter h, String columnName) {
         switch (columnName) {
+            case "Time":
+                Long ms = com.treloc.xtreloc.util.TimeFormatConverter.toEpochMillis(h.time);
+                return ms == null ? Double.NaN : ms.doubleValue();
             case "Latitude":
                 return h.lat;
             case "Longitude":
@@ -1452,6 +1624,8 @@ public class XTreLocGUI {
             }
         }
         
+        settings.applyTimeDisplayFormat();
+        
         String logLevel = settings.getLogLevel();
         if (logLevel != null) {
             java.util.logging.Level level;
@@ -1482,11 +1656,6 @@ public class XTreLocGUI {
         UiFonts.applyToUIManager(font);
     }
     
-    private static JPanel createThemedPanel() {
-        JPanel p = new JPanel(new BorderLayout());
-        AppPanelStyle.setPanelBackground(p);
-        return p;
-    }
     
     /**
      * Applies the selected UI theme to the application.
@@ -1550,6 +1719,27 @@ public class XTreLocGUI {
             default:
                 return UIManager.getSystemLookAndFeelClassName();
         }
+    }
+
+    private static void checkForUpdatesNow(JFrame mainFrame) {
+        new Thread(() -> {
+            try {
+                UpdateInfo info = UpdateChecker.checkForUpdates();
+                SwingUtilities.invokeLater(() -> {
+                    if (info != null && info.isUpdateAvailable()) {
+                        new UpdateDialog(mainFrame, info).setVisible(true);
+                    } else if (info != null) {
+                        JOptionPane.showMessageDialog(mainFrame, "xTreLoc is up to date.", "Check for Updates", 1);
+                    } else {
+                        JOptionPane.showMessageDialog(mainFrame, "Could not check for updates.", "Check for Updates", 2);
+                    }
+                });
+            }
+            catch (Exception e) {
+                logger.log(Level.WARNING, "Update check failed", e);
+                SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(mainFrame, "Could not check for updates: " + e.getMessage(), "Check for Updates", 2));
+            }
+        }, "update-check").start();
     }
 
     private static void checkForUpdatesAsync(

@@ -1,23 +1,17 @@
 package com.treloc.xtreloc.app.gui.util;
 
-import org.jfree.chart.ChartPanel;
-
 import java.awt.BasicStroke;
 import java.awt.Color;
 import java.awt.Font;
-import java.awt.Paint;
 import java.awt.Stroke;
 
 /**
- * Settings for JFreeChart appearance.
- * Used to maintain consistent appearance across all charts (residual plots, k-distance plots, etc.).
- * 
+ * Shared appearance for custom-drawn charts (hist / scatter / residual / k-distance / waveforms).
+ *
  * @author xTreLoc Development Team
  */
 public class ChartAppearanceSettings {
-    
-    /** Plot / chart padding background: transparent so Swing parent shows through. */
-    public static final Paint TRANSPARENT_CHART_BACKGROUND = new Color(0, 0, 0, 0);
+
     // Title font
     private String titleFontName = "SansSerif";
     private int titleFontSize = 14;
@@ -49,8 +43,8 @@ public class ChartAppearanceSettings {
     private String gridlineStyle = "solid"; // "solid", "dash", "dot"
 
     /**
-     * Minimum interval (ms) between repaints of the Solver convergence chart ({@code ResidualPlotPanel}).
-     * Larger values reduce GUI load during MCMC / parallel runs. 0 disables throttling (repaint every update).
+     * Minimum interval (ms) between batched redraws of the Solver convergence chart ({@code ResidualPlotPanel}).
+     * Larger values reduce GUI load during MCMC / parallel runs. Clamped to 80–60000.
      */
     private int convergenceRepaintThrottleMs = 350;
     
@@ -175,10 +169,13 @@ public class ChartAppearanceSettings {
     }
     
     public void setBackgroundColor(String backgroundColor) {
-        this.backgroundColor = backgroundColor;
+        this.backgroundColor = backgroundColor == null ? "" : backgroundColor.trim();
     }
     
     public Color getBackgroundColorAsColor() {
+        if (backgroundColor == null || backgroundColor.isBlank()) {
+            return null;
+        }
         return Color.decode(backgroundColor);
     }
     
@@ -235,7 +232,7 @@ public class ChartAppearanceSettings {
     }
 
     public void setConvergenceRepaintThrottleMs(int convergenceRepaintThrottleMs) {
-        this.convergenceRepaintThrottleMs = convergenceRepaintThrottleMs;
+        this.convergenceRepaintThrottleMs = Math.max(80, Math.min(60_000, convergenceRepaintThrottleMs));
     }
     
     /**
@@ -255,19 +252,4 @@ public class ChartAppearanceSettings {
         }
     }
     
-    /**
-     * Lets a {@link ChartPanel} grow and shrink with its Swing parent instead of a fixed preferred size.
-     * Clears the default JFreeChart preferred bounds and widens off-screen draw limits for large windows.
-     */
-    public static void applyResponsiveChartPanelSizing(ChartPanel panel) {
-        if (panel == null) {
-            return;
-        }
-        panel.setMinimumDrawWidth(1);
-        panel.setMinimumDrawHeight(1);
-        panel.setMaximumDrawWidth(8192);
-        panel.setMaximumDrawHeight(8192);
-        panel.setPreferredSize(null);
-        panel.setOpaque(false);
-    }
 }

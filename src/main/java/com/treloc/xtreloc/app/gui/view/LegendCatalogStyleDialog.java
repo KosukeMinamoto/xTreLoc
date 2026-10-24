@@ -129,7 +129,7 @@ public final class LegendCatalogStyleDialog {
                 cat.setColor(colorHolders.get(i)[0]);
                 cat.setSymbolType((CatalogInfo.SymbolType) combos.get(i).getSelectedItem());
             }
-            mapView.updateMultipleCatalogsDisplay();
+            mapView.preferLayerStyleColors(null);
             dlg.dispose();
         });
         buttons.add(cancel);

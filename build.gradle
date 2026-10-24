@@ -42,8 +42,12 @@ dependencies {
     implementation 'edu.sc.seis:TauP:2.6.1'
     // GeographicLib Java
     implementation 'net.sf.geographiclib:GeographicLib-Java:1.49'
+    // IIR Butterworth (filtfilt) — align waveform band-pass with ObsPy/SciPy-style processing
+    implementation 'uk.me.berndporr:iirj:1.7'
     // Lanterna for TUI
     implementation 'com.googlecode.lanterna:lanterna:3.1.3'
+    // ONNX Runtime (EQTransformer picker)
+    implementation 'com.microsoft.onnxruntime:onnxruntime:1.20.0'
     // JUnit
     testImplementation 'junit:junit:4.11'
 }
@@ -66,12 +70,9 @@ dependencies {
     guiOnly "org.geotools:gt-shapefile:${geotoolsVersion}"
     guiOnly "org.geotools:gt-swing:${geotoolsVersion}"
     guiOnly "org.geotools:gt-render:${geotoolsVersion}"
-    guiOnly "org.geotools:gt-tile-client:${geotoolsVersion}"
-    guiOnly "org.geotools:gt-grid:${geotoolsVersion}"
     guiOnly "org.geotools:gt-referencing:${geotoolsVersion}"
     guiOnly 'org.locationtech.jts:jts-core:1.19.0'
     guiOnly 'com.formdev:flatlaf:3.2.5'
-    guiOnly 'jfree:jfreechart:1.0.13'
     
     // Include GUI dependencies in main configuration for full build
     // Comment out these lines to build lightweight CLI/TUI-only versions
@@ -80,12 +81,9 @@ dependencies {
     implementation "org.geotools:gt-shapefile:${geotoolsVersion}"
     implementation "org.geotools:gt-swing:${geotoolsVersion}"
     implementation "org.geotools:gt-render:${geotoolsVersion}"
-    implementation "org.geotools:gt-tile-client:${geotoolsVersion}"
-    implementation "org.geotools:gt-grid:${geotoolsVersion}"
     implementation "org.geotools:gt-referencing:${geotoolsVersion}"
     implementation 'org.locationtech.jts:jts-core:1.19.0'
     implementation 'com.formdev:flatlaf:3.2.5'
-    implementation 'jfree:jfreechart:1.0.13'
 }
 
 jar {
@@ -180,12 +178,23 @@ task guiJar(type: Jar) {
     exclude 'META-INF/*.RSA'
 }
 
+test {
+    // Independent test classes; forks keep SharedFileManager / AWT isolated.
+    maxParallelForks = Math.max(1, Runtime.runtime.availableProcessors().intdiv(2))
+    systemProperty 'java.awt.headless', 'true'
+    maxHeapSize = '100g'
+}
+
 tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8'
     // 巨大なクラスパス(GeoTools等)と大きなソースファイルでコンパイルが重くなる対策
     options.fork = true
-    options.forkOptions.memoryMaximumSize = '1g'
+    options.forkOptions.memoryMaximumSize = '100g'
     options.compilerArgs.addAll(['-parameters'])
+}
+
+tasks.withType(JavaExec).configureEach {
+    jvmArgs '-Xmx100g'
 }
 
 javadoc {
@@ -209,11 +218,23 @@ task javadocJar(type: Jar, dependsOn: javadoc) {
 
 application {
     mainClass = 'com.treloc.xtreloc.app.XTreLoc'
+    applicationDefaultJvmArgs = ['-Xmx100g']
 }
 
-test {
-    failOnNoDiscoveredTests = false
-    useJUnit()
+task cfTool(type: JavaExec) {
+    group = 'verification'
+    description = 'CF export / SAC directory compare (parity). Example: ./gradlew cfTool -PcfToolArgs="export 20071201 build/cf-java 2 8"'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'com.treloc.xtreloc.devtools.CfPipelineTool'
+    args = project.hasProperty('cfToolArgs') ? project.cfToolArgs.tokenize() : ['help']
+}
+
+task gridTool(type: JavaExec) {
+    group = 'application'
+    description = 'Build station-wise travel-time grids (NonLinLoc format) from a layer cake. Example: ./gradlew gridTool -PgridToolArgs="--model prem.nd --stations demo/locating_example/station.tbl --out build/ttgrid --dip 10 --strike 20"'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'com.treloc.xtreloc.solver.grid.TravelTimeGridTool'
+    args = project.hasProperty('gridToolArgs') ? project.gridToolArgs.tokenize() : ['--help']
 }
 
 task runCLI(type: JavaExec) {
@@ -336,7 +357,8 @@ task createApp(type: Exec) {
             '--app-version', appVersion,
             '--vendor', 'xTreLoc',
             '--description', 'Multi-method hypocenter location software with GUI and CLI support',
-            '--copyright', 'Copyright © 2024 xTreLoc'
+            '--copyright', 'Copyright © 2026 xTreLoc',
+            '--java-options', '-Xmx100g'
         ]
         
         // Set icon (prefer .icns file if exists, otherwise use PNG)
@@ -423,7 +445,8 @@ task createDmg(type: Exec) {
             '--app-version', appVersion,
             '--vendor', 'xTreLoc',
             '--description', 'Multi-method hypocenter location software with GUI and CLI support',
-            '--copyright', 'Copyright © 2024 xTreLoc',
+            '--copyright', 'Copyright © 2026 xTreLoc',
+            '--java-options', '-Xmx100g',
             '--mac-package-identifier', 'com.treloc.xtreloc',
             '--mac-package-name', appName
         ]
@@ -490,7 +513,8 @@ task createLinuxApp(type: Exec) {
             '--app-version', appVersion,
             '--vendor', 'xTreLoc',
             '--description', 'Multi-method hypocenter location software with GUI, TUI and CLI',
-            '--copyright', 'Copyright © 2024 xTreLoc'
+            '--copyright', 'Copyright © 2026 xTreLoc',
+            '--java-options', '-Xmx100g'
         ]
         if (new File(pngIconFile).exists()) {
             cmd.addAll(['--icon', pngIconFile])

@@ -50,14 +50,13 @@ public class HypoStationPairDiff extends SolverBase {
         double lon;
         double lat;
         double dep;
-        double[][] dtdr;
-        double[] trvTime;
+        double[][] dtdrP;
+        double[][] dtdrS;
+        double[] trvP;
+        double[] trvS;
         int[] usedIdx;
         
         boolean matches(double lon, double lat, double dep, int[] usedIdx) {
-            if (this.dtdr == null || this.trvTime == null) {
-                return false;
-            }
             if (this.usedIdx == null || this.usedIdx.length != usedIdx.length) {
                 return false;
             }
@@ -189,13 +188,18 @@ public class HypoStationPairDiff extends SolverBase {
         RealVector hypvec = MatrixUtils.createRealVector(new double[] {lon, lat, dep});
         RealVector target = MatrixUtils.createRealVector(new double[numPhase]);
         for (int i = 0; i < numPhase; i++) {
-            target.setEntry(i, lagTable[i][2]);
+            target.setEntry(i, Math.sqrt(HypoUtils.phaseWeight(lagTable[i], pWeight)) * lagTable[i][2]);
         }
 
         boolean hasOutlier = false;
         boolean[] isOutlier = new boolean[numPhase];
         int nIter = 0;
         int nEval = 0;
+        final double startLon = lon;
+        final double startLat = lat;
+        // Keep the search inside a local box. Absolute lon/lat plus a failed-ray residual
+        // used to send LM to the other hemisphere; MCMC/GRD never take that Newton step.
+        final double maxShiftDeg = 0.5;
         
         partialDerivativeCache = null;
         
@@ -217,12 +221,23 @@ public class HypoStationPairDiff extends SolverBase {
                     .parameterValidator(new ParameterValidator() {
                         @Override
                         public RealVector validate(RealVector params) {
-                            double dep = params.getEntry(2);
-                            if (dep <= stnBottom) {
-                                params.setEntry(2, Math.random() * hypBottom);
+                            double pLon = params.getEntry(0);
+                            double pLat = params.getEntry(1);
+                            double pDep = params.getEntry(2);
+                            if (pLon < startLon - maxShiftDeg) {
+                                params.setEntry(0, startLon - maxShiftDeg);
+                            } else if (pLon > startLon + maxShiftDeg) {
+                                params.setEntry(0, startLon + maxShiftDeg);
                             }
-                            if (dep > hypBottom) {
-                                params.setEntry(2, hypBottom * 0.9);
+                            if (pLat < startLat - maxShiftDeg) {
+                                params.setEntry(1, startLat - maxShiftDeg);
+                            } else if (pLat > startLat + maxShiftDeg) {
+                                params.setEntry(1, startLat + maxShiftDeg);
+                            }
+                            if (pDep < stnBottom) {
+                                params.setEntry(2, stnBottom);
+                            } else if (pDep > hypBottom) {
+                                params.setEntry(2, hypBottom);
                             }
                             return params;
                         }
@@ -236,20 +251,14 @@ public class HypoStationPairDiff extends SolverBase {
                 Precision.SAFE_MIN
             ).optimize(problem);
 
-            RealVector resDiffTime = optimum.getResiduals();
-            double sumOfSquares = 0;
-            int okCount = 0;
-            for (int i = 0; i < numPhase; i++) {
-                if (!isOutlier[i]) {
-                    sumOfSquares += Math.pow(resDiffTime.getEntry(i), 2);
-                    okCount++;
-                }
-            }
-            res = Math.sqrt(sumOfSquares / okCount);
+            double[] xmin0 = optimum.getPoint().toArray();
+            Point fitted = new Point(point.getTime(), xmin0[1], xmin0[0], xmin0[2], 0, 0, 0, 0, "", "", -999);
+            double[] pairRes = pairResiduals(stationTable, usedIdx, fitted, lagTable);
+            res = HypoUtils.weightedRms(pairRes, lagTable, pWeight);
 
             for (int i = 0; i < numPhase; i++) {
                 if (!isOutlier[i]) {
-                    if (Math.abs(resDiffTime.getEntry(i)) > 2 * res) {
+                    if (Double.isFinite(pairRes[i]) && Math.abs(pairRes[i]) > 2 * res) {
                         lagTable[i][3] = 0;
                         isOutlier[i] = true;
                         hasOutlier = true;
@@ -278,13 +287,13 @@ public class HypoStationPairDiff extends SolverBase {
             lat = newLat;
             dep = newDep;
             
-            if (dep <= stnBottom) {
-                dep = Math.random() * hypBottom;
-                logger.warning("Depth too shallow, reset to: " + dep);
-                SolverLogger.warning("LMO: Depth too shallow, reset to " + String.format("%.3f", dep));
+            if (dep < stnBottom) {
+                dep = stnBottom;
+                logger.warning("Depth too shallow, clamped to: " + dep);
+                SolverLogger.warning("LMO: Depth too shallow, clamped to " + String.format("%.3f", dep));
             }
             if (dep > hypBottom) {
-                dep = hypBottom * 0.9;
+                dep = hypBottom;
                 logger.warning("Depth too deep, limited to: " + dep);
                 SolverLogger.warning("LMO: Depth too deep, limited to " + String.format("%.3f", dep));
             }
@@ -299,11 +308,13 @@ public class HypoStationPairDiff extends SolverBase {
                     if (isOutlier[i]) {
                         lagTable[i][3] = 0;
                     } else {
-                        lagTable[i][3] = 1.0 / Math.abs(resDiffTime.getEntry(i));
+                        lagTable[i][3] = Double.isFinite(pairRes[i])
+                            ? 1.0 / Math.abs(pairRes[i] + 1e-10)
+                            : 0;
                     }
                 }
                 
-                if (dep > hypBottom) {
+                if (dep > hypBottom || !isSourceInRange(lat, lon, dep)) {
                     method = "ERR";
                 } else {
                     method = "LMO";
@@ -402,43 +413,74 @@ public class HypoStationPairDiff extends SolverBase {
                     double currentLat = hypoVector.getEntry(1);
                     double currentDep = hypoVector.getEntry(2);
                     
-                    double[][] dtdr;
-                    double[] trvTime;
+                    double[][] dtdrP;
+                    double[][] dtdrS;
+                    double[] trvP;
+                    double[] trvS;
                     
                     if (partialDerivativeCache != null && 
                         partialDerivativeCache.matches(currentLon, currentLat, currentDep, usedIdx)) {
-                        dtdr = partialDerivativeCache.dtdr;
-                        trvTime = partialDerivativeCache.trvTime;
+                        dtdrP = partialDerivativeCache.dtdrP;
+                        dtdrS = partialDerivativeCache.dtdrS;
+                        trvP = partialDerivativeCache.trvP;
+                        trvS = partialDerivativeCache.trvS;
                     } else {
                         Point point = new Point("", currentLat, currentLon, currentDep,
                             0, 0, 0, 0, "", "", -999);
-                        Object[] tmp = partialDerivativeMatrix(stationTable, usedIdx, point);
-                        dtdr = (double[][]) tmp[0];
-                        trvTime = (double[]) tmp[1];
+                        boolean[] ph = DatPair.phasesPresent(lagTable);
+                        boolean needP = ph[0];
+                        boolean needS = ph[1];
+                        dtdrP = dtdrS = null;
+                        trvP = trvS = null;
+                        if (needP) {
+                            Object[] tmpP = partialDerivativeMatrix(stationTable, usedIdx, point,
+                                com.treloc.xtreloc.solver.table.TravelTimeTable.Phase.P);
+                            dtdrP = (double[][]) tmpP[0];
+                            trvP = (double[]) tmpP[1];
+                        }
+                        if (needS) {
+                            Object[] tmpS = partialDerivativeMatrix(stationTable, usedIdx, point,
+                                com.treloc.xtreloc.solver.table.TravelTimeTable.Phase.S);
+                            dtdrS = (double[][]) tmpS[0];
+                            trvS = (double[]) tmpS[1];
+                        }
+                        if (dtdrP == null) {
+                            dtdrP = dtdrS;
+                            trvP = trvS;
+                        }
+                        if (dtdrS == null) {
+                            dtdrS = dtdrP;
+                            trvS = trvP;
+                        }
                         
                         partialDerivativeCache = new PartialDerivativeCache();
                         partialDerivativeCache.lon = currentLon;
                         partialDerivativeCache.lat = currentLat;
                         partialDerivativeCache.dep = currentDep;
-                        partialDerivativeCache.dtdr = dtdr;
-                        partialDerivativeCache.trvTime = trvTime;
+                        partialDerivativeCache.dtdrP = dtdrP;
+                        partialDerivativeCache.dtdrS = dtdrS;
+                        partialDerivativeCache.trvP = trvP;
+                        partialDerivativeCache.trvS = trvS;
                         partialDerivativeCache.usedIdx = usedIdx.clone();
                     }
 
                     for (int i = 0; i < lagTable.length; i++) {
                         int nstnk = (int) lagTable[i][0];
                         int nstnl = (int) lagTable[i][1];
-                        if ((int) lagTable[i][3] == 0) {
+                        double[] t = DatPair.timesFor(lagTable[i], trvP, trvS);
+                        if ((int) lagTable[i][3] == 0 || !DatPair.finitePair(t, nstnk, nstnl)) {
                             value.setEntry(i, 0);
                             jacobian.setEntry(i, 0, 0);
                             jacobian.setEntry(i, 1, 0);
                             jacobian.setEntry(i, 2, 0);
-                        } else {
-                            value.setEntry(i, trvTime[nstnl] - trvTime[nstnk]);
-                            jacobian.setEntry(i, 0, dtdr[nstnl][0] - dtdr[nstnk][0]);
-                            jacobian.setEntry(i, 1, dtdr[nstnl][1] - dtdr[nstnk][1]);
-                            jacobian.setEntry(i, 2, dtdr[nstnl][2] - dtdr[nstnk][2]);
+                            continue;
                         }
+                        double[][] dtdr = DatPair.dtdrFor(lagTable[i], dtdrP, dtdrS);
+                        double sw = Math.sqrt(HypoUtils.phaseWeight(lagTable[i], pWeight));
+                        value.setEntry(i, sw * (t[nstnl] - t[nstnk]));
+                        jacobian.setEntry(i, 0, sw * (dtdr[nstnl][0] - dtdr[nstnk][0]));
+                        jacobian.setEntry(i, 1, sw * (dtdr[nstnl][1] - dtdr[nstnk][1]));
+                        jacobian.setEntry(i, 2, sw * (dtdr[nstnl][2] - dtdr[nstnk][2]));
                     }
                 } catch (Exception e) {
             logger.warning("Error when calculating partial derivative: " + e.getMessage());
@@ -472,7 +514,8 @@ public class HypoStationPairDiff extends SolverBase {
             int ik = (int) lagTable[i][0];
             int il = (int) lagTable[i][1];
             sb.append(i + 1).append(':')
-                .append(stationCodeAt(codeStrings, ik)).append('-').append(stationCodeAt(codeStrings, il));
+                .append(stationCodeAt(codeStrings, ik)).append('-').append(stationCodeAt(codeStrings, il))
+                .append('(').append(DatPair.label(lagTable[i])).append(')');
         }
         return sb.length() == 0 ? null : sb.toString();
     }

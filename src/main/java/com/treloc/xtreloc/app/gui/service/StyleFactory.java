@@ -1,52 +1,13 @@
 package com.treloc.xtreloc.app.gui.service;
 
 import java.awt.Color;
-import java.util.logging.Level;
-import java.util.logging.Logger;
 
 import org.geotools.api.style.*;
 import org.geotools.styling.StyleBuilder;
 
 public class StyleFactory {
 
-    private static final Logger LOG = Logger.getLogger(StyleFactory.class.getName());
 
-    public static Style hypocenterStyle() {
-        StyleBuilder sb = new StyleBuilder();
-        // Create fill with explicit literal expressions
-        org.geotools.api.style.Fill fill = sb.createFill();
-        fill.setColor(sb.literalExpression(Color.BLUE));
-        fill.setOpacity(sb.literalExpression(1.0));
-        // Create stroke with explicit literal expressions
-        org.geotools.api.style.Stroke stroke = sb.createStroke();
-        stroke.setColor(sb.literalExpression(Color.BLACK));
-        stroke.setWidth(sb.literalExpression(1.0));
-        stroke.setOpacity(sb.literalExpression(1.0));
-        Mark mark = sb.createMark(StyleBuilder.MARK_CIRCLE, fill, stroke);
-        Graphic g = sb.createGraphic(null, new Mark[] { mark }, null, 1, 8, 0);
-        return sb.createStyle(sb.createPointSymbolizer(g));
-    }
-    
-    /**
-     * Creates a hypocenter style for color mapping.
-     * The actual color is set per feature in MapView, so this returns a default style.
-     */
-    public static Style hypocenterColorStyle() {
-        StyleBuilder sb = new StyleBuilder();
-        org.geotools.api.style.Fill fill = sb.createFill();
-        fill.setColor(sb.literalExpression(Color.BLUE));
-        fill.setOpacity(sb.literalExpression(1.0));
-        // Create stroke with explicit literal expressions
-        org.geotools.api.style.Stroke stroke = sb.createStroke();
-        stroke.setColor(sb.literalExpression(Color.BLACK));
-        stroke.setWidth(sb.literalExpression(1.0));
-        stroke.setOpacity(sb.literalExpression(1.0));
-        Mark mark = sb.createMark(StyleBuilder.MARK_CIRCLE, fill, stroke);
-        Graphic g = sb.createGraphic(null, new Mark[] { mark }, null, 1, 8, 0);
-        
-        return sb.createStyle(sb.createPointSymbolizer(g));
-    }
-    
     /**
      * Creates a style based on RGB color values.
      * @param size symbol size in pixels (used when coloring by column)
@@ -84,50 +45,6 @@ public class StyleFactory {
         return createColorStyle(r, g, b, 8);
     }
 
-    public static Style stationStyle() {
-        StyleBuilder sb = new StyleBuilder();
-        // Black filled inverted triangle (180 degree rotation)
-        // Create fill with explicit literal expressions
-        org.geotools.api.style.Fill fill = sb.createFill();
-        fill.setColor(sb.literalExpression(Color.BLACK)); // Filled black
-        fill.setOpacity(sb.literalExpression(1.0));
-        // Create stroke with explicit literal expressions
-        org.geotools.api.style.Stroke stroke = sb.createStroke();
-        stroke.setColor(sb.literalExpression(Color.BLACK));
-        stroke.setWidth(sb.literalExpression(1.0));
-        stroke.setOpacity(sb.literalExpression(1.0));
-        Mark mark = sb.createMark(StyleBuilder.MARK_TRIANGLE, fill, stroke);
-        // Rotate 180 degrees to make it inverted
-        Graphic g = sb.createGraphic(null, new Mark[] { mark }, null, 1, 10, 180);
-
-        TextSymbolizer text = sb.createTextSymbolizer();
-        text.setLabel(sb.attributeExpression("code"));
-        text.setFont(sb.createFont("SansSerif", 10));
-        // Create text fill with explicit literal expressions
-        org.geotools.api.style.Fill textFill = sb.createFill();
-        textFill.setColor(sb.literalExpression(Color.BLACK));
-        textFill.setOpacity(sb.literalExpression(1.0));
-        text.setFill(textFill);
-        text.setHalo(sb.createHalo(Color.WHITE, 2)); // Larger halo for better visibility
-        // Position label above the triangle (offset upward)
-        // Create point placement - anchor at bottom center, displace upward
-        org.geotools.api.style.PointPlacement placement = sb.createPointPlacement();
-        placement.setAnchorPoint(sb.createAnchorPoint(0.5, 0.0)); // Center horizontally, at bottom of point
-        placement.setDisplacement(sb.createDisplacement(0, -15)); // Move 15 pixels upward
-        placement.setRotation(sb.literalExpression(0)); // No rotation
-        text.setLabelPlacement(placement);
-
-        Rule r = sb.createRule(sb.createPointSymbolizer(g));
-        r.symbolizers().add(text);
-
-        FeatureTypeStyle fts = sb.createFeatureTypeStyle(r.symbolizers().get(0));
-        fts.rules().add(r);
-
-        Style s = sb.createStyle();
-        s.featureTypeStyles().add(fts);
-        return s;
-    }
-    
     public static Style selectedPointStyle() {
         StyleBuilder sb = new StyleBuilder();
         org.geotools.api.style.Fill fill = sb.createFill();
@@ -286,70 +203,56 @@ public class StyleFactory {
     }
     
     /**
-     * Creates a style for shapefiles based on geometry type.
-     * This method determines the geometry type and creates an appropriate style.
-     * 
-     * @param featureSource the feature source to determine geometry type from
-     * @return a style appropriate for the geometry type
-     */
-    public static Style createShapefileStyleForGeometry(org.geotools.api.data.FeatureSource featureSource) {
-        try {
-            org.geotools.api.feature.type.FeatureType featureType = featureSource.getSchema();
-            org.geotools.api.feature.type.GeometryDescriptor geomDesc = featureType.getGeometryDescriptor();
-            if (geomDesc != null) {
-                Class<?> geomClass = geomDesc.getType().getBinding();
-                LOG.log(Level.FINE, "Shapefile geometry binding: {0}", geomClass.getName());
-                
-                if (org.locationtech.jts.geom.Point.class.isAssignableFrom(geomClass) ||
-                    org.locationtech.jts.geom.MultiPoint.class.isAssignableFrom(geomClass)) {
-                    StyleBuilder sb = new StyleBuilder();
-                    org.geotools.api.style.Fill fill = sb.createFill();
-                    fill.setColor(sb.literalExpression(Color.BLUE));
-                    fill.setOpacity(sb.literalExpression(1.0));
-                    org.geotools.api.style.Stroke stroke = sb.createStroke();
-                    stroke.setColor(sb.literalExpression(Color.BLUE));
-                    stroke.setWidth(sb.literalExpression(1.0));
-                    stroke.setOpacity(sb.literalExpression(1.0));
-                    Mark mark = sb.createMark(StyleBuilder.MARK_CIRCLE, fill, stroke);
-                    Graphic graphic = sb.createGraphic(null, new Mark[] { mark }, null, 1, 8, 0);
-                    return sb.createStyle(sb.createPointSymbolizer(graphic));
-                }
-                if (org.locationtech.jts.geom.Polygon.class.isAssignableFrom(geomClass) ||
-                    org.locationtech.jts.geom.MultiPolygon.class.isAssignableFrom(geomClass)) {
-                    // Outline only via LineSymbolizer: any PolygonSymbolizer (even fill=null) can still
-                    // hit JDK Area / Marlin NPEs (fillSpansLoop / drawPathLoop, null loops) on bad rings.
-                    StyleBuilder sb = new StyleBuilder();
-                    org.geotools.api.style.Stroke stroke = sb.createStroke();
-                    stroke.setColor(sb.literalExpression(new Color(0, 90, 180)));
-                    stroke.setWidth(sb.literalExpression(1.5f));
-                    stroke.setOpacity(sb.literalExpression(1.0));
-                    return sb.createStyle(sb.createLineSymbolizer(stroke));
-                }
-            }
-        } catch (Exception e) {
-            LOG.log(Level.WARNING, "Error determining geometry type; using default line style", e);
-        }
-        return createShapefileStyle();
-    }
-    
-    /**
      * Creates a style based on symbol type and color.
      */
     public static Style createSymbolStyle(com.treloc.xtreloc.app.gui.model.CatalogInfo.SymbolType symbolType, Color color, int size) {
+        return createSymbolStyle(symbolType, color, size, true);
+    }
+
+    public static Style createSymbolStyle(com.treloc.xtreloc.app.gui.model.CatalogInfo.SymbolType symbolType, Color color,
+            int size, boolean filled) {
         if (color == null) {
             color = new Color(96, 96, 96);
         }
         StyleBuilder sb = new StyleBuilder();
         double op = Math.max(0.0, Math.min(1.0, color.getAlpha() / 255.0));
         Color rgb = new Color(color.getRed(), color.getGreen(), color.getBlue());
-        // Create fill with explicit literal expressions
+        org.geotools.api.filter.expression.Expression fillOp =
+            sb.literalExpression(filled ? op : 0.0);
+        return buildSymbolStyle(sb, symbolType, size, sb.literalExpression(rgb), fillOp, sb.literalExpression(rgb),
+            sb.literalExpression(op));
+    }
+
+    /** Feature attribute holding the fill color as {@code #RRGGBB} for {@link #createSymbolStyleByAttribute}. */
+    public static final String COLOR_ATTRIBUTE = "color";
+    /** Feature attribute holding the opacity (0-1) for {@link #createSymbolStyleByAttribute}. */
+    public static final String OPACITY_ATTRIBUTE = "opacity";
+
+    /**
+     * Creates a single style whose fill color and opacity are read per feature from the
+     * {@link #COLOR_ATTRIBUTE} (String, {@code #RRGGBB}) and {@link #OPACITY_ATTRIBUTE} (Double) attributes.
+     * This lets a color-mapped catalog be drawn in <em>one</em> layer instead of one layer per distinct color,
+     * which keeps GeoTools from re-rendering the map once per added layer.
+     */
+    public static Style createSymbolStyleByAttribute(com.treloc.xtreloc.app.gui.model.CatalogInfo.SymbolType symbolType, int size) {
+        StyleBuilder sb = new StyleBuilder();
+        org.geotools.api.filter.expression.Expression color = sb.attributeExpression(COLOR_ATTRIBUTE);
+        org.geotools.api.filter.expression.Expression opacity = sb.attributeExpression(OPACITY_ATTRIBUTE);
+        return buildSymbolStyle(sb, symbolType, size, color, opacity, sb.literalExpression(Color.BLACK), opacity);
+    }
+
+    private static Style buildSymbolStyle(StyleBuilder sb,
+            com.treloc.xtreloc.app.gui.model.CatalogInfo.SymbolType symbolType, int size,
+            org.geotools.api.filter.expression.Expression fillColor,
+            org.geotools.api.filter.expression.Expression fillOpacity,
+            org.geotools.api.filter.expression.Expression strokeColor,
+            org.geotools.api.filter.expression.Expression strokeOpacity) {
         org.geotools.api.style.Fill fill = sb.createFill();
-        fill.setColor(sb.literalExpression(rgb));
-        fill.setOpacity(sb.literalExpression(op));
-        // Create stroke with explicit literal expressions
+        fill.setColor(fillColor);
+        fill.setOpacity(fillOpacity);
         org.geotools.api.style.Stroke stroke = sb.createStroke();
-        stroke.setColor(sb.literalExpression(Color.BLACK));
-        stroke.setOpacity(sb.literalExpression(op));
+        stroke.setColor(strokeColor);
+        stroke.setOpacity(strokeOpacity);
         
         Mark mark;
         switch (symbolType) {
@@ -386,12 +289,40 @@ public class StyleFactory {
         return sb.createStyle(sb.createPointSymbolizer(graphic));
     }
     
-    /**
-     * Creates a style for connection lines.
-     */
-    public static Style createConnectionLineStyle(Color color, float width) {
+    public static Style createLineStyle(com.treloc.xtreloc.app.gui.model.MapLayerStyle style) {
+        if (style == null) {
+            return createShapefileStyle();
+        }
+        return createLineStyle(style.getColor(), style.getSize(), style.getOpacity(), style.dashArray());
+    }
+
+    public static Style createLineStyle(Color color, float width, float opacity, float[] dash) {
         StyleBuilder sb = new StyleBuilder();
-        org.geotools.api.style.Stroke stroke = sb.createStroke(color, width);
+        Color rgb = color != null ? new Color(color.getRed(), color.getGreen(), color.getBlue()) : Color.BLUE;
+        double op = Math.max(0.0, Math.min(1.0, opacity));
+        org.geotools.api.style.Stroke stroke = sb.createStroke();
+        stroke.setColor(sb.literalExpression(rgb));
+        stroke.setWidth(sb.literalExpression((double) Math.max(0.5f, width)));
+        stroke.setOpacity(sb.literalExpression(op));
+        if (dash != null && dash.length > 0) {
+            try {
+                stroke.setDashArray(dash);
+            } catch (RuntimeException ignored) {
+                // some GeoTools Stroke implementations reject dash arrays
+            }
+        }
         return sb.createStyle(sb.createLineSymbolizer(stroke));
+    }
+
+    public static Style createStationStyle(com.treloc.xtreloc.app.gui.model.MapLayerStyle style) {
+        return createStationStyle(style, true);
+    }
+
+    public static Style createStationStyle(com.treloc.xtreloc.app.gui.model.MapLayerStyle style, boolean filled) {
+        if (style == null) {
+            return createSymbolStyle(com.treloc.xtreloc.app.gui.model.CatalogInfo.SymbolType.TRIANGLE,
+                Color.BLACK, 10, filled);
+        }
+        return createSymbolStyle(style.getSymbol(), style.colorWithOpacity(), Math.round(style.getSize()), filled);
     }
 }

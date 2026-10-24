@@ -80,15 +80,6 @@ public class ModeNameMapper {
     }
     
     /**
-     * Gets all available mode abbreviations.
-     * 
-     * @return array of mode abbreviations
-     */
-    public static String[] getAllAbbreviations() {
-        return ABBREV_TO_DISPLAY.keySet().toArray(new String[0]);
-    }
-    
-    /**
      * Gets all available display names in the specified order.
      * 
      * @return array of display names in order: GRD, LMO, MCMC, DE, CLS, TRD, SYN
@@ -99,19 +90,6 @@ public class ModeNameMapper {
             displayNames[i] = ABBREV_TO_DISPLAY.get(MODE_ORDER[i]);
         }
         return displayNames;
-    }
-    
-    /**
-     * Checks if a string is a valid mode abbreviation.
-     * 
-     * @param abbrev mode abbreviation to check
-     * @return true if valid, false otherwise
-     */
-    public static boolean isValidAbbreviation(String abbrev) {
-        if (abbrev == null) {
-            return false;
-        }
-        return ABBREV_TO_DISPLAY.containsKey(abbrev.toUpperCase());
     }
     
     /**

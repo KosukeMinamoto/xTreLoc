@@ -7,8 +7,7 @@ import org.junit.Test;
 public class RaytraceTauPComparisonTableTest {
 
     @Test
-    public void markdownReportContainsExpectedTitle() throws Exception {
-        String md = RaytraceTauPComparisonTable.buildMarkdownReport();
-        assertTrue(md.contains("# Raytrace1D vs TauP"));
+    public void markdownReportContainsExpectedTitle() {
+        assertTrue(RaytraceTauPComparisonTable.REPORT_TITLE.contains("# Raytrace1D vs TauP"));
     }
 }

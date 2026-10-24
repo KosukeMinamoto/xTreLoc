@@ -22,7 +22,7 @@ public class UpdateChecker {
      * @return the current version string
      */
     private static String getCurrentVersion() {
-        return com.treloc.xtreloc.app.gui.util.VersionInfo.getVersion();
+        return com.treloc.xtreloc.util.VersionInfo.getVersion();
     }
     
     /**

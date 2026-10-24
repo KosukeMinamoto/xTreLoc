@@ -9,6 +9,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+import com.treloc.xtreloc.app.gui.service.CfXcorrPipeline;
 import com.treloc.xtreloc.app.util.AsciiLogo;
 import com.treloc.xtreloc.io.AppConfig;
 import com.treloc.xtreloc.io.ConfigLoader;
@@ -56,9 +57,10 @@ public final class XTreLocCLI {
         }
 
         String mode = args[0].toUpperCase();
+        boolean pipeline = CfXcorrPipeline.isPipelineMode(mode);
         String configPath = (args.length >= 2)
                 ? args[1]
-                : "config.json";
+                : (pipeline ? null : "config.json");
 
         showLogo();
 
@@ -92,9 +94,16 @@ public final class XTreLocCLI {
      */
     public static void runWithoutLogo(String mode, String configPath) throws Exception {
         if (mode == null || mode.isEmpty()) {
-            throw new IllegalArgumentException("Mode is required (GRD, LMO, MCMC, DE, TRD, CLS, SYN).");
+            throw new IllegalArgumentException("Mode is required (GRD, LMO, MCMC, DE, TRD, CLS, SYN, CF, CC, CFCC).");
         }
         mode = mode.trim().toUpperCase();
+        if (CfXcorrPipeline.isPipelineMode(mode)) {
+            CfXcorrPipeline.Result r = CfXcorrPipeline.runCli(mode, configPath);
+            if (r.failed()) {
+                throw new IllegalStateException(CfXcorrPipeline.summary(CfXcorrPipeline.parsePhase(mode), r));
+            }
+            return;
+        }
         if (configPath == null) configPath = "config.json";
         configPath = configPath.trim();
 
@@ -319,11 +328,6 @@ public final class XTreLocCLI {
             throw new IllegalStateException("No .dat files to process for mode " + context.getMode());
         }
 
-        ExecutorService executor = (numJobs > 1)
-                ? BatchExecutorFactory.newFixedThreadPoolBounded(
-                        numJobs, BatchExecutorFactory.suggestedQueueCapacity(datFiles.length))
-                : null;
-
         Path outDir = context.getOutDir();
         if (outDir == null) {
             throw new IllegalStateException(
@@ -347,7 +351,7 @@ public final class XTreLocCLI {
         }
 
         StationRepository preLoadedStations = null;
-        if (executor != null && config.stationFile != null) {
+        if (numJobs > 1 && config.stationFile != null) {
             try {
                 preLoadedStations = StationRepository.load(Path.of(config.stationFile));
             } catch (Exception e) {
@@ -355,6 +359,10 @@ public final class XTreLocCLI {
             }
         }
 
+        ExecutorService executor = (numJobs > 1)
+                ? BatchExecutorFactory.newFixedThreadPoolBounded(
+                        numJobs, BatchExecutorFactory.suggestedQueueCapacity(datFiles.length))
+                : null;
         try {
             final StationRepository sharedStations = preLoadedStations;
             for (Path datPath : datFiles) {
@@ -420,6 +428,10 @@ public final class XTreLocCLI {
         } catch (Exception e) {
             logger.log(Level.SEVERE, "Batch processing failed", e);
             throw new RuntimeException("Batch processing failed", e);
+        } finally {
+            if (executor != null) {
+                executor.shutdownNow();
+            }
         }
     }
     
@@ -615,25 +627,29 @@ public final class XTreLocCLI {
         System.out.println("For batch usage without prompts: xtreloc <MODE> [config.json]");
         while (true) {
             System.out.println();
-            System.out.print("Solver mode (GRD/LMO/MCMC/DE/TRD/CLS/SYN) [GRD]: ");
+            System.out.print("Mode (GRD/LMO/MCMC/DE/TRD/CLS/SYN/CF/CC/CFCC) [GRD]: ");
             String modeLine = readLine(scanner);
             if ("q".equalsIgnoreCase(modeLine)) {
                 System.out.println(quitMessage);
                 return;
             }
             String mode = modeLine.isEmpty() ? "GRD" : modeLine.toUpperCase();
-            if (!isKnownSolverMode(mode)) {
-                System.err.println("Unknown mode: " + mode + ". Use GRD, LMO, MCMC, DE, TRD, CLS, or SYN.");
+            if (!isKnownSolverMode(mode) && !CfXcorrPipeline.isPipelineMode(mode)) {
+                System.err.println("Unknown mode: " + mode + ". Use GRD, LMO, MCMC, DE, TRD, CLS, SYN, CF, CC, or CFCC.");
                 continue;
             }
 
-            System.out.print("Config path [config.json]: ");
+            System.out.print(CfXcorrPipeline.isPipelineMode(mode)
+                    ? "Pipeline JSON or path glob: "
+                    : "Config path [config.json]: ");
             String configLine = readLine(scanner);
             if ("q".equalsIgnoreCase(configLine)) {
                 System.out.println(quitMessage);
                 return;
             }
-            String configPath = configLine.isEmpty() ? "config.json" : configLine;
+            String configPath = configLine.isEmpty()
+                    ? (CfXcorrPipeline.isPipelineMode(mode) ? "" : "config.json")
+                    : configLine;
 
             System.out.println();
             System.out.println("Running: mode=" + mode + ", config=" + configPath);
@@ -694,20 +710,37 @@ public final class XTreLocCLI {
         System.out.println();
         System.out.println("Usage:");
         System.out.println("  xtreloc                          Interactive CLI (prompts for mode and config)");
-        System.out.println("  xtreloc <MODE> [config.json]     Batch: run once and exit");
+        System.out.println("  xtreloc <MODE> [config.json]     Batch location: run once and exit");
+        System.out.println("  xtreloc CF|CC|CFCC <glob|json>   CF then/or cross-corr over day folders");
         System.out.println("  java -jar xTreLoc.jar ...        Same as above");
         System.out.println();
         System.out.println("Options:");
         System.out.println("  --help, -h    Show this help message");
         System.out.println("  --version, -v Show version information");
         System.out.println();
-        System.out.println("Modes:");
+        System.out.println("Location modes:");
         System.out.println("  GRD   Grid search location");
         System.out.println("  LMO   Levenberg-Marquardt optimization");
         System.out.println("  MCMC  Markov Chain Monte Carlo location");
+        System.out.println("  DE    Differential evolution location");
         System.out.println("  TRD   Triple difference relocation");
         System.out.println("  CLS   Spatial clustering");
         System.out.println("  SYN   Synthetic test data generation");
+        System.out.println();
+        System.out.println("Trace-pipeline modes (no taupFile):");
+        System.out.println("  CF    Characteristic function for every matching day folder");
+        System.out.println("  CC    Cross-corr of already-written CF SAC in matching folders");
+        System.out.println("  CFCC  All CF first, then all CC (same day set)");
+        System.out.println("  Second argument: pipeline JSON or a path glob (quote the *):");
+        System.out.println("    xtreloc CFCC '/data/sac/2007*'");
+        System.out.println("    xtreloc CF   pipeline.json     # inputRoot may contain *");
+        System.out.println("  Output: <out>/CF/<day>/  then  <out>/Correlation/<day>/*.dat");
+        System.out.println("  Existing CF/dat days are skipped unless skipExisting is false.");
+        System.out.println();
+        System.out.println("config.json taupFile (same as GUI):");
+        System.out.println("  1-D model (.nd/.tvel or bundled name: prem, prem.nd, iasp91.tvel, …)");
+        System.out.println("  NonLinLoc travel-time grid directory (*.time.hdr; P and/or S)");
+        System.out.println("  raytraceMethod is the 1-D fallback only (layered | taup); tables/grids ignore it.");
     }
 
     private static void showVersion() {

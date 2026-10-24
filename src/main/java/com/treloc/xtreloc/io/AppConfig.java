@@ -7,6 +7,8 @@ import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
 
@@ -15,6 +17,7 @@ import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
  * Structure: "io" (I/O paths per mode), "params" (parameters per mode).
  * Use getModes() for a merged view (io + params) as ModeConfig.
  */
+@JsonInclude(JsonInclude.Include.NON_NULL)
 public class AppConfig {
 
     /** Default SYN mode: random seed */
@@ -38,11 +41,26 @@ public class AppConfig {
     /**
      * Travel-time engine: {@code layered} (default, {@link com.treloc.xtreloc.solver.Raytrace1D}) or
      * {@code taup} (spherical TauP, same velocity file when supported by TauModelLoader).
-     * The synonym {@code legacy} is accepted when reading configs for compatibility.
      */
     public String raytraceMethod = "layered";
     public double hypBottom = 100.0;
+    /**
+     * Optional Model Range box. When set (travel-time table or an explicit Range), search and
+     * solutions stay inside. A box smaller than the table is allowed; a larger box is rejected in the UI.
+     */
+    public Double locLonMin;
+    public Double locLonMax;
+    public Double locLatMin;
+    public Double locLatMax;
+    public Double locMinDepthKm;
     public double threshold = 0.0;
+    /**
+     * Relative weight of P-phase pair residuals versus S ({@code S = 1}). Default {@code 2}
+     * so P contributes more to the combined residual used by GRD / LMO / MCMC / DE / TRD.
+     */
+    public double pWeight = 2.0;
+    /** Minimum number of lag rows required after threshold screening (0 = no minimum). */
+    public int minDataCount = 0;
 
     /** I/O paths per mode (datDirectory, outDirectory, catalogFile). */
     public Map<String, ModeIOConfig> io;
@@ -57,13 +75,17 @@ public class AppConfig {
     public String getRaytraceMethod() { return raytraceMethod; }
     public double getHypBottom() { return hypBottom; }
     public double getThreshold() { return threshold; }
+    public double getPWeight() { return pWeight; }
+    public int getMinDataCount() { return minDataCount; }
     public Map<String, ModeIOConfig> getIO() { return io; }
     public Map<String, JsonNode> getParams() { return params; }
 
     /**
      * Returns merged mode config (io + params) per mode for backward compatibility.
-     * Builds ModeConfig from io and params on each call.
+     * Builds ModeConfig from io and params on each call. Not a JSON field ({@code modes} / {@code solver}
+     * in old files are ignored).
      */
+    @JsonIgnore
     public Map<String, ModeConfig> getModes() {
         Map<String, ModeConfig> merged = new HashMap<>();
         Set<String> modes = new HashSet<>();
@@ -85,10 +107,6 @@ public class AppConfig {
         return merged;
     }
 
-    /** @deprecated Use getParams() */
-    @Deprecated
-    public Map<String, JsonNode> getSolver() { return params; }
-
     /**
      * Resolves relative paths in this config against the given base directory.
      * Paths that are already absolute are left unchanged.
@@ -103,6 +121,7 @@ public class AppConfig {
         if (stationFile != null && !stationFile.isEmpty() && !Paths.get(stationFile).isAbsolute()) {
             stationFile = base.resolve(stationFile).normalize().toString();
         }
+        taupFile = resolveModelOrTablePath(base, taupFile);
         if (io != null) {
             for (Map.Entry<String, ModeIOConfig> e : io.entrySet()) {
                 ModeIOConfig m = e.getValue();
@@ -118,6 +137,17 @@ public class AppConfig {
                 }
             }
         }
+    }
+
+    private static String resolveModelOrTablePath(Path base, String spec) {
+        if (spec == null || spec.isBlank() || Paths.get(spec).isAbsolute()) {
+            return spec;
+        }
+        String t = spec.trim();
+        if (VelocityModelCatalog.isBundledModelName(t)) {
+            return t;
+        }
+        return base.resolve(t).normalize().toString();
     }
 
     private static void applyParamsToModeConfig(JsonNode p, ModeConfig m, String mode) {
@@ -145,6 +175,7 @@ public class AppConfig {
     }
 
     /** I/O paths for one mode (used in config "io" section). */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     public static class ModeIOConfig {
         @JsonDeserialize(using = PathDeserializer.class)
         public Path datDirectory;

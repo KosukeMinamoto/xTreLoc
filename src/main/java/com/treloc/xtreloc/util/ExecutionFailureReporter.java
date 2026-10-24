@@ -110,22 +110,4 @@ public final class ExecutionFailureReporter {
         }
         return sb.toString();
     }
-
-    /** Short text for modal dialogs. */
-    public static String dialogMessage(Throwable t) {
-        Throwable r = unwrap(t);
-        if (r == null) {
-            return "An error occurred.";
-        }
-        StringBuilder sb = new StringBuilder();
-        sb.append(r.getClass().getSimpleName());
-        sb.append(": ");
-        sb.append(r.getMessage() != null ? r.getMessage() : "(no message)");
-        Throwable c = r.getCause();
-        if (c != null) {
-            sb.append("\nCaused by: ");
-            sb.append(c.getMessage() != null ? c.getMessage() : c.getClass().getSimpleName());
-        }
-        return sb.toString();
-    }
 }

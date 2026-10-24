@@ -5,14 +5,16 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 import com.treloc.xtreloc.app.util.AsciiLogo;
+import com.treloc.xtreloc.app.util.LauncherModePreference;
 import com.treloc.xtreloc.app.util.ModeAvailabilityChecker;
 
 /**
  * Main entry point for xTreLoc (also the {@code xtreloc} command from {@code installDist}).
  * <p>
- * Default with no arguments: interactive CLI (boxed logo, then prompts for mode and config).
- * Use {@code --gui} or {@code --tui}
- * for other interfaces. {@code --interactive} offers the legacy menu when stdin is available.
+ * Default with no arguments: respects {@link com.treloc.xtreloc.app.util.LauncherModePreference Startup}
+ * ({@code ~/.xtreloc/settings.json}, key {@code launcherMode}); default is terminal menu after ASCII logo ({@code select}
+ * with choices 0=CLI, 1=TUI, 2=GUI). Use {@code --gui}, {@code --tui}, or {@code --cli}
+ * for other interfaces.
  * With a solver mode name (e.g. GRD) and optional config path, runs CLI directly.
  * From a macOS app bundle (no stdin), launches GUI when available.
  *
@@ -107,8 +109,66 @@ public class XTreLoc {
             }
             return;
         }
-        // Default: command-line mode (CLI help or batch usage documented there)
-        launchCLI(new String[0]);
+        LauncherModePreference.StartupMode startup = LauncherModePreference.readPreferredStartupMode();
+        boolean stdinOk = isStandardInputAvailable();
+
+        if (!stdinOk) {
+            switch (startup) {
+                case CLI:
+                    launchCLI(new String[0]);
+                    return;
+                case TUI:
+                    if (ModeAvailabilityChecker.isTUIAvailable()) {
+                        launchTUI(new String[0]);
+                    } else {
+                        System.err.println("Startup preference is TUI but it is unavailable in this JAR/build.");
+                        System.err.println("Run with a terminal, or install the full distribution.");
+                        launchCLI(new String[0]);
+                    }
+                    return;
+                case GUI:
+                    if (ModeAvailabilityChecker.isGUIAvailable()) {
+                        launchGUI(new String[0]);
+                    } else {
+                        printModeBuildGuide("GUI");
+                        System.err.println("(No stdin for terminal menu.)");
+                        System.err.println("Run: xtreloc --cli GRD config.json");
+                        launchCLI(new String[0]);
+                    }
+                    return;
+                case SELECT:
+                default:
+                    launchCLI(new String[0]);
+                    return;
+            }
+        }
+
+        // Terminal with stdin — honor saved startup mode
+        switch (startup) {
+            case CLI:
+                launchCLI(new String[0]);
+                return;
+            case TUI:
+                if (!ModeAvailabilityChecker.isTUIAvailable()) {
+                    System.err.println("Startup preference is TUI but it is unavailable. Opening launcher menu...");
+                    showModeSelection();
+                    return;
+                }
+                launchTUI(new String[0]);
+                return;
+            case GUI:
+                if (!ModeAvailabilityChecker.isGUIAvailable()) {
+                    System.err.println("Startup preference is GUI but it is unavailable in this build. Opening launcher menu...");
+                    showModeSelection();
+                    return;
+                }
+                launchGUI(new String[0]);
+                return;
+            case SELECT:
+            default:
+                showModeSelection();
+                return;
+        }
     }
 
     /** Returns true if the argument is a known solver mode name (GRD, LMO, MCMC, DE, TRD, CLS, SYN). */
@@ -148,45 +208,62 @@ public class XTreLoc {
                     AsciiLogo.print(System.out);
                     showLogo = false;
                 }
-                printModeSelection(guiAvailable, tuiAvailableForSelection, cliAvailable);
+                printModeHints(guiAvailable, tuiAvailableForSelection, cliAvailable);
+                printModePrompt();
                 
                 String line = scanner.hasNextLine() ? scanner.nextLine().trim() : "";
                 if (line.isEmpty() && scanner.hasNext()) {
                     line = scanner.next().trim();
-                    if (scanner.hasNextLine()) scanner.nextLine();
+                    if (scanner.hasNextLine()) {
+                        scanner.nextLine();
+                    }
                 }
-                
-                if ("q".equalsIgnoreCase(line) || "0".equals(line)) {
+
+                if ("q".equalsIgnoreCase(line)) {
                     System.out.println("\nExiting. Goodbye!");
                     return;
                 }
-                
-                int choice = -1;
+
+                int choice;
                 try {
                     choice = Integer.parseInt(line);
                 } catch (NumberFormatException e) {
-                    System.out.println("\nInvalid choice. Enter 1, 2, 3, 0, or q.");
+                    printModeReminder(guiAvailable, tuiAvailableForSelection, cliAvailable);
                     continue;
                 }
-                
-                int currentOption = 1;
-                if (guiAvailable && choice == currentOption++) {
-                    System.out.println("\nLaunching GUI mode...");
-                    launchGUI(new String[0]);
-                    return;
+
+                switch (choice) {
+                    case 0:
+                        if (!cliAvailable) {
+                            System.out.println("\nCLI is not available in this build.");
+                            printModeReminder(guiAvailable, tuiAvailableForSelection, cliAvailable);
+                            continue;
+                        }
+                        System.out.println("\nLaunching CLI (interactive)...");
+                        runCLIInteractive(scanner);
+                        continue;
+                    case 1:
+                        if (!tuiAvailableForSelection) {
+                            System.out.println("\nTUI requires a terminal and is unavailable in this build.");
+                            printModeReminder(guiAvailable, tuiAvailableForSelection, cliAvailable);
+                            continue;
+                        }
+                        System.out.println("\nLaunching TUI...");
+                        launchTUI(new String[0]);
+                        return;
+                    case 2:
+                        if (!guiAvailable) {
+                            System.out.println("\nGUI is not included in this JAR/build.");
+                            printModeReminder(guiAvailable, tuiAvailableForSelection, cliAvailable);
+                            continue;
+                        }
+                        System.out.println("\nLaunching GUI...");
+                        launchGUI(new String[0]);
+                        return;
+                    default:
+                        printModeReminder(guiAvailable, tuiAvailableForSelection, cliAvailable);
+                        continue;
                 }
-                if (tuiAvailableForSelection && choice == currentOption++) {
-                    System.out.println("\nLaunching TUI mode...");
-                    launchTUI(new String[0]);
-                    return;
-                }
-                if (cliAvailable && choice == currentOption++) {
-                    runCLIInteractive(scanner);
-                    continue;
-                }
-                
-                System.out.println("\nInvalid choice. Enter 1, 2, 3, 0, or q.");
-                continue;
             }
         } catch (Exception e) {
             System.err.println("Error: " + e.getMessage());
@@ -202,32 +279,31 @@ public class XTreLoc {
     }
 
     /**
-     * Prints the interface mode menu (no logo). Used after invalid choice or when returning from CLI.
-     *
-     * @param guiAvailable whether GUI mode is available
-     * @param tuiAvailableForSelection whether TUI is available and stdin is usable
-     * @param cliAvailable whether CLI mode is available
+     * Explains numbering (0 / 1 / 2); shown once below the ASCII logo or after invalid input.
      */
-    private static void printModeSelection(boolean guiAvailable, boolean tuiAvailableForSelection, boolean cliAvailable) {
-        System.out.println("Select interface mode:");
-        int optionNumber = 1;
-        if (guiAvailable) {
-            System.out.println("  " + optionNumber + ". GUI - Graphical User Interface (recommended)");
-            optionNumber++;
-        }
-        if (tuiAvailableForSelection) {
-            System.out.println("  " + optionNumber + ". TUI - Text User Interface (interactive menu)");
-            optionNumber++;
-        }
-        if (cliAvailable) {
-            System.out.println("  " + optionNumber + ". CLI - Command Line Interface (batch processing)");
-            optionNumber++;
-        }
-        System.out.println();
-        System.out.println("  0 or q. Exit");
-        System.out.println();
-        System.out.print("Enter your choice: ");
+    private static void printModeHints(boolean guiAvailable, boolean tuiAvailableForSelection, boolean cliAvailable) {
+        System.out.println("Select interface mode (Settings » General saves the default startup):");
+        String cliSuffix = cliAvailable ? "" : " — not included in this JAR/build";
+        String tuiSuffix = tuiAvailableForSelection ? "" : " — unavailable (need terminal full build)";
+        String guiSuffix = guiAvailable ? "" : " — not included in this JAR/build";
+        System.out.println("  0. CLI — command line (solver prompts)" + cliSuffix);
+        System.out.println("  1. TUI — text menu" + tuiSuffix);
+        System.out.println("  2. GUI — graphical" + guiSuffix);
+        System.out.println("  q. Exit without launching\n");
     }
+
+    private static void printModePrompt() {
+        System.out.print("Enter choice (0, 1, 2, or q): ");
+    }
+
+    /**
+     * Prints a short reminder when the user enters an invalid selection.
+     */
+    private static void printModeReminder(boolean guiAvailable, boolean tuiAvailableForSelection, boolean cliAvailable) {
+        System.out.println("Invalid choice.");
+        printModeHints(guiAvailable, tuiAvailableForSelection, cliAvailable);
+    }
+
     /**
      * Runs CLI in a loop: prompts for solver mode and config path, runs once, then prompts again.
      * Typing q at either prompt exits back to the interface mode menu.
@@ -353,14 +429,16 @@ public class XTreLoc {
         System.out.println("  xtreloc [MODE] [config.json]");
         System.out.println("  java -jar xTreLoc.jar ...   (same as above)");
         System.out.println("");
-        System.out.println("Default (no arguments): interactive CLI (prompts for mode and config).");
+        System.out.println("Default (no arguments): reads ~/.xtreloc/settings.json (launcherMode).");
+        System.out.println("  Default launcherMode \"select\": terminal shows ASCII logo, then enter 0=CLI / 1=TUI / 2=GUI (q=exit).");
+        System.out.println("  Set CLI / TUI / GUI under GUI Settings » General » Startup.");
         System.out.println("Install: ./gradlew installDist  →  build/install/xtreloc/bin/xtreloc");
         System.out.println("");
         System.out.println("Options:");
         System.out.println("  --gui, -g           Graphical user interface");
         System.out.println("  --tui, -t           Text user interface (terminal menu)");
-        System.out.println("  --cli, -c           Command-line mode (same as default with no args)");
-        System.out.println("  --interactive, -i   Interactive menu to choose GUI / TUI / CLI (needs stdin)");
+        System.out.println("  --cli, -c           Command-line mode (same as no-args when launcherMode is cli)");
+        System.out.println("  --interactive, -i   Interactive menu (0/1/2) ignoring saved launcherMode");
         System.out.println("  --help, -h          Show this help message");
         System.out.println("  --version, -v       Show version information");
         System.out.println("");
@@ -373,10 +451,10 @@ public class XTreLoc {
         System.out.println("  SYN              Synthetic test data generation");
         System.out.println("");
         System.out.println("Examples:");
-        System.out.println("  xtreloc                          # Interactive CLI (default)");
+        System.out.println("  xtreloc                          # Use saved launcherMode (default: terminal menu 0/1/2)");
         System.out.println("  xtreloc --gui                    # Launch GUI (requires full build)");
         System.out.println("  xtreloc --tui                    # Launch TUI");
-        System.out.println("  xtreloc --interactive            # Choose interface in terminal");
+        System.out.println("  xtreloc --interactive            # Force terminal menu regardless of settings");
         System.out.println("  xtreloc GRD config.json          # Run GRD via CLI");
         System.out.println("");
     }

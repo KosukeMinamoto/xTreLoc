@@ -21,6 +21,10 @@ public class CatalogInfo {
     private boolean visible;
     /** Whether to show error ellipses for this catalog on the map. */
     private boolean showErrorEllipse;
+    /** Symbol size in pixels; {@code <= 0} uses the map default. */
+    private int symbolSize;
+    /** Fill opacity 0–1. */
+    private float opacity = 1f;
 
     public CatalogInfo(String name, Color color, SymbolType symbolType, List<Hypocenter> hypocenters, File sourceFile) {
         this.name = name;
@@ -30,6 +34,8 @@ public class CatalogInfo {
         this.sourceFile = sourceFile;
         this.visible = true;
         this.showErrorEllipse = false;
+        this.symbolSize = 0;
+        this.opacity = 1f;
     }
     
     public enum SymbolType {
@@ -128,6 +134,43 @@ public class CatalogInfo {
         this.showErrorEllipse = showErrorEllipse;
     }
 
+    public int getSymbolSize() {
+        return symbolSize;
+    }
+
+    public void setSymbolSize(int symbolSize) {
+        this.symbolSize = symbolSize;
+    }
+
+    public float getOpacity() {
+        return opacity;
+    }
+
+    public void setOpacity(float opacity) {
+        this.opacity = Float.isFinite(opacity) ? Math.max(0f, Math.min(1f, opacity)) : 1f;
+    }
+
+    public Color colorWithOpacity() {
+        Color c = color != null ? color : new Color(96, 96, 96);
+        int a = Math.round(opacity * 255f);
+        return new Color(c.getRed(), c.getGreen(), c.getBlue(), a);
+    }
+
+    public MapLayerStyle toLayerStyle(int defaultSize) {
+        float size = symbolSize > 0 ? symbolSize : defaultSize;
+        return MapLayerStyle.scatter(color, symbolType, size, opacity);
+    }
+
+    public void applyLayerStyle(MapLayerStyle style) {
+        if (style == null) {
+            return;
+        }
+        setColor(style.getColor());
+        setSymbolType(style.getSymbol());
+        setSymbolSize(Math.round(style.getSize()));
+        setOpacity(style.getOpacity());
+    }
+
     /**
      * Normalizes time string for comparison
      * Supports both ISO 8601 and yymmdd.hhmmss formats
@@ -135,14 +178,6 @@ public class CatalogInfo {
      */
     public static String normalizeTime(String time) {
         return TimeFormatConverter.normalizeTimeForComparison(time);
-    }
-    
-    /**
-     * Checks if two times represent the same event (minute-level comparison)
-     */
-    public static boolean isSameEvent(String time1, String time2) {
-        if (time1 == null || time2 == null) return false;
-        return normalizeTime(time1).equals(normalizeTime(time2));
     }
 }
 

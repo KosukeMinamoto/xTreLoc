@@ -54,7 +54,7 @@ public class HypoTripleDiff extends SolverBase {
     private Path outDir;
     private Path targetDir;
     private int[] iterNumArray;
-    private int[] distKmArray;
+    private double[] distKmArray;
     private int[] dampFactArray;
     private double lsqrAtol = 1e-6;
     private double lsqrBtol = 1e-6;
@@ -149,7 +149,7 @@ public class HypoTripleDiff extends SolverBase {
         if (appConfig.getParams() != null && appConfig.getParams().containsKey("TRD")) {
             var trdSolver = appConfig.getParams().get("TRD");
             this.iterNumArray = parseIntArray(trdSolver, "iterNum", new int[]{10, 10});
-            this.distKmArray = parseIntArray(trdSolver, "distKm", new int[]{50, 20});
+            this.distKmArray = parseDoubleArray(trdSolver, "distKm", new double[]{50, 20});
             this.dampFactArray = parseIntArray(trdSolver, "dampFact", new int[]{0, 1});
             
             if (trdSolver.has("lsqrAtol")) {
@@ -169,7 +169,7 @@ public class HypoTripleDiff extends SolverBase {
             }
         } else {
             this.iterNumArray = new int[]{10, 10};
-            this.distKmArray = new int[]{50, 20};
+            this.distKmArray = new double[]{50, 20};
             this.dampFactArray = new int[]{0, 1};
         }
         
@@ -251,6 +251,46 @@ public class HypoTripleDiff extends SolverBase {
         try {
             for (int i = 0; i < parts.length; i++) {
                 out[i] = Integer.parseInt(parts[i].trim());
+            }
+            return out;
+        } catch (NumberFormatException e) {
+            return defaultValue;
+        }
+    }
+
+    private double[] parseDoubleArray(com.fasterxml.jackson.databind.JsonNode node, String key, double[] defaultValue) {
+        if (!node.has(key) || node.get(key).isNull()) {
+            return defaultValue;
+        }
+        com.fasterxml.jackson.databind.JsonNode v = node.get(key);
+        if (v.isArray()) {
+            double[] out = new double[v.size()];
+            for (int i = 0; i < v.size(); i++) {
+                out[i] = v.get(i).asDouble();
+            }
+            return out;
+        }
+        if (v.isTextual()) {
+            return parseCommaSeparatedDoubles(v.asText(), defaultValue);
+        }
+        if (v.isNumber()) {
+            return new double[]{v.asDouble()};
+        }
+        return defaultValue;
+    }
+
+    private static double[] parseCommaSeparatedDoubles(String text, double[] defaultValue) {
+        if (text == null || text.isBlank()) {
+            return defaultValue;
+        }
+        String[] parts = text.trim().split("\\s*,\\s*");
+        if (parts.length == 0) {
+            return defaultValue;
+        }
+        double[] out = new double[parts.length];
+        try {
+            for (int i = 0; i < parts.length; i++) {
+                out[i] = Double.parseDouble(parts[i].trim());
             }
             return out;
         } catch (NumberFormatException e) {
@@ -509,7 +549,7 @@ public class HypoTripleDiff extends SolverBase {
                         throw new RuntimeException("Cancelled");
                     }
                     
-                    int distKm = distKmArray[i];
+                    double distKm = distKmArray[i];
                     int iterNum = iterNumArray[i];
                     int dampFact = dampFactArray[i];
                     int globalIterOffset = 0;
@@ -562,7 +602,7 @@ public class HypoTripleDiff extends SolverBase {
                                 break;
                             }
                             
-                            double[][][] partialTbl = createPartialTblArray(cluster, targMap);
+                            double[][][][] partialTbl = createPartialTblArray(cluster, targMap, filteredTripDiff);
                             if (Thread.currentThread().isInterrupted()) {
                                 logger.info("Triple difference relocation interrupted by user");
                                 SolverLogger.info("TRD: Interrupted by user");
@@ -635,6 +675,7 @@ public class HypoTripleDiff extends SolverBase {
                             } else {
                                 double[] residuals = calculateResiduals(GObj, d, dm);
                                 weights = turkeyBiweight(residuals, 4.685);
+                                pinCentroidConstraintWeights(weights);
                             }
                             
                             logger.fine("TRD: applyWeights start (d.length=" + d.length + ")");
@@ -724,23 +765,42 @@ public class HypoTripleDiff extends SolverBase {
                             if (dm != null) {
                             // Use only indices [0, numTarget-1] when dm is longer than expected (ERR reduced numTarget).
                             int effectiveDmLength = Math.min(dm.length, expectedDmLength);
-                            for (int k = 0; k < clusterPoints.size(); k++) {
+                            int nPts = clusterPoints.size();
+                            double[] dLonUpd = new double[nPts];
+                            double[] dLatUpd = new double[nPts];
+                            double[] dDepUpd = new double[nPts];
+                            boolean[] upd = new boolean[nPts];
+                            for (int k = 0; k < nPts; k++) {
                                 if (targMap[k] == -1) {
                                     continue;
                                 }
-                                Point point = clusterPoints.get(k);
                                 int targIdx = targMap[k];
                                 if (targIdx * 3 + 2 >= effectiveDmLength) {
-                                    // This target index is beyond current numTarget (e.g. ERR reduced count); exclude from relocation.
                                     logger.warning("Cluster " + clusterId + ": excluding point " + k + " from relocation (targIdx=" + targIdx + " >= numTarget=" + numTarget + "). Target mapping was reduced by ERR marking.");
                                     SolverLogger.warning("TRD: Excluding point " + k + " from relocation (targIdx out of range after ERR marking).");
                                     targMap[k] = -1;
                                     continue;
                                 }
-                                // Always apply solution update (dm) to position; then mark ERR if depth out of range (excluded from next iterations).
-                                double newLon = point.getLon() + dm[targIdx * 3];
-                                double newLat = point.getLat() + dm[targIdx * 3 + 1];
-                                double newDep = point.getDep() + dm[targIdx * 3 + 2];
+                                dLonUpd[k] = clip(dm[targIdx * 3], 0.05);
+                                dLatUpd[k] = clip(dm[targIdx * 3 + 1], 0.05);
+                                dDepUpd[k] = clip(dm[targIdx * 3 + 2], 5.0);
+                                upd[k] = true;
+                            }
+                            double[] meanShift = removeMeanShift(dLonUpd, dLatUpd, dDepUpd, upd);
+                            if (meanShift != null && (Math.abs(meanShift[0]) > 1e-6
+                                    || Math.abs(meanShift[1]) > 1e-6 || Math.abs(meanShift[2]) > 1e-3)) {
+                                SolverLogger.info(String.format(java.util.Locale.ROOT,
+                                    "TRD: Cluster %d stage %d iter %d removed mean shift dlon=%.5f dlat=%.5f ddep=%.3f km",
+                                    clusterId, i + 1, j + 1, meanShift[0], meanShift[1], meanShift[2]));
+                            }
+                            for (int k = 0; k < nPts; k++) {
+                                if (!upd[k]) {
+                                    continue;
+                                }
+                                Point point = clusterPoints.get(k);
+                                double newLon = point.getLon() + dLonUpd[k];
+                                double newLat = point.getLat() + dLatUpd[k];
+                                double newDep = point.getDep() + dDepUpd[k];
                                 point.setLon(newLon);
                                 point.setLat(newLat);
                                 point.setDep(newDep);
@@ -752,7 +812,8 @@ public class HypoTripleDiff extends SolverBase {
                                     point.setType("ERR");
                                     targMap[k] = -1;
                                 } else {
-                                    if (shouldCalcVar && var != null && targIdx * 3 + 2 < var.length) {
+                                    int targIdx = targMap[k];
+                                    if (shouldCalcVar && var != null && targIdx >= 0 && targIdx * 3 + 2 < var.length) {
                                         double lonVar = var[targIdx * 3];
                                         double latVar = var[targIdx * 3 + 1];
                                         double depVar = var[targIdx * 3 + 2];
@@ -912,13 +973,13 @@ public class HypoTripleDiff extends SolverBase {
      * otherwise, OpenMapRealMatrix is used.
      */
     private Object[] matrixDG(List<TripleDifference> trpDiff, Cluster<Point> cluster, 
-                              double[][][] partialTbl, double distanceThreshold, int[] targMap, int numTarget) {
+                              double[][][][] partialTbl, double distanceThreshold, int[] targMap, int numTarget) {
         int M = trpDiff.size();
         int N = numTarget;
         logger.fine("TRD matrixDG: start M=" + M + " N=" + N + " (3*N=" + (3 * N) + ")");
         SolverLogger.fine("TRD: matrixDG start (rows=" + M + ", cols=" + (3 * N) + ")");
         
-        // Count valid rows (excluding REF-REF pairs and rows with targMap index >= N)
+        // Count valid rows (excluding REF-REF pairs, out-of-range targMap, and failed travel times)
         int validRowCount = 0;
         for (int m = 0; m < M; m++) {
             TripleDifference td = trpDiff.get(m);
@@ -926,6 +987,7 @@ public class HypoTripleDiff extends SolverBase {
             int nCol1 = targMap[td.eve1];
             if (nCol0 == -1 && nCol1 == -1) continue;
             if ((nCol0 >= 0 && nCol0 >= N) || (nCol1 >= 0 && nCol1 >= N)) continue;
+            if (!tripleTravelOk(partialTbl, td)) continue;
             validRowCount++;
         }
         
@@ -949,6 +1011,7 @@ public class HypoTripleDiff extends SolverBase {
                 TripleDifference td = trpDiff.get(m);
                 int eve0 = td.eve0;
                 int eve1 = td.eve1;
+                int iph = td.phase < 0.5 ? 0 : 1;
                 int stnk = td.stn0;
                 int stnl = td.stn1;
                 
@@ -971,26 +1034,30 @@ public class HypoTripleDiff extends SolverBase {
                     }
                     continue;
                 }
+                if (!tripleTravelOk(partialTbl, td)) {
+                    continue;
+                }
                 
                 if (nCol1 >= 0) {
-                    G.setEntry(rowIdx, 3 * nCol1, partialTbl[eve1][stnl][0] - partialTbl[eve1][stnk][0]);
-                    G.setEntry(rowIdx, 3 * nCol1 + 1, partialTbl[eve1][stnl][1] - partialTbl[eve1][stnk][1]);
-                    G.setEntry(rowIdx, 3 * nCol1 + 2, partialTbl[eve1][stnl][2] - partialTbl[eve1][stnk][2]);
+                    G.setEntry(rowIdx, 3 * nCol1, partialTbl[iph][eve1][stnl][0] - partialTbl[iph][eve1][stnk][0]);
+                    G.setEntry(rowIdx, 3 * nCol1 + 1, partialTbl[iph][eve1][stnl][1] - partialTbl[iph][eve1][stnk][1]);
+                    G.setEntry(rowIdx, 3 * nCol1 + 2, partialTbl[iph][eve1][stnl][2] - partialTbl[iph][eve1][stnk][2]);
                 }
                 
                 if (nCol0 >= 0) {
-                    G.setEntry(rowIdx, 3 * nCol0, -(partialTbl[eve0][stnl][0] - partialTbl[eve0][stnk][0]));
-                    G.setEntry(rowIdx, 3 * nCol0 + 1, -(partialTbl[eve0][stnl][1] - partialTbl[eve0][stnk][1]));
-                    G.setEntry(rowIdx, 3 * nCol0 + 2, -(partialTbl[eve0][stnl][2] - partialTbl[eve0][stnk][2]));
+                    G.setEntry(rowIdx, 3 * nCol0, -(partialTbl[iph][eve0][stnl][0] - partialTbl[iph][eve0][stnk][0]));
+                    G.setEntry(rowIdx, 3 * nCol0 + 1, -(partialTbl[iph][eve0][stnl][1] - partialTbl[iph][eve0][stnk][1]));
+                    G.setEntry(rowIdx, 3 * nCol0 + 2, -(partialTbl[iph][eve0][stnl][2] - partialTbl[iph][eve0][stnk][2]));
                 }
                 // Note: If nCol0 == -1 (REF event), no column entry is set (REF position is fixed, δx = 0)
                 
                 // Calculate residual (using partialTbl for both events, including REF)
-                double cal0 = partialTbl[eve0][stnl][3] - partialTbl[eve0][stnk][3];
-                double cal1 = partialTbl[eve1][stnl][3] - partialTbl[eve1][stnk][3];
+                double cal0 = partialTbl[iph][eve0][stnl][3] - partialTbl[iph][eve0][stnk][3];
+                double cal1 = partialTbl[iph][eve1][stnl][3] - partialTbl[iph][eve1][stnk][3];
                 double lagCal = cal1 - cal0;
                 double lagObs = td.tdTime;
                 d[rowIdx] = lagObs - lagCal;
+                scaleTripleRow(G, d, rowIdx, nCol0, nCol1, td);
                 
                 rowIdx++;
                 if (rowIdx % 100000 == 0 && rowIdx > 0) {
@@ -1006,24 +1073,7 @@ public class HypoTripleDiff extends SolverBase {
             
             logger.fine("TRD matrixDG COO: data rows done, adding constraint rows");
             SolverLogger.fine("TRD: matrixDG COO constraint rows");
-            // Add constraint rows: sum{delta m} = 0 for each component (x, y, z)
-            // Constraint row for x component: sum(delta_x_i) = 0
-            for (int k = 0; k < N; k++) {
-                G.setEntry(validRowCount, 3 * k, 1.0);
-            }
-            d[validRowCount] = 0.0;
-            
-            // Constraint row for y component: sum(delta_y_i) = 0
-            for (int k = 0; k < N; k++) {
-                G.setEntry(validRowCount + 1, 3 * k + 1, 1.0);
-            }
-            d[validRowCount + 1] = 0.0;
-            
-            // Constraint row for z component: sum(delta_z_i) = 0
-            for (int k = 0; k < N; k++) {
-                G.setEntry(validRowCount + 2, 3 * k + 2, 1.0);
-            }
-            d[validRowCount + 2] = 0.0;
+            addCentroidConstraintRows(G, d, validRowCount, N);
             
             logger.fine("TRD matrixDG: COO done (rows=" + M_constrained + ")");
             SolverLogger.fine("TRD: matrixDG COO done");
@@ -1037,6 +1087,7 @@ public class HypoTripleDiff extends SolverBase {
                 TripleDifference td = trpDiff.get(m);
                 int eve0 = td.eve0;
                 int eve1 = td.eve1;
+                int iph = td.phase < 0.5 ? 0 : 1;
                 int stnk = td.stn0;
                 int stnl = td.stn1;
                 
@@ -1059,26 +1110,30 @@ public class HypoTripleDiff extends SolverBase {
                     }
                     continue;
                 }
+                if (!tripleTravelOk(partialTbl, td)) {
+                    continue;
+                }
                 
                 if (nCol1 >= 0) {
-                    G.setEntry(rowIdx, 3 * nCol1, partialTbl[eve1][stnl][0] - partialTbl[eve1][stnk][0]);
-                    G.setEntry(rowIdx, 3 * nCol1 + 1, partialTbl[eve1][stnl][1] - partialTbl[eve1][stnk][1]);
-                    G.setEntry(rowIdx, 3 * nCol1 + 2, partialTbl[eve1][stnl][2] - partialTbl[eve1][stnk][2]);
+                    G.setEntry(rowIdx, 3 * nCol1, partialTbl[iph][eve1][stnl][0] - partialTbl[iph][eve1][stnk][0]);
+                    G.setEntry(rowIdx, 3 * nCol1 + 1, partialTbl[iph][eve1][stnl][1] - partialTbl[iph][eve1][stnk][1]);
+                    G.setEntry(rowIdx, 3 * nCol1 + 2, partialTbl[iph][eve1][stnl][2] - partialTbl[iph][eve1][stnk][2]);
                 }
                 
                 if (nCol0 >= 0) {
-                    G.setEntry(rowIdx, 3 * nCol0, -(partialTbl[eve0][stnl][0] - partialTbl[eve0][stnk][0]));
-                    G.setEntry(rowIdx, 3 * nCol0 + 1, -(partialTbl[eve0][stnl][1] - partialTbl[eve0][stnk][1]));
-                    G.setEntry(rowIdx, 3 * nCol0 + 2, -(partialTbl[eve0][stnl][2] - partialTbl[eve0][stnk][2]));
+                    G.setEntry(rowIdx, 3 * nCol0, -(partialTbl[iph][eve0][stnl][0] - partialTbl[iph][eve0][stnk][0]));
+                    G.setEntry(rowIdx, 3 * nCol0 + 1, -(partialTbl[iph][eve0][stnl][1] - partialTbl[iph][eve0][stnk][1]));
+                    G.setEntry(rowIdx, 3 * nCol0 + 2, -(partialTbl[iph][eve0][stnl][2] - partialTbl[iph][eve0][stnk][2]));
                 }
                 // Note: If nCol0 == -1 (REF event), no column entry is set (REF position is fixed, δx = 0)
                 
                 // Calculate residual (using partialTbl for both events, including REF)
-                double cal0 = partialTbl[eve0][stnl][3] - partialTbl[eve0][stnk][3];
-                double cal1 = partialTbl[eve1][stnl][3] - partialTbl[eve1][stnk][3];
+                double cal0 = partialTbl[iph][eve0][stnl][3] - partialTbl[iph][eve0][stnk][3];
+                double cal1 = partialTbl[iph][eve1][stnl][3] - partialTbl[iph][eve1][stnk][3];
                 double lagCal = cal1 - cal0;
                 double lagObs = td.tdTime;
                 d[rowIdx] = lagObs - lagCal;
+                scaleTripleRow(G, d, rowIdx, nCol0, nCol1, td);
                 
                 rowIdx++;
                 if (rowIdx % 100000 == 0 && rowIdx > 0) {
@@ -1092,24 +1147,7 @@ public class HypoTripleDiff extends SolverBase {
             }
             
             logger.fine("TRD matrixDG OpenMap: adding constraint rows");
-            // Add constraint rows: sum{delta m} = 0 for each component (x, y, z)
-            // Constraint row for x component: sum(delta_x_i) = 0
-            for (int k = 0; k < N; k++) {
-                G.setEntry(validRowCount, 3 * k, 1.0);
-            }
-            d[validRowCount] = 0.0;
-            
-            // Constraint row for y component: sum(delta_y_i) = 0
-            for (int k = 0; k < N; k++) {
-                G.setEntry(validRowCount + 1, 3 * k + 1, 1.0);
-            }
-            d[validRowCount + 1] = 0.0;
-            
-            // Constraint row for z component: sum(delta_z_i) = 0
-            for (int k = 0; k < N; k++) {
-                G.setEntry(validRowCount + 2, 3 * k + 2, 1.0);
-            }
-            d[validRowCount + 2] = 0.0;
+            addCentroidConstraintRows(G, d, validRowCount, N);
             
             logger.fine("TRD matrixDG: OpenMap done (rows=" + M_constrained + ")");
             SolverLogger.fine("TRD: matrixDG OpenMap done");
@@ -1117,8 +1155,30 @@ public class HypoTripleDiff extends SolverBase {
         }
     }
     
-    private double[][][] createPartialTblArray(Cluster<Point> cluster) {
-        return createPartialTblArray(cluster, null);
+    private double[][][][] createPartialTblArray(Cluster<Point> cluster) {
+        return createPartialTblArray(cluster, null, true, true);
+    }
+
+    private double[][][][] createPartialTblArray(Cluster<Point> cluster, int[] targMap,
+                                                 List<TripleDifference> tripDiff) {
+        boolean needP = false;
+        boolean needS = false;
+        if (tripDiff != null) {
+            for (TripleDifference td : tripDiff) {
+                if (td.phase < 0.5) {
+                    needP = true;
+                } else {
+                    needS = true;
+                }
+                if (needP && needS) {
+                    break;
+                }
+            }
+        }
+        if (!needP && !needS) {
+            needP = needS = true;
+        }
+        return createPartialTblArray(cluster, targMap, needP, needS);
     }
     
     /**
@@ -1170,11 +1230,12 @@ public class HypoTripleDiff extends SolverBase {
      * @param targMap optional; if non-null, set to -1 for any point that fails partial derivative calculation so caller can recompute numTarget
      * @return three-dimensional array of partial derivatives
      */
-    private double[][][] createPartialTblArray(Cluster<Point> cluster, int[] targMap) {
+    private double[][][][] createPartialTblArray(Cluster<Point> cluster, int[] targMap,
+                                                 boolean needP, boolean needS) {
         List<Point> points = cluster.getPoints();
         int numEvents = points.size();
         int numStations = stationTable.length;
-        double[][][] partialTbl = new double[numEvents][numStations][4];
+        double[][][][] partialTbl = new double[2][numEvents][numStations][4];
         logger.fine("TRD createPartialTblArray: start numEvents=" + numEvents + " numStations=" + numStations + " numJobs=" + numJobs);
         SolverLogger.fine("TRD: createPartialTblArray start (events=" + numEvents + ", stations=" + numStations + ")");
         
@@ -1193,15 +1254,7 @@ public class HypoTripleDiff extends SolverBase {
                     usedIdx[j] = j;
                 }
                 try {
-                    Object[] tmp = partialDerivativeMatrix(stationTable, usedIdx, point);
-                    double[][] dtdr = (double[][]) tmp[0];
-                    double[] trvTime = (double[]) tmp[1];
-                    for (int j = 0; j < numStations; j++) {
-                        partialTbl[i][j][0] = dtdr[j][0];
-                        partialTbl[i][j][1] = dtdr[j][1];
-                        partialTbl[i][j][2] = dtdr[j][2];
-                        partialTbl[i][j][3] = trvTime[j];
-                    }
+                    storePhasePartials(partialTbl, i, point, usedIdx, numStations, needP, needS);
                 } catch (Exception e) {
                     boolean depthOutOfRange = isDepthOrArrivalFailure(e);
                     String pointInfo = String.format("point %d (time: %s, lat=%.6f, lon=%.6f, dep=%.3f km)",
@@ -1247,15 +1300,7 @@ public class HypoTripleDiff extends SolverBase {
                             usedIdx[j] = j;
                         }
                         try {
-                            Object[] tmp = partialDerivativeMatrix(stationTable, usedIdx, point);
-                            double[][] dtdr = (double[][]) tmp[0];
-                            double[] trvTime = (double[]) tmp[1];
-                            for (int j = 0; j < numStations; j++) {
-                                partialTbl[eventIndex][j][0] = dtdr[j][0];
-                                partialTbl[eventIndex][j][1] = dtdr[j][1];
-                                partialTbl[eventIndex][j][2] = dtdr[j][2];
-                                partialTbl[eventIndex][j][3] = trvTime[j];
-                            }
+                            storePhasePartials(partialTbl, eventIndex, point, usedIdx, numStations, needP, needS);
                         } catch (Exception e) {
                             boolean depthOutOfRange = isDepthOrArrivalFailure(e);
                             String pointInfo = String.format("point %d (time: %s, lat=%.6f, lon=%.6f, dep=%.3f km)",
@@ -1329,6 +1374,184 @@ public class HypoTripleDiff extends SolverBase {
         }
         
         return partialTbl;
+    }
+
+    /** Scales one triple-diff equation so P rows have weight {@code pWeight} (S = 1). */
+    private void scaleTripleRow(org.apache.commons.math3.linear.RealMatrix G, double[] d,
+                                int rowIdx, int nCol0, int nCol1, TripleDifference td) {
+        double s = triplePhaseScale(td);
+        if (s == 1.0) {
+            return;
+        }
+        if (nCol1 >= 0) {
+            G.setEntry(rowIdx, 3 * nCol1, G.getEntry(rowIdx, 3 * nCol1) * s);
+            G.setEntry(rowIdx, 3 * nCol1 + 1, G.getEntry(rowIdx, 3 * nCol1 + 1) * s);
+            G.setEntry(rowIdx, 3 * nCol1 + 2, G.getEntry(rowIdx, 3 * nCol1 + 2) * s);
+        }
+        if (nCol0 >= 0) {
+            G.setEntry(rowIdx, 3 * nCol0, G.getEntry(rowIdx, 3 * nCol0) * s);
+            G.setEntry(rowIdx, 3 * nCol0 + 1, G.getEntry(rowIdx, 3 * nCol0 + 1) * s);
+            G.setEntry(rowIdx, 3 * nCol0 + 2, G.getEntry(rowIdx, 3 * nCol0 + 2) * s);
+        }
+        d[rowIdx] *= s;
+    }
+
+    private void scaleTripleRow(COOSparseMatrix G, double[] d,
+                                int rowIdx, int nCol0, int nCol1, TripleDifference td) {
+        double s = triplePhaseScale(td);
+        if (s == 1.0) {
+            return;
+        }
+        if (nCol1 >= 0) {
+            G.setEntry(rowIdx, 3 * nCol1, G.getEntry(rowIdx, 3 * nCol1) * s);
+            G.setEntry(rowIdx, 3 * nCol1 + 1, G.getEntry(rowIdx, 3 * nCol1 + 1) * s);
+            G.setEntry(rowIdx, 3 * nCol1 + 2, G.getEntry(rowIdx, 3 * nCol1 + 2) * s);
+        }
+        if (nCol0 >= 0) {
+            G.setEntry(rowIdx, 3 * nCol0, G.getEntry(rowIdx, 3 * nCol0) * s);
+            G.setEntry(rowIdx, 3 * nCol0 + 1, G.getEntry(rowIdx, 3 * nCol0 + 1) * s);
+            G.setEntry(rowIdx, 3 * nCol0 + 2, G.getEntry(rowIdx, 3 * nCol0 + 2) * s);
+        }
+        d[rowIdx] *= s;
+    }
+
+    private double triplePhaseScale(TripleDifference td) {
+        return Math.sqrt(HypoUtils.phaseWeight(td.phase, pWeight));
+    }
+
+    private static double clip(double v, double maxAbs) {
+        if (v > maxAbs) {
+            return maxAbs;
+        }
+        if (v < -maxAbs) {
+            return -maxAbs;
+        }
+        return v;
+    }
+
+    /** Weight so the 3 centroid rows are not drowned by M data equations. */
+    static double centroidConstraintWeight(int validRowCount) {
+        return Math.sqrt(Math.max(1, validRowCount));
+    }
+
+    private void addCentroidConstraintRows(org.apache.commons.math3.linear.RealMatrix G,
+                                           double[] d, int validRowCount, int N) {
+        double w = centroidConstraintWeight(validRowCount);
+        for (int k = 0; k < N; k++) {
+            G.setEntry(validRowCount, 3 * k, w);
+            G.setEntry(validRowCount + 1, 3 * k + 1, w);
+            G.setEntry(validRowCount + 2, 3 * k + 2, w);
+        }
+        d[validRowCount] = 0.0;
+        d[validRowCount + 1] = 0.0;
+        d[validRowCount + 2] = 0.0;
+    }
+
+    private void addCentroidConstraintRows(COOSparseMatrix G, double[] d, int validRowCount, int N) {
+        double w = centroidConstraintWeight(validRowCount);
+        for (int k = 0; k < N; k++) {
+            G.setEntry(validRowCount, 3 * k, w);
+            G.setEntry(validRowCount + 1, 3 * k + 1, w);
+            G.setEntry(validRowCount + 2, 3 * k + 2, w);
+        }
+        d[validRowCount] = 0.0;
+        d[validRowCount + 1] = 0.0;
+        d[validRowCount + 2] = 0.0;
+    }
+
+    /** Keep sum{Δm}=0 rows at full weight so Tukey cannot drop the centroid constraint. */
+    static void pinCentroidConstraintWeights(double[] weights) {
+        if (weights == null || weights.length < 3) {
+            return;
+        }
+        weights[weights.length - 3] = 1.0;
+        weights[weights.length - 2] = 1.0;
+        weights[weights.length - 1] = 1.0;
+    }
+
+    /**
+     * Subtract the mean of each component so the cluster centroid does not translate.
+     * @return mean (dlon, dlat, ddep) that was removed, or null if nothing was updated
+     */
+    static double[] removeMeanShift(double[] dLon, double[] dLat, double[] dDep, boolean[] used) {
+        if (dLon == null || dLat == null || dDep == null || used == null) {
+            return null;
+        }
+        int n = 0;
+        double sLon = 0.0;
+        double sLat = 0.0;
+        double sDep = 0.0;
+        for (int i = 0; i < used.length; i++) {
+            if (!used[i]) {
+                continue;
+            }
+            sLon += dLon[i];
+            sLat += dLat[i];
+            sDep += dDep[i];
+            n++;
+        }
+        if (n == 0) {
+            return null;
+        }
+        sLon /= n;
+        sLat /= n;
+        sDep /= n;
+        for (int i = 0; i < used.length; i++) {
+            if (!used[i]) {
+                continue;
+            }
+            dLon[i] -= sLon;
+            dLat[i] -= sLat;
+            dDep[i] -= sDep;
+        }
+        return new double[] { sLon, sLat, sDep };
+    }
+
+    /** False when any of the four event-station travel times failed (MAX_VALUE / NaN). */
+    private static boolean tripleTravelOk(double[][][][] partialTbl, TripleDifference td) {
+        int iph = td.phase < 0.5 ? 0 : 1;
+        int e0 = td.eve0;
+        int e1 = td.eve1;
+        int k = td.stn0;
+        int l = td.stn1;
+        if (partialTbl == null || iph < 0 || iph >= partialTbl.length) {
+            return false;
+        }
+        if (e0 < 0 || e1 < 0 || e0 >= partialTbl[iph].length || e1 >= partialTbl[iph].length) {
+            return false;
+        }
+        int n0 = partialTbl[iph][e0].length;
+        int n1 = partialTbl[iph][e1].length;
+        if (k < 0 || l < 0 || k >= n0 || l >= n0 || k >= n1 || l >= n1) {
+            return false;
+        }
+        return DatPair.finiteTravel(partialTbl[iph][e0][k][3])
+            && DatPair.finiteTravel(partialTbl[iph][e0][l][3])
+            && DatPair.finiteTravel(partialTbl[iph][e1][k][3])
+            && DatPair.finiteTravel(partialTbl[iph][e1][l][3]);
+    }
+
+    private void storePhasePartials(double[][][][] partialTbl, int eventIndex, Point point,
+                                    int[] usedIdx, int numStations, boolean needP, boolean needS) {
+        com.treloc.xtreloc.solver.table.TravelTimeTable.Phase[] phases = {
+            com.treloc.xtreloc.solver.table.TravelTimeTable.Phase.P,
+            com.treloc.xtreloc.solver.table.TravelTimeTable.Phase.S
+        };
+        boolean[] need = { needP, needS };
+        for (int ph = 0; ph < 2; ph++) {
+            if (!need[ph]) {
+                continue;
+            }
+            Object[] tmp = partialDerivativeMatrix(stationTable, usedIdx, point, phases[ph]);
+            double[][] dtdr = (double[][]) tmp[0];
+            double[] trvTime = (double[]) tmp[1];
+            for (int j = 0; j < numStations; j++) {
+                partialTbl[ph][eventIndex][j][0] = dtdr[j][0];
+                partialTbl[ph][eventIndex][j][1] = dtdr[j][1];
+                partialTbl[ph][eventIndex][j][2] = dtdr[j][2];
+                partialTbl[ph][eventIndex][j][3] = trvTime[j];
+            }
+        }
     }
     
     /**
@@ -1510,7 +1733,7 @@ public class HypoTripleDiff extends SolverBase {
     /**
      * @return the filtered triple difference
      */
-    private List<TripleDifference> filterTripDiffByDistance(List<TripleDifference> tripDiff, int distKm) {
+    private List<TripleDifference> filterTripDiffByDistance(List<TripleDifference> tripDiff, double distKm) {
         List<TripleDifference> filtered = new ArrayList<>();
         for (TripleDifference td : tripDiff) {
             if (td.distKm < distKm) {
@@ -1615,7 +1838,7 @@ public class HypoTripleDiff extends SolverBase {
         double[] rmsPerEvent = new double[numEvents];
         java.util.Arrays.fill(rmsPerEvent, Double.NaN);
         
-        double[][][] partialTbl = createPartialTblArray(cluster);
+        double[][][][] partialTbl = createPartialTblArray(cluster, null, tripDiff);
         Object[] dG = matrixDG(tripDiff, cluster, partialTbl, 0, targMap, numTarget);
         double[] d = (double[]) dG[0];
         int validRowCount = d.length - 3;
@@ -1633,6 +1856,9 @@ public class HypoTripleDiff extends SolverBase {
                 continue;
             }
             if ((nCol0 >= 0 && nCol0 >= N) || (nCol1 >= 0 && nCol1 >= N)) {
+                continue;
+            }
+            if (!tripleTravelOk(partialTbl, td)) {
                 continue;
             }
             rowToEve.add(new int[]{td.eve0, td.eve1});

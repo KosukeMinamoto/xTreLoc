@@ -1,9 +1,12 @@
 package com.treloc.xtreloc.app.gui.model;
 
+import com.treloc.xtreloc.util.TimeFormatConverter;
+
 public class Hypocenter {
     public final double lat;
     public final double lon;
     public final double depth;
+    /** Origin time in ISO-8601 {@code yyyy-MM-dd'T'HH:mm:ss} when parseable; otherwise the raw string. */
     public final String time;
     public final double xerr; // x error (km)
     public final double yerr; // y error (km)
@@ -34,7 +37,8 @@ public class Hypocenter {
 
     public Hypocenter(String time, double lat, double lon, double depth, 
                      double xerr, double yerr, double zerr, double rms, Integer clusterId, String datFilePath, String type) {
-        this.time = time;
+        // Always store calendar order yyyy-MM-dd (from yymmdd.hhmmss filenames after MCMC, etc.).
+        this.time = TimeFormatConverter.toISO8601(time);
         this.lat = lat;
         this.lon = lon;
         this.depth = depth;

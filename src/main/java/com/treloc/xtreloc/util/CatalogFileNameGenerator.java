@@ -26,7 +26,7 @@ public class CatalogFileNameGenerator {
         String modeSuffix = getModeSuffix(mode);
         
         if (mode.equals("SYN")) {
-            return new File(outputDir, DEFAULT_BASE_NAME + "_syn.csv");
+            return uniqueIfExists(new File(outputDir, DEFAULT_BASE_NAME + "_syn.csv"));
         }
         
         String baseName = DEFAULT_BASE_NAME;
@@ -46,7 +46,29 @@ public class CatalogFileNameGenerator {
             baseName = baseName + "_" + modeSuffix;
         }
         
-        return new File(outputDir, baseName + ".csv");
+        return uniqueIfExists(new File(outputDir, baseName + ".csv"));
+    }
+
+    /**
+     * If {@code proposed} already exists, returns {@code base_N.ext} with the smallest N ≥ 1
+     * that is free (e.g. {@code catalog_lmo.csv} → {@code catalog_lmo_1.csv}).
+     */
+    public static File uniqueIfExists(File proposed) {
+        if (proposed == null || !proposed.exists()) {
+            return proposed;
+        }
+        File parent = proposed.getParentFile();
+        String name = proposed.getName();
+        int dot = name.lastIndexOf('.');
+        String base = dot > 0 ? name.substring(0, dot) : name;
+        String ext = dot > 0 ? name.substring(dot) : "";
+        int n = 1;
+        File next;
+        do {
+            next = new File(parent, base + "_" + n + ext);
+            n++;
+        } while (next.exists());
+        return next;
     }
     
     /**

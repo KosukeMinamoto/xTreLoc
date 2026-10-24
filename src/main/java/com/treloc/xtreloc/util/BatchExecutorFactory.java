@@ -12,6 +12,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  */
 public final class BatchExecutorFactory {
 
+    private static final long IDLE_TIMEOUT_SECONDS = 10L;
     private static final AtomicInteger POOL_SEQ = new AtomicInteger();
 
     private BatchExecutorFactory() {
@@ -24,7 +25,7 @@ public final class BatchExecutorFactory {
         if (taskCount <= 0) {
             return 64;
         }
-        return Math.min(8192, Math.max(32, taskCount * 2));
+        return Math.min(256, Math.max(8, taskCount));
     }
 
     /**
@@ -38,11 +39,15 @@ public final class BatchExecutorFactory {
             t.setDaemon(false);
             return t;
         };
-        return new ThreadPoolExecutor(
+        ThreadPoolExecutor pool = new ThreadPoolExecutor(
                 n, n,
-                0L, TimeUnit.MILLISECONDS,
+                IDLE_TIMEOUT_SECONDS, TimeUnit.SECONDS,
                 new ArrayBlockingQueue<>(cap),
                 tf,
                 new ThreadPoolExecutor.CallerRunsPolicy());
+        // Safety net: idle workers exit even if a caller forgets to shut the pool down,
+        // so non-daemon threads can never keep the JVM alive indefinitely.
+        pool.allowCoreThreadTimeOut(true);
+        return pool;
     }
 }

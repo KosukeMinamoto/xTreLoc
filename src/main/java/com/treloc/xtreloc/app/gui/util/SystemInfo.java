@@ -17,7 +17,7 @@ public class SystemInfo {
         info.append("=== System Information ===\n");
         
         // Application version
-        info.append("Application: ").append(VersionInfo.getVersionString()).append("\n");
+        info.append("Application: ").append(com.treloc.xtreloc.util.VersionInfo.getVersionString()).append("\n");
         
         // Java version
         info.append("Java Version: ").append(System.getProperty("java.version")).append("\n");

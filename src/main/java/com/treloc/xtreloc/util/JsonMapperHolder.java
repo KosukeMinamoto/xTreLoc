@@ -26,6 +26,8 @@ public final class JsonMapperHolder {
     private static ObjectMapper createMapper() {
         ObjectMapper mapper = new ObjectMapper();
         mapper.enable(SerializationFeature.INDENT_OUTPUT);
+        mapper.disable(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
+        mapper.setSerializationInclusion(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL);
         com.fasterxml.jackson.databind.module.SimpleModule module =
             new com.fasterxml.jackson.databind.module.SimpleModule();
         module.addDeserializer(Path.class, new com.treloc.xtreloc.io.PathDeserializer());

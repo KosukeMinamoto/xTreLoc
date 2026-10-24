@@ -246,16 +246,7 @@ public class SyntheticTest extends SolverBase {
         );
         
         int[] codeIdx = IntStream.rangeClosed(0, stationTable.length - 1).toArray();
-        double[] sWaveTravelTime = travelTime(stationTable, codeIdx, pointPerturbed);
-        
-        double[] travelTimeResidual = new double[lagTable.length];
-        for (int i = 0; i < lagTable.length; i++) {
-            int idxK = (int) lagTable[i][0];
-            int idxL = (int) lagTable[i][1];
-            double observedLag = lagTable[i][2];
-            double calculatedLag = sWaveTravelTime[idxL] - sWaveTravelTime[idxK];
-            travelTimeResidual[i] = observedLag - calculatedLag;
-        }
+        double[] travelTimeResidual = pairResiduals(stationTable, codeIdx, pointPerturbed, lagTable);
         
         double meanResidual = 0.0;
         for (double r : travelTimeResidual) {
@@ -325,19 +316,29 @@ public class SyntheticTest extends SolverBase {
                 "SYN needs at least 2 stations for differential times; station table has " + stationTable.length);
         }
         int[] codeIdx = IntStream.rangeClosed(0, stationTable.length - 1).toArray();
-        double[] sTravelTime = travelTime(stationTable, codeIdx, point);
+        double[] pTravelTime = travelTime(stationTable, codeIdx, point, com.treloc.xtreloc.solver.table.TravelTimeTable.Phase.P);
+        double[] sTravelTime = travelTime(stationTable, codeIdx, point, com.treloc.xtreloc.solver.table.TravelTimeTable.Phase.S);
 
-        int numAllPairs = stationTable.length * (stationTable.length - 1) / 2;
-        double[][] allData = new double[numAllPairs][4];
+        int numStaPairs = stationTable.length * (stationTable.length - 1) / 2;
+        int numAllPairs = numStaPairs * 2;
+        double[][] allData = new double[numAllPairs][5];
 
         int count = 0;
         for (int i = 0; i < sTravelTime.length - 1; i++) {
             for (int j = i + 1; j < sTravelTime.length; j++) {
+                double lagErrP = addPurturb ? rand.nextGaussian() * phsErr : 0;
                 allData[count][0] = i;
                 allData[count][1] = j;
-                double lagErr = addPurturb ? rand.nextGaussian() * phsErr : 0;
-                allData[count][2] = sTravelTime[j] - sTravelTime[i] + lagErr;
+                allData[count][2] = pTravelTime[j] - pTravelTime[i] + lagErrP;
                 allData[count][3] = 1;
+                allData[count][4] = DatPair.P;
+                count++;
+                double lagErrS = addPurturb ? rand.nextGaussian() * phsErr : 0;
+                allData[count][0] = i;
+                allData[count][1] = j;
+                allData[count][2] = sTravelTime[j] - sTravelTime[i] + lagErrS;
+                allData[count][3] = 1;
+                allData[count][4] = DatPair.S;
                 count++;
             }
         }

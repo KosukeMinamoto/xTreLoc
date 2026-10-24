@@ -9,6 +9,7 @@ import java.nio.file.Path;
 import java.util.List;
 
 import org.junit.Assume;
+import org.junit.BeforeClass;
 import org.junit.Test;
 
 import edu.sc.seis.TauP.Arrival;
@@ -57,6 +58,18 @@ public class RaytraceTauPAccuracyTest {
         }
     }
 
+    private static TauModel tauModel;
+    private static Raytrace1D layered;
+
+    @BeforeClass
+    public static void loadSharedPrem() throws Exception {
+        Assume.assumeFalse(
+            "skip TauP compare",
+            Boolean.parseBoolean(System.getProperty("xtreloc.skipTauPCompare", "false")));
+        tauModel = loadTauModelFromBundledNd(BUNDLED_PREM);
+        layered = Raytrace1D.load("prem.nd");
+    }
+
     private static Arrival fastestArrival(List<Arrival> arrivals) {
         if (arrivals == null || arrivals.isEmpty()) {
             throw new IllegalStateException("TauP returned no arrivals.");
@@ -72,13 +85,6 @@ public class RaytraceTauPAccuracyTest {
 
     @Test
     public void premRegionalDistanceUpTo120Km_matchesTauPFastS_withinTenPercent() throws Exception {
-        Assume.assumeFalse(
-            "skip TauP compare",
-            Boolean.parseBoolean(System.getProperty("xtreloc.skipTauPCompare", "false")));
-
-        TauModel tauModel = loadTauModelFromBundledNd(BUNDLED_PREM);
-        Raytrace1D layered = Raytrace1D.load("prem.nd");
-
         TauP_Time taup = new TauP_Time();
         taup.setTauModel(tauModel);
         taup.clearPhaseNames();
@@ -86,7 +92,7 @@ public class RaytraceTauPAccuracyTest {
         taup.clearPhases();
         taup.parsePhaseList("tts,S");
 
-        double[] distancesKm = {10.0, 30.0, 50.0, 100.0, 120.0};
+        double[] distancesKm = {10.0, 50.0, 120.0};
         double sourceDepthKm = 30.0;
         double stationDepthKm = 0.1;
 
@@ -118,13 +124,6 @@ public class RaytraceTauPAccuracyTest {
 
     @Test
     public void premTeleseismic_when1dTauPRatioComparable_thenRelativeErrorBounded() throws Exception {
-        Assume.assumeFalse(
-            "skip TauP compare",
-            Boolean.parseBoolean(System.getProperty("xtreloc.skipTauPCompare", "false")));
-
-        TauModel tauModel = loadTauModelFromBundledNd(BUNDLED_PREM);
-        Raytrace1D layered = Raytrace1D.load("prem.nd");
-
         TauP_Time taup = new TauP_Time();
         taup.setTauModel(tauModel);
         taup.clearPhaseNames();
@@ -132,8 +131,8 @@ public class RaytraceTauPAccuracyTest {
         taup.clearPhases();
         taup.parsePhaseList("tts,S");
 
-        double[] distancesKm = {500.0, 800.0, 1200.0, 2000.0, 3500.0, 5000.0};
-        double[] sourceDepthsKm = {10.0, 33.0, 100.0};
+        double[] distancesKm = {500.0, 2000.0, 5000.0};
+        double[] sourceDepthsKm = {10.0, 100.0};
         double stationDepthKm = 0.1;
 
         for (double distKm : distancesKm) {

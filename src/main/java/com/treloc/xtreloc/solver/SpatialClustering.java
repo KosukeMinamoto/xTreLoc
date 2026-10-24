@@ -775,11 +775,12 @@ public class SpatialClustering extends SolverBase {
                 
                 for (double[] row1 : lagTable1) {
                     for (double[] row2 : lagTable2) {
-                        if (row1[0] == row2[0] && row1[1] == row2[1]) {
+                        if (row1[0] == row2[0] && row1[1] == row2[1] && DatPair.samePhase(row1, row2)) {
                             double diff = row2[2] - row1[2];
                             tripleDifferences.add(new TripleDifference(
                                 eid1, eid2, (int) row1[0], (int) row1[1], 
-                                diff, distKm, clusterId));
+                                diff, distKm, clusterId, Double.NaN,
+                                DatPair.isP(row1) ? DatPair.P : DatPair.S));
                         }
                     }
                 }
@@ -817,15 +818,46 @@ public class SpatialClustering extends SolverBase {
             return tripleDifferences;
         }
         int numStations = stationTable.length;
-        int[] usedIdx = new int[numStations];
-        for (int j = 0; j < numStations; j++) usedIdx[j] = j;
+        boolean needP = false;
+        boolean needS = false;
+        boolean[] usedSta = new boolean[numStations];
+        for (TripleDifference td : tripleDifferences) {
+            if (td.phase < 0.5) {
+                needP = true;
+            } else {
+                needS = true;
+            }
+            if (td.stn0 >= 0 && td.stn0 < numStations) {
+                usedSta[td.stn0] = true;
+            }
+            if (td.stn1 >= 0 && td.stn1 < numStations) {
+                usedSta[td.stn1] = true;
+            }
+        }
+        int nUsed = 0;
+        for (boolean u : usedSta) {
+            if (u) {
+                nUsed++;
+            }
+        }
+        int[] usedIdx = new int[nUsed];
+        int w = 0;
+        for (int j = 0; j < numStations; j++) {
+            if (usedSta[j]) {
+                usedIdx[w++] = j;
+            }
+        }
 
-        double[][] trvTbl = new double[clusterPoints.size()][numStations];
+        double[][] trvP = new double[clusterPoints.size()][numStations];
+        double[][] trvS = new double[clusterPoints.size()][numStations];
         try {
             for (int i = 0; i < clusterPoints.size(); i++) {
-                double[] tt = travelTime(stationTable, usedIdx, clusterPoints.get(i));
+                double[][] ts = travelTimes(stationTable, usedIdx, clusterPoints.get(i), needP, needS);
+                double[] ttP = ts[0];
+                double[] ttS = ts[1];
                 for (int j = 0; j < numStations; j++) {
-                    trvTbl[i][j] = (tt != null && j < tt.length) ? tt[j] : Double.MAX_VALUE;
+                    trvP[i][j] = (ttP != null && j < ttP.length) ? ttP[j] : Double.MAX_VALUE;
+                    trvS[i][j] = (ttS != null && j < ttS.length) ? ttS[j] : Double.MAX_VALUE;
                 }
             }
         } catch (Exception e) {
@@ -841,10 +873,11 @@ public class SpatialClustering extends SolverBase {
             int e1 = td.eve1;
             int s0 = td.stn0;
             int s1 = td.stn1;
+            double[][] trvTbl = td.phase < 0.5 ? trvP : trvS;
             if (e0 >= trvTbl.length || e1 >= trvTbl.length
                     || s0 >= numStations || s1 >= numStations) {
                 withResidual.add(new TripleDifference(td.eve0, td.eve1, td.stn0, td.stn1,
-                        td.tdTime, td.distKm, td.clusterId, Double.NaN));
+                        td.tdTime, td.distKm, td.clusterId, Double.NaN, td.phase));
                 invalidCount++;
                 continue;
             }
@@ -855,14 +888,15 @@ public class SpatialClustering extends SolverBase {
             if (t00 >= Double.MAX_VALUE - 1 || t01 >= Double.MAX_VALUE - 1
                     || t10 >= Double.MAX_VALUE - 1 || t11 >= Double.MAX_VALUE - 1) {
                 withResidual.add(new TripleDifference(td.eve0, td.eve1, td.stn0, td.stn1,
-                        td.tdTime, td.distKm, td.clusterId, Double.NaN));
+                        td.tdTime, td.distKm, td.clusterId, Double.NaN, td.phase));
                 invalidCount++;
                 continue;
             }
-            double predTd = (t10 - t11) - (t00 - t01);
+            // tdTime = lag(eve1) − lag(eve0) with lag = t(stn1) − t(stn0)
+            double predTd = DatPair.calcTriple(trvTbl[e0], trvTbl[e1], s0, s1);
             double residual = Math.abs(td.tdTime - predTd);
             withResidual.add(new TripleDifference(td.eve0, td.eve1, td.stn0, td.stn1,
-                    td.tdTime, td.distKm, td.clusterId, residual));
+                    td.tdTime, td.distKm, td.clusterId, residual, td.phase));
         }
         if (invalidCount > 0) {
             logger.info("CLS: Cluster " + clusterId + " residuals: " + (tripleDifferences.size() - invalidCount)

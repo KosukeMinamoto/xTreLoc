@@ -1,37 +1,39 @@
 package com.treloc.xtreloc.app.gui.service;
 
+import java.io.IOException;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
-import java.util.ArrayList;
-import java.util.Date;
-import java.util.List;
-
-import org.jfree.data.time.Millisecond;
-import org.jfree.data.time.TimeSeries;
-
-import org.apache.commons.math3.fitting.PolynomialCurveFitter;
-import org.apache.commons.math3.fitting.WeightedObservedPoint;
-
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
 import edu.sc.seis.seisFile.sac.SacHeader;
 import edu.sc.seis.seisFile.sac.SacTimeSeries;
+import uk.me.berndporr.iirj.Butterworth;
 
 /**
  * Utility class for processing SAC waveform data.
  * Provides methods for reading SAC files, applying filters, and converting to time series.
- * 
+ * <p>
+ * Detrend matches ObsPy {@code stream.detrend("linear")} (line through first and last sample).
+ * Band-pass / high-pass / low-pass use Butterworth IIR + forward–reverse filtering (filtfilt),
+ * aligned with ObsPy {@code zerophase=True} band-pass processing in spirit (SciPy-style).
+ * </p>
+ *
  * @author xTreLoc Development Team
  * @version 1.0
  */
 public class WaveProcessor {
 
     private static final Logger LOG = Logger.getLogger(WaveProcessor.class.getName());
-    
+
+    /** Butterworth order for band-pass (ObsPy default {@code corners=4}). */
+    private static final int BP_ORDER = 4;
+    /** Butterworth order for dedicated high-pass / low-pass (ObsPy default {@code corners=4}). */
+    private static final int HP_LP_ORDER = 4;
+
     /**
      * Reads a SAC file from the specified path.
-     * 
+     *
      * @param sacFilePath the path to the SAC file
      * @return the SacTimeSeries object
      * @throws Exception if there is an error reading the file
@@ -40,9 +42,14 @@ public class WaveProcessor {
         return SacTimeSeries.read(sacFilePath);
     }
 
+    /** Header only (632 bytes). Safe for day-long continuous SAC. */
+    public static SacHeader readHeader(String sacFilePath) throws IOException {
+        return new SacHeader(new java.io.File(sacFilePath));
+    }
+
     /**
-     * Gets the start time from a SAC file header.
-     * 
+     * Gets the first-sample time from a SAC file header (NZ reference + {@code B} seconds).
+     *
      * @param sac the SacTimeSeries object
      * @return the start time as LocalDateTime
      */
@@ -57,35 +64,22 @@ public class WaveProcessor {
             hdr.getNzsec(),
             hdr.getNzmsec() * 1_000_000); // Convert milliseconds to nanoseconds
         time = time.plusDays(hdr.getNzjday() - 1);
+        float b = hdr.getB();
+        if (!Float.isNaN(b) && Math.abs(b + 12345f) > 1f) {
+            time = time.plusNanos(Math.round((double) b * 1_000_000_000.0));
+        }
         return time;
     }
 
-    /**
-     * Converts a SAC time series to a JFreeChart TimeSeries.
-     * 
-     * @param sac the SacTimeSeries object
-     * @return a TimeSeries for JFreeChart
-     */
-    public static TimeSeries getTimeSeries(SacTimeSeries sac) {
-        SacHeader hdr = sac.getHeader();
-        float[] data = sac.getY();
-        int npts = hdr.getNpts();
-        float delta = hdr.getDelta();
-
-        TimeSeries timeSeries = new TimeSeries("time");
-        ZoneId zoneId = ZoneId.systemDefault();
-        LocalDateTime startTime = getStarttime(sac);
-        for (int i = 0; i < npts; i++) {
-            LocalDateTime nowDT = startTime.plusNanos((long) (i * 1e9 * delta));
-            Date nowDate = Date.from(nowDT.atZone(zoneId).toInstant());
-            timeSeries.add(new Millisecond(nowDate), data[i]);
-        }
-        return timeSeries;
+    /** Epoch milliseconds of the first sample ({@link #getStarttime} in the system zone). */
+    public static long startEpochMillis(SacTimeSeries sac) {
+        return getStarttime(sac).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();
     }
 
     /**
-     * Removes linear trend from the SAC data.
-     * 
+     * Linear detrend matching ObsPy {@code detrend("linear")}: subtract the straight line through
+     * the first and last samples (not a least-squares fit over all points).
+     *
      * @param sac the SacTimeSeries object
      * @return the detrended SacTimeSeries
      */
@@ -94,22 +88,18 @@ public class WaveProcessor {
             SacHeader hdr = sac.getHeader();
             int npts = hdr.getNpts();
             float[] data = sac.getY();
-            double[] trend = new double[npts];
-            float[] detrended = new float[npts];
-
-            List<WeightedObservedPoint> points = new ArrayList<>();
-            for (int i = 0; i < npts; i++) {
-                points.add(new WeightedObservedPoint(1.0, i, data[i]));
+            if (npts < 2) {
+                return sac;
             }
-
-            PolynomialCurveFitter fitter = PolynomialCurveFitter.create(1);
-            double[] coefficients = fitter.fit(points);
-            
+            double y0 = data[0];
+            double y1 = data[npts - 1];
+            double slope = (y1 - y0) / (npts - 1);
+            float[] out = new float[npts];
             for (int i = 0; i < npts; i++) {
-                trend[i] = coefficients[0] + coefficients[1] * i;
-                detrended[i] = (float) (data[i] - trend[i]);
+                double trend = y0 + slope * i;
+                out[i] = (float) (data[i] - trend);
             }
-            sac.setY(detrended);
+            sac.setY(out);
         } catch (Exception e) {
             LOG.log(Level.WARNING, "Error in detrend", e);
         }
@@ -117,10 +107,75 @@ public class WaveProcessor {
     }
 
     /**
-     * Applies a simple band-pass filter to the SAC data using a moving average approach.
-     * Note: This is a simplified implementation. For production use, consider using
-     * a proper signal processing library.
-     * 
+     * Applies frequency filtering only for non-null corners: both null → no change;
+     * low only → high-pass; high only → low-pass; both → band-pass (same as {@link #bandPassFilter}).
+     */
+    public static SacTimeSeries applyOptionalFrequencyFilter(SacTimeSeries sac, Float freqMinHz, Float freqMaxHz) {
+        if (freqMinHz == null && freqMaxHz == null) {
+            return sac;
+        }
+        if (freqMinHz != null && freqMaxHz != null) {
+            return bandPassFilter(sac, freqMinHz, freqMaxHz);
+        }
+        if (freqMinHz != null) {
+            return highPassFilter(sac, freqMinHz);
+        }
+        return lowPassFilter(sac, java.util.Objects.requireNonNull(freqMaxHz, "freqMaxHz"));
+    }
+
+    /**
+     * High-pass: Butterworth + filtfilt (zero-phase), ObsPy-style {@code corners=4}.
+     */
+    public static SacTimeSeries highPassFilter(SacTimeSeries sac, float freqmin) {
+        try {
+            SacHeader hdr = sac.getHeader();
+            int npts = hdr.getNpts();
+            if (npts < 4) {
+                return sac;
+            }
+            float delta = hdr.getDelta();
+            double fs = 1.0 / delta;
+            float[] dataIni = sac.getY();
+            double[] xd = floatsToDoubles(dataIni);
+            double[] yd = filtfiltHighPass(fs, freqmin, xd);
+            doublesToFloats(yd, dataIni);
+            sac.setY(dataIni);
+        } catch (Exception e) {
+            LOG.log(Level.WARNING, "Error in highPassFilter", e);
+        }
+        return sac;
+    }
+
+    /**
+     * Low-pass: Butterworth + filtfilt (zero-phase), ObsPy-style {@code corners=4}.
+     */
+    public static SacTimeSeries lowPassFilter(SacTimeSeries sac, float freqmax) {
+        try {
+            SacHeader hdr = sac.getHeader();
+            int npts = hdr.getNpts();
+            if (npts < 4) {
+                return sac;
+            }
+            float delta = hdr.getDelta();
+            double fs = 1.0 / delta;
+            float nyquist = (float) (0.5 * fs);
+            if (freqmax >= nyquist) {
+                return sac;
+            }
+            float[] dataIni = sac.getY();
+            double[] xd = floatsToDoubles(dataIni);
+            double[] yd = filtfiltLowPass(fs, freqmax, xd);
+            doublesToFloats(yd, dataIni);
+            sac.setY(dataIni);
+        } catch (Exception e) {
+            LOG.log(Level.WARNING, "Error in lowPassFilter", e);
+        }
+        return sac;
+    }
+
+    /**
+     * Band-pass: Butterworth + filtfilt (zero-phase), ObsPy-style {@code corners=4}.
+     *
      * @param sac the SacTimeSeries object
      * @param freqmin minimum frequency in Hz
      * @param freqmax maximum frequency in Hz
@@ -130,53 +185,124 @@ public class WaveProcessor {
         try {
             SacHeader hdr = sac.getHeader();
             int npts = hdr.getNpts();
+            if (npts < 8) {
+                return sac;
+            }
             float delta = hdr.getDelta();
+            double fs = 1.0 / delta;
+            double nyq = 0.5 * fs;
+            if (freqmax >= nyq) {
+                return highPassFilter(sac, freqmin);
+            }
+            if (freqmin <= 0) {
+                return lowPassFilter(sac, freqmax);
+            }
+            if (freqmin >= freqmax) {
+                return sac;
+            }
             float[] dataIni = sac.getY();
-            float[] dataOut = new float[npts];
-            
-            // Simple high-pass filter (remove DC and low frequencies)
-            // Calculate moving average for low-frequency removal
-            int windowSize = (int) Math.max(1, Math.round(1.0f / (freqmin * delta)));
-            if (windowSize > npts / 2) {
-                windowSize = npts / 2;
-            }
-            
-            // High-pass: subtract moving average
-            for (int i = 0; i < npts; i++) {
-                int start = Math.max(0, i - windowSize / 2);
-                int end = Math.min(npts, i + windowSize / 2);
-                float sum = 0;
-                for (int j = start; j < end; j++) {
-                    sum += dataIni[j];
-                }
-                float avg = sum / (end - start);
-                dataOut[i] = dataIni[i] - avg;
-            }
-            
-            // Low-pass: simple moving average for high-frequency removal
-            float nyquist = 0.5f / delta;
-            if (freqmax < nyquist) {
-                int lowPassWindow = (int) Math.max(1, Math.round(nyquist / (freqmax * delta)));
-                if (lowPassWindow > 1) {
-                    float[] temp = new float[npts];
-                    System.arraycopy(dataOut, 0, temp, 0, npts);
-                    for (int i = 0; i < npts; i++) {
-                        int start = Math.max(0, i - lowPassWindow / 2);
-                        int end = Math.min(npts, i + lowPassWindow / 2);
-                        float sum = 0;
-                        for (int j = start; j < end; j++) {
-                            sum += temp[j];
-                        }
-                        dataOut[i] = sum / (end - start);
-                    }
-                }
-            }
-            
-            sac.setY(dataOut);
+            double[] xd = floatsToDoubles(dataIni);
+            double center = 0.5 * (freqmin + freqmax);
+            double width = Math.max(freqmax - freqmin, 1e-6);
+            double[] yd = filtfiltBandPass(fs, center, width, xd);
+            doublesToFloats(yd, dataIni);
+            sac.setY(dataIni);
         } catch (Exception e) {
-            LOG.log(Level.WARNING, "Error in bandPassFilter; returning partially processed data", e);
-            // Return original data if filtering fails
+            LOG.log(Level.WARNING, "Error in bandPassFilter", e);
         }
         return sac;
+    }
+
+    private static double[] floatsToDoubles(float[] f) {
+        double[] d = new double[f.length];
+        for (int i = 0; i < f.length; i++) {
+            d[i] = f[i];
+        }
+        return d;
+    }
+
+    private static void doublesToFloats(double[] d, float[] f) {
+        for (int i = 0; i < d.length && i < f.length; i++) {
+            f[i] = (float) d[i];
+        }
+    }
+
+    private static void reverseInPlace(double[] a) {
+        for (int i = 0, j = a.length - 1; i < j; i++, j--) {
+            double t = a[i];
+            a[i] = a[j];
+            a[j] = t;
+        }
+    }
+
+    private static double[] forwardFilter(Butterworth bw, double[] x) {
+        double[] y = new double[x.length];
+        for (int i = 0; i < x.length; i++) {
+            y[i] = bw.filter(x[i]);
+        }
+        return y;
+    }
+
+    private static double[] filtfiltHighPass(double sampleRate, double cutoffHz, double[] x) {
+        if (cutoffHz <= 0 || sampleRate <= 0 || x.length == 0) {
+            return x.clone();
+        }
+        double nyq = sampleRate / 2.0;
+        if (cutoffHz >= nyq * 0.999) {
+            return x.clone();
+        }
+        Butterworth b1 = new Butterworth();
+        b1.highPass(HP_LP_ORDER, sampleRate, cutoffHz);
+        double[] y = forwardFilter(b1, x);
+        reverseInPlace(y);
+        Butterworth b2 = new Butterworth();
+        b2.highPass(HP_LP_ORDER, sampleRate, cutoffHz);
+        y = forwardFilter(b2, y);
+        reverseInPlace(y);
+        return y;
+    }
+
+    private static double[] filtfiltLowPass(double sampleRate, double cutoffHz, double[] x) {
+        if (cutoffHz <= 0 || sampleRate <= 0 || x.length == 0) {
+            return x.clone();
+        }
+        double nyq = sampleRate / 2.0;
+        if (cutoffHz >= nyq * 0.999) {
+            return x.clone();
+        }
+        Butterworth b1 = new Butterworth();
+        b1.lowPass(HP_LP_ORDER, sampleRate, cutoffHz);
+        double[] y = forwardFilter(b1, x);
+        reverseInPlace(y);
+        Butterworth b2 = new Butterworth();
+        b2.lowPass(HP_LP_ORDER, sampleRate, cutoffHz);
+        y = forwardFilter(b2, y);
+        reverseInPlace(y);
+        return y;
+    }
+
+    private static double[] filtfiltBandPass(double sampleRate, double centerHz, double widthHz, double[] x) {
+        if (sampleRate <= 0 || x.length == 0) {
+            return x.clone();
+        }
+        double nyq = sampleRate / 2.0;
+        double half = 0.5 * widthHz;
+        double lo = centerHz - half;
+        double hi = centerHz + half;
+        if (lo <= 0) {
+            return filtfiltLowPass(sampleRate, Math.min(hi, nyq * 0.999), x);
+        }
+        if (hi >= nyq * 0.999) {
+            return filtfiltHighPass(sampleRate, lo, x);
+        }
+        Butterworth b1 = new Butterworth();
+        b1.bandPass(BP_ORDER, sampleRate, centerHz, widthHz);
+        double[] y = forwardFilter(b1, x);
+        reverseInPlace(y);
+        Butterworth b2 = new Butterworth();
+        b2.bandPass(BP_ORDER, sampleRate, centerHz, widthHz);
+        y = forwardFilter(b2, y);
+        reverseInPlace(y);
+        return y;
     }
 }

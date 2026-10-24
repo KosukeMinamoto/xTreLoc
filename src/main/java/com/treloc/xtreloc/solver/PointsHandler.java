@@ -11,10 +11,8 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.logging.Logger;
 
 public class PointsHandler {
-    private static final Logger logger = Logger.getLogger(PointsHandler.class.getName());
     private Point mainPoint;
     private Map<String, Integer> codeIndexMap;
 
@@ -24,6 +22,18 @@ public class PointsHandler {
     }
 
     public void readDatFile(String datFile, String[] codeStrings, double threshold) throws IOException {
+        readDatFile(datFile, codeStrings, threshold, 0);
+    }
+
+    /**
+     * Reads one solver .dat file and applies screening by weight threshold first, then minimum row count.
+     *
+     * @param datFile input dat path
+     * @param codeStrings station codes
+     * @param threshold keep rows with weight >= threshold (or all rows if threshold <= 0)
+     * @param minDataCount minimum number of lag rows after threshold screening (0 = no minimum)
+     */
+    public void readDatFile(String datFile, String[] codeStrings, double threshold, int minDataCount) throws IOException {
         codeIndexMap.clear();
         for (int i = 0; i < codeStrings.length; i++) {
             codeIndexMap.put(codeStrings[i], i);
@@ -86,14 +96,25 @@ public class PointsHandler {
                 String code1 = parts[0];
                 String code2 = parts[1];
                 double lagTime = Double.parseDouble(parts[2]);
-                double weight = parts.length > 3 ? Double.parseDouble(parts[3]) : 1.0;
+                double weight = 1.0;
+                String phaseTok = "S";
+                if (parts.length >= 5) {
+                    weight = Double.parseDouble(parts[3]);
+                    phaseTok = parts[4];
+                } else if (parts.length == 4) {
+                    if (isPhaseToken(parts[3])) {
+                        phaseTok = parts[3];
+                    } else {
+                        weight = Double.parseDouble(parts[3]);
+                    }
+                }
 
                 Integer idx1 = codeIndexMap.get(code1);
                 Integer idx2 = codeIndexMap.get(code2);
 
                 if (idx1 != null && idx2 != null) {
                     if (threshold <= 0.0 || weight >= threshold) {
-                        lagList.add(new double[]{idx1, idx2, lagTime, weight});
+                        lagList.add(new double[]{idx1, idx2, lagTime, weight, DatPair.code(phaseTok)});
                         usedIdxSet.add(idx1);
                         usedIdxSet.add(idx2);
                     }
@@ -103,6 +124,12 @@ public class PointsHandler {
             }
             double[][] lagTable = lagList.toArray(new double[lagList.size()][]);
             int[] usedIdx = usedIdxSet.stream().mapToInt(i -> i).toArray();
+
+            if (minDataCount > 0 && lagTable.length < minDataCount) {
+                throw new IOException(String.format(
+                    "Insufficient data after weight screening in %s: %d rows (< minDataCount=%d, threshold=%.6f)",
+                    datFile, lagTable.length, minDataCount, threshold));
+            }
 
             mainPoint = new Point("", lat, lon, dep, elat, elon, edep, res, datFile, type, -1);
             mainPoint.setLagTable(lagTable);
@@ -116,6 +143,14 @@ public class PointsHandler {
 
     public void setMainPoint(Point point) {
         this.mainPoint = point;
+    }
+
+    private static boolean isPhaseToken(String tok) {
+        if (tok == null || tok.isEmpty()) {
+            return false;
+        }
+        char c = Character.toUpperCase(tok.charAt(0));
+        return (c == 'P' || c == 'S') && tok.length() <= 3;
     }
 
     public void writeDatFile(String outFile, String[] codeStrings) throws IOException {
@@ -155,8 +190,8 @@ public class PointsHandler {
                     double weight = lag.length > 3 ? lag[3] : 1.0;
 
                     if (idx1 < codeStrings.length && idx2 < codeStrings.length) {
-                        writer.printf("%s %s %.3f %.3f%n",
-                            codeStrings[idx1], codeStrings[idx2], lagTime, weight);
+                        writer.printf("%s %s %.6f %.6f %s%n",
+                            codeStrings[idx1], codeStrings[idx2], lagTime, weight, DatPair.label(lag));
                     }
                 }
             }

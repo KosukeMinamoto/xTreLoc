@@ -44,6 +44,8 @@ public class AppSettings {
     private String defaultSymbolColor = "#000000";
     /** Picking: mouse button for P (Left, Right, Middle) */
     private String pickingMouseP = "Left";
+    /** Folder of one event's SAC files, e.g. /data/sac/{yyMMdd.HHmmss} (Seismic opener from the 2D map). */
+    private String eventWaveformPattern = "";
     /** Picking: mouse button for S (Left, Right, Middle) */
     private String pickingMouseS = "Right";
     /** Picking: mouse button for context menu (Left, Right, Middle) */
@@ -54,6 +56,19 @@ public class AppSettings {
     private String pickingKeyS = "None";
     /** Travel-time engine for location solvers: {@code layered} or {@code taup} (see AppConfig#raytraceMethod). */
     private String raytraceMethod = "layered";
+    /**
+     * When starting {@code xtreloc} with no arguments from a terminal: {@code select} (logo + 0/1/2 menu),
+     * {@code cli}, {@code tui}, or {@code gui}. Also used by the main launcher (see {@code LauncherModePreference}).
+     */
+    private String launcherMode = "select";
+    /** GUI date pattern ({@link java.time.format.DateTimeFormatter}), e.g. yyyy-MM-dd. Display only. */
+    private String dateFormat = com.treloc.xtreloc.util.TimeFormatConverter.DEFAULT_DATE_PATTERN;
+    /** GUI time-of-day pattern, e.g. HH:mm:ss. Display only. */
+    private String timeFormat = com.treloc.xtreloc.util.TimeFormatConverter.DEFAULT_TIME_PATTERN;
+    /** Text between date and time in the catalog table (e.g. "T" or " "). */
+    private String dateTimeSeparator = com.treloc.xtreloc.util.TimeFormatConverter.DEFAULT_DATE_TIME_SEPARATOR;
+    /** Map colour-bar time labels: Auto, Date, Date + time, Time. */
+    private String colorBarTimeLabel = com.treloc.xtreloc.util.TimeFormatConverter.COLORBAR_AUTO;
     
     /**
      * Loads application settings from the settings file.
@@ -115,6 +130,9 @@ public class AppSettings {
                 if (node.has("mainWindowHeight")) {
                     settings.setMainWindowHeight(node.get("mainWindowHeight").asInt());
                 }
+                if (node.has("eventWaveformPattern")) {
+                    settings.eventWaveformPattern = node.get("eventWaveformPattern").asText();
+                }
                 if (node.has("pickingMouseP")) settings.pickingMouseP = node.get("pickingMouseP").asText();
                 if (node.has("pickingMouseS")) settings.pickingMouseS = node.get("pickingMouseS").asText();
                 if (node.has("pickingMouseContext")) settings.pickingMouseContext = node.get("pickingMouseContext").asText();
@@ -122,6 +140,9 @@ public class AppSettings {
                 if (node.has("pickingKeyS")) settings.pickingKeyS = node.get("pickingKeyS").asText();
                 if (node.has("raytraceMethod")) {
                     settings.setRaytraceMethod(node.get("raytraceMethod").asText());
+                }
+                if (node.has("launcherMode")) {
+                    settings.setLauncherMode(node.get("launcherMode").asText());
                 }
                 if (node.has("chartAppearance")) {
                     ObjectNode chartNode = (ObjectNode) node.get("chartAppearance");
@@ -188,6 +209,10 @@ public class AppSettings {
                 if (node.has("defaultSymbolColor")) {
                     settings.defaultSymbolColor = node.get("defaultSymbolColor").asText();
                 }
+                if (node.has("dateFormat")) settings.setDateFormat(node.get("dateFormat").asText());
+                if (node.has("timeFormat")) settings.setTimeFormat(node.get("timeFormat").asText());
+                if (node.has("dateTimeSeparator")) settings.setDateTimeSeparator(node.get("dateTimeSeparator").asText());
+                if (node.has("colorBarTimeLabel")) settings.setColorBarTimeLabel(node.get("colorBarTimeLabel").asText());
                 return settings;
             } catch (IOException e) {
                 logger.log(Level.WARNING, "Failed to load settings file: " + e.getMessage(), e);
@@ -220,12 +245,14 @@ public class AppSettings {
             node.put("recentFilesCount", recentFilesCount);
             node.put("mainWindowWidth", mainWindowWidth);
             node.put("mainWindowHeight", mainWindowHeight);
+            node.put("eventWaveformPattern", eventWaveformPattern);
             node.put("pickingMouseP", pickingMouseP);
             node.put("pickingMouseS", pickingMouseS);
             node.put("pickingMouseContext", pickingMouseContext);
             node.put("pickingKeyP", pickingKeyP);
             node.put("pickingKeyS", pickingKeyS);
             node.put("raytraceMethod", getRaytraceMethod());
+            node.put("launcherMode", getLauncherMode());
             ObjectNode chartNode = node.putObject("chartAppearance");
             chartNode.put("titleFontName", chartAppearance.getTitleFontName());
             chartNode.put("titleFontSize", chartAppearance.getTitleFontSize());
@@ -247,6 +274,10 @@ public class AppSettings {
             chartNode.put("gridlineStyle", chartAppearance.getGridlineStyle());
             chartNode.put("convergenceRepaintThrottleMs", chartAppearance.getConvergenceRepaintThrottleMs());
             node.put("defaultSymbolColor", defaultSymbolColor);
+            node.put("dateFormat", dateFormat);
+            node.put("timeFormat", timeFormat);
+            node.put("dateTimeSeparator", dateTimeSeparator);
+            node.put("colorBarTimeLabel", colorBarTimeLabel);
             mapper.writerWithDefaultPrettyPrinter().writeValue(settingsFile, node);
             AppSettingsCache.invalidate();
         } catch (IOException e) {
@@ -311,7 +342,7 @@ public class AppSettings {
     /**
      * Gets the log level for application logging.
      *
-     * @return log level ("INFO", "FINE", "FINER", "DEBUG", "WARNING", or "SEVERE")
+     * @return log level ("INFO", "FINE", "FINER", "WARNING", or "SEVERE")
      */
     public String getLogLevel() {
         return logLevel;
@@ -320,9 +351,13 @@ public class AppSettings {
     /**
      * Sets the log level for application logging.
      *
-     * @param logLevel log level ("INFO", "FINE", "FINER", "DEBUG", "WARNING", or "SEVERE")
+     * @param logLevel JUL level name; legacy {@code DEBUG} is stored as {@code FINE}
      */
     public void setLogLevel(String logLevel) {
+        if (logLevel != null && "DEBUG".equalsIgnoreCase(logLevel.trim())) {
+            this.logLevel = "FINE";
+            return;
+        }
         this.logLevel = logLevel;
     }
     
@@ -535,6 +570,14 @@ public class AppSettings {
         this.mainWindowHeight = MainWindowSizePresets.clampHeight(mainWindowHeight);
     }
     
+    public String getEventWaveformPattern() {
+        return eventWaveformPattern;
+    }
+
+    public void setEventWaveformPattern(String pattern) {
+        this.eventWaveformPattern = pattern != null ? pattern.trim() : "";
+    }
+
     public String getPickingMouseP() { return pickingMouseP; }
     public void setPickingMouseP(String pickingMouseP) { this.pickingMouseP = pickingMouseP != null ? pickingMouseP : "Left"; }
     public String getPickingMouseS() { return pickingMouseS; }
@@ -548,14 +591,9 @@ public class AppSettings {
 
     /**
      * Travel-time method for solvers: {@code layered} (default) or {@code taup}.
-     * The value {@code legacy} is normalized to {@code layered} for compatibility.
      */
     public String getRaytraceMethod() {
         if (raytraceMethod == null || raytraceMethod.isBlank()) {
-            return "layered";
-        }
-        String m = raytraceMethod.trim().toLowerCase();
-        if ("legacy".equals(m)) {
             return "layered";
         }
         return raytraceMethod;
@@ -574,7 +612,47 @@ public class AppSettings {
         }
     }
 
+    /**
+     * Persisted launcher preference: {@code select}, {@code cli}, {@code tui}, {@code gui}.
+     */
+    public String getLauncherMode() {
+        return com.treloc.xtreloc.app.util.LauncherModePreference.StartupMode.fromJson(launcherMode).toJsonValue();
+    }
+
+    public void setLauncherMode(String launcherMode) {
+        this.launcherMode = com.treloc.xtreloc.app.util.LauncherModePreference.StartupMode.fromJson(launcherMode).toJsonValue();
+    }
+
     public String getDefaultSymbolColor() { return defaultSymbolColor; }
     public void setDefaultSymbolColor(String defaultSymbolColor) { this.defaultSymbolColor = defaultSymbolColor != null ? defaultSymbolColor : "#000000"; }
-}
 
+    public String getDateFormat() { return dateFormat; }
+    public void setDateFormat(String dateFormat) {
+        this.dateFormat = com.treloc.xtreloc.util.TimeFormatConverter.isValidPattern(dateFormat)
+            ? dateFormat.trim() : com.treloc.xtreloc.util.TimeFormatConverter.DEFAULT_DATE_PATTERN;
+    }
+
+    public String getTimeFormat() { return timeFormat; }
+    public void setTimeFormat(String timeFormat) {
+        this.timeFormat = com.treloc.xtreloc.util.TimeFormatConverter.isValidPattern(timeFormat)
+            ? timeFormat.trim() : com.treloc.xtreloc.util.TimeFormatConverter.DEFAULT_TIME_PATTERN;
+    }
+
+    public String getDateTimeSeparator() { return dateTimeSeparator; }
+    public void setDateTimeSeparator(String dateTimeSeparator) {
+        this.dateTimeSeparator = dateTimeSeparator != null
+            ? dateTimeSeparator : com.treloc.xtreloc.util.TimeFormatConverter.DEFAULT_DATE_TIME_SEPARATOR;
+    }
+
+    public String getColorBarTimeLabel() { return colorBarTimeLabel; }
+    public void setColorBarTimeLabel(String colorBarTimeLabel) {
+        this.colorBarTimeLabel = colorBarTimeLabel != null && !colorBarTimeLabel.isBlank()
+            ? colorBarTimeLabel.trim() : com.treloc.xtreloc.util.TimeFormatConverter.COLORBAR_AUTO;
+    }
+
+    /** Pushes the date/time display settings to {@link com.treloc.xtreloc.util.TimeFormatConverter}. */
+    public void applyTimeDisplayFormat() {
+        com.treloc.xtreloc.util.TimeFormatConverter.configureDisplay(
+            dateFormat, timeFormat, dateTimeSeparator, colorBarTimeLabel);
+    }
+}

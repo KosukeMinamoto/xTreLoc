@@ -25,6 +25,8 @@ import edu.sc.seis.TauP.TauP_Time;
  */
 public final class RaytraceTauPComparisonTable {
 
+    static final String REPORT_TITLE = "# Raytrace1D vs TauP (`prem.nd`, phases `tts,S`)";
+
     private static final double EARTH_RADIUS_KM = 6371.0;
     private static final String BUNDLED_PREM = "velocity-models/prem.nd";
 
@@ -54,7 +56,7 @@ public final class RaytraceTauPComparisonTable {
 
         double stationDepthKm = 0.1;
         StringBuilder sb = new StringBuilder(8192);
-        sb.append("# Raytrace1D vs TauP (`prem.nd`, phases `tts,S`)\n\n");
+        sb.append(REPORT_TITLE).append("\n\n");
         sb.append("In the layered 1D scheme, **ANG/BNG are discrete takeoff/incident angles measured from downward vertical** (radians).\n\n");
         sb.append("TauP 2.x `SeismicPhase.calcTakeoffAngle` returns **degrees**, uses a spherical model in `asin(v·p/(R−h))`, and **maps the first upgoing leg into 90°–180°** ")
             .append("via `180° − …`—so conventions differ from the flat-layer solver.\n\n");

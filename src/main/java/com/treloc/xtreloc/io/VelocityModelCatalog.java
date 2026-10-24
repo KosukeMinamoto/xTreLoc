@@ -32,21 +32,39 @@ public final class VelocityModelCatalog {
     }
 
     public static boolean isBundledModelName(String value) {
-        if (value == null) return false;
-        String v = value.trim();
-        if (v.isEmpty()) return false;
-        if (BUNDLED_MODELS.contains(v)) return true;
-        if (v.startsWith(RESOURCE_DIR)) {
-            return BUNDLED_MODELS.contains(v.substring(RESOURCE_DIR.length()));
+        return bundledFileName(value) != null;
+    }
+
+    /** {@code prem} / {@code prem.nd} / {@code velocity-models/prem.nd} → {@code prem.nd}. */
+    public static String bundledFileName(String value) {
+        if (value == null) {
+            return null;
         }
-        return false;
+        String v = value.trim();
+        if (v.isEmpty()) {
+            return null;
+        }
+        if (v.startsWith(RESOURCE_DIR)) {
+            v = v.substring(RESOURCE_DIR.length());
+        }
+        if (BUNDLED_MODELS.contains(v)) {
+            return v;
+        }
+        for (String m : BUNDLED_MODELS) {
+            int dot = m.lastIndexOf('.');
+            if (dot > 0 && m.substring(0, dot).equalsIgnoreCase(v)) {
+                return m;
+            }
+        }
+        return null;
     }
 
     public static String toResourcePath(String value) {
         if (value == null) return null;
         String v = value.trim();
         if (v.startsWith(RESOURCE_DIR)) return v;
-        if (BUNDLED_MODELS.contains(v)) return RESOURCE_DIR + v;
+        String bundled = bundledFileName(v);
+        if (bundled != null) return RESOURCE_DIR + bundled;
         return v;
     }
 }

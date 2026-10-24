@@ -18,7 +18,6 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.treloc.xtreloc.io.AppConfig;
-import com.treloc.xtreloc.io.VelocityModelCatalog;
 import com.treloc.xtreloc.util.JsonMapperHolder;
 
 /**
@@ -108,7 +107,8 @@ public class ConfigInputHelper {
         TextBox stationFileBox = new TextBox(new TerminalSize(textBoxWidth, 1));
         paramPanel.addComponent(stationFileBox);
         
-        paramPanel.addComponent(new Label("Velocity model (.nd/.tvel or bundled name) *:"));
+        paramPanel.addComponent(new Label("Travel time * (velocity model OR table, not both):"));
+        paramPanel.addComponent(new Label("  (1-D .nd/.tvel with Vp+Vs, bundled name, or *.time.hdr grid dir)"));
         TextBox taupFileBox = new TextBox(new TerminalSize(textBoxWidth, 1));
         paramPanel.addComponent(taupFileBox);
         
@@ -123,6 +123,18 @@ public class ConfigInputHelper {
         TextBox thresholdBox = new TextBox(new TerminalSize(textBoxWidth, 1));
         thresholdBox.setText("0.0");
         paramPanel.addComponent(thresholdBox);
+
+        Label pWeightLabel = new Label("P phase weight (pWeight, S=1):");
+        paramPanel.addComponent(pWeightLabel);
+        TextBox pWeightBox = new TextBox(new TerminalSize(textBoxWidth, 1));
+        pWeightBox.setText("2.0");
+        paramPanel.addComponent(pWeightBox);
+
+        Label minDataCountLabel = new Label("Minimum data count (minDataCount):");
+        paramPanel.addComponent(minDataCountLabel);
+        TextBox minDataCountBox = new TextBox(new TerminalSize(textBoxWidth, 1));
+        minDataCountBox.setText("0");
+        paramPanel.addComponent(minDataCountBox);
         
         Label numJobsLabel = new Label("Number of parallel jobs:");
         paramPanel.addComponent(numJobsLabel);
@@ -291,6 +303,18 @@ public class ConfigInputHelper {
                 numFocusBox.setText("3");
                 paramPanel.addComponent(numFocusBox);
                 solverComponents.add(numFocusBox);
+
+                paramPanel.addComponent(new Label("Range sigma (station std multiplier):"));
+                TextBox rangeSigmaBox = new TextBox(new TerminalSize(textBoxWidth, 1));
+                rangeSigmaBox.setText("2.0");
+                paramPanel.addComponent(rangeSigmaBox);
+                solverComponents.add(rangeSigmaBox);
+
+                paramPanel.addComponent(new Label("Depth seeds km (comma-separated):"));
+                TextBox depthSeedsBox = new TextBox(new TerminalSize(textBoxWidth, 1));
+                depthSeedsBox.setText("1,5,10");
+                paramPanel.addComponent(depthSeedsBox);
+                solverComponents.add(depthSeedsBox);
                 break;
                 
             case "MCMC":
@@ -351,6 +375,18 @@ public class ConfigInputHelper {
                 crossoverBox.setText("0.9");
                 paramPanel.addComponent(crossoverBox);
                 solverComponents.add(crossoverBox);
+
+                paramPanel.addComponent(new Label("Range sigma (station std multiplier):"));
+                TextBox deRangeSigmaBox = new TextBox(new TerminalSize(textBoxWidth, 1));
+                deRangeSigmaBox.setText("2.0");
+                paramPanel.addComponent(deRangeSigmaBox);
+                solverComponents.add(deRangeSigmaBox);
+
+                paramPanel.addComponent(new Label("Depth seeds km (comma-separated):"));
+                TextBox deDepthSeedsBox = new TextBox(new TerminalSize(textBoxWidth, 1));
+                deDepthSeedsBox.setText("1,5,10");
+                paramPanel.addComponent(deDepthSeedsBox);
+                solverComponents.add(deDepthSeedsBox);
                 break;
                 
             case "TRD":
@@ -364,7 +400,7 @@ public class ConfigInputHelper {
                 paramPanel.addComponent(iterNumBox);
                 solverComponents.add(iterNumBox);
                 
-                paramPanel.addComponent(new Label("Distance thresholds in km (e.g., '50,20'):"));
+                paramPanel.addComponent(new Label("Distance thresholds in km (e.g., '0.5,20'):"));
                 TextBox distKmBox = new TextBox(new TerminalSize(textBoxWidth, 1));
                 distKmBox.setText("50,20");
                 paramPanel.addComponent(distKmBox);
@@ -391,10 +427,12 @@ public class ConfigInputHelper {
             seedFormStateFromConfig(mode, seedConfig);
         }
         // Restore previously entered values for this mode if any
-        applyFormStateForMode(mode, stationFileBox, taupFileBox, hypBottomBox, thresholdBox, numJobsBox, logLevelBox, modeComponents, solverComponents);
+        applyFormStateForMode(mode, stationFileBox, taupFileBox, hypBottomBox, thresholdBox, pWeightBox, minDataCountBox,
+                numJobsBox, logLevelBox, modeComponents, solverComponents);
         
         // Deactivate common parameters not used by this mode (read-only + dim label)
-        applyCommonParamAvailability(mode, hypBottomLabel, hypBottomBox, thresholdLabel, thresholdBox, numJobsLabel, numJobsBox);
+        applyCommonParamAvailability(mode, hypBottomLabel, hypBottomBox, thresholdLabel, thresholdBox,
+                pWeightLabel, pWeightBox, minDataCountLabel, minDataCountBox, numJobsLabel, numJobsBox);
         
         // Buttons
         Panel buttonPanel = new Panel();
@@ -405,6 +443,11 @@ public class ConfigInputHelper {
             AppConfig c = new AppConfig();
             c.stationFile = stationFileBox.getText().trim();
             c.taupFile = taupFileBox.getText().trim();
+            if (seedConfig != null) {
+                if (seedConfig.raytraceMethod != null && !seedConfig.raytraceMethod.isBlank()) {
+                    c.raytraceMethod = seedConfig.raytraceMethod;
+                }
+            }
             if (isCommonParamActive(mode, "hypBottom")) {
                 try { c.hypBottom = Double.parseDouble(hypBottomBox.getText().trim()); } catch (NumberFormatException e) { c.hypBottom = 100.0; }
             } else {
@@ -414,6 +457,18 @@ public class ConfigInputHelper {
                 try { c.threshold = Double.parseDouble(thresholdBox.getText().trim()); } catch (NumberFormatException e) { c.threshold = 0.0; }
             } else {
                 c.threshold = 0.0;
+            }
+            if (isCommonParamActive(mode, "pWeight")) {
+                try { c.pWeight = Double.parseDouble(pWeightBox.getText().trim()); } catch (NumberFormatException e) { c.pWeight = 2.0; }
+                if (c.pWeight < 0) c.pWeight = 2.0;
+            } else {
+                c.pWeight = 2.0;
+            }
+            if (isCommonParamActive(mode, "minDataCount")) {
+                try { c.minDataCount = Integer.parseInt(minDataCountBox.getText().trim()); } catch (NumberFormatException e) { c.minDataCount = 0; }
+                if (c.minDataCount < 0) c.minDataCount = 0;
+            } else {
+                c.minDataCount = 0;
             }
             if (isCommonParamActive(mode, "numJobs")) {
                 try { c.numJobs = Integer.parseInt(numJobsBox.getText().trim()); } catch (NumberFormatException e) { c.numJobs = 1; }
@@ -509,6 +564,11 @@ public class ConfigInputHelper {
                         ObjectNode grdSolver = mapper.createObjectNode();
                         try { grdSolver.put("totalGrids", Integer.parseInt(((TextBox) solverComponents.get(0)).getText().trim())); } catch (NumberFormatException e) { grdSolver.put("totalGrids", 300); }
                         try { grdSolver.put("numFocus", Integer.parseInt(((TextBox) solverComponents.get(1)).getText().trim())); } catch (NumberFormatException e) { grdSolver.put("numFocus", 3); }
+                        if (solverComponents.size() >= 4) {
+                            try { grdSolver.put("rangeSigma", Double.parseDouble(((TextBox) solverComponents.get(2)).getText().trim())); } catch (NumberFormatException e) { grdSolver.put("rangeSigma", 2.0); }
+                            String grdSeeds = ((TextBox) solverComponents.get(3)).getText().trim();
+                            grdSolver.put("depthSeeds", grdSeeds.isEmpty() ? "1,5,10" : grdSeeds);
+                        }
                         c.params.put("GRD", grdSolver);
                     }
                     break;
@@ -529,6 +589,11 @@ public class ConfigInputHelper {
                         try { deSolver.put("iterationNumber", Integer.parseInt(((TextBox) solverComponents.get(1)).getText().trim())); } catch (NumberFormatException e) { deSolver.put("iterationNumber", 100); }
                         try { deSolver.put("mutationFactor", Double.parseDouble(((TextBox) solverComponents.get(2)).getText().trim())); } catch (NumberFormatException e) { deSolver.put("mutationFactor", 0.8); }
                         try { deSolver.put("crossoverProbability", Double.parseDouble(((TextBox) solverComponents.get(3)).getText().trim())); } catch (NumberFormatException e) { deSolver.put("crossoverProbability", 0.9); }
+                        if (solverComponents.size() >= 6) {
+                            try { deSolver.put("rangeSigma", Double.parseDouble(((TextBox) solverComponents.get(4)).getText().trim())); } catch (NumberFormatException e) { deSolver.put("rangeSigma", 2.0); }
+                            String deSeeds = ((TextBox) solverComponents.get(5)).getText().trim();
+                            deSolver.put("depthSeeds", deSeeds.isEmpty() ? "1,5,10" : deSeeds);
+                        }
                         c.params.put("DE", deSolver);
                     }
                     break;
@@ -544,7 +609,7 @@ public class ConfigInputHelper {
                         String distKmStr = ((TextBox) solverComponents.get(1)).getText().trim();
                         ArrayNode distKmArray = mapper.createArrayNode();
                         for (String val : distKmStr.split(",")) {
-                            try { distKmArray.add(Integer.parseInt(val.trim())); } catch (NumberFormatException e) { distKmArray.add(50); }
+                            try { distKmArray.add(Double.parseDouble(val.trim())); } catch (NumberFormatException e) { distKmArray.add(50.0); }
                         }
                         trdSolver.set("distKm", distKmArray);
                         String dampFactStr = ((TextBox) solverComponents.get(2)).getText().trim();
@@ -578,7 +643,8 @@ public class ConfigInputHelper {
 
         Button okButton = new Button("OK", () -> {
             currentConfig = buildConfigFromForm.get();
-            saveFormStateForMode(mode, stationFileBox, taupFileBox, hypBottomBox, thresholdBox, numJobsBox, logLevelBox, modeComponents, solverComponents);
+            saveFormStateForMode(mode, stationFileBox, taupFileBox, hypBottomBox, thresholdBox, pWeightBox, minDataCountBox,
+                    numJobsBox, logLevelBox, modeComponents, solverComponents);
             appendToLog("Parameters saved. Opening execution panel.");
             onOk.run();
         });
@@ -618,22 +684,7 @@ public class ConfigInputHelper {
             if (!stationFile.exists()) errors.add("Station file does not exist: " + cfg.stationFile);
             else if (!stationFile.isFile()) errors.add("Station path is not a file: " + cfg.stationFile);
         }
-        if (cfg.taupFile == null || cfg.taupFile.trim().isEmpty()) {
-            errors.add("TauP velocity model is required.");
-        } else {
-            String taupPath = cfg.taupFile.trim();
-            if (!isBuiltinTaupModel(taupPath)) {
-                File taupFile = new File(taupPath);
-                if (!taupFile.exists()) errors.add("TauP model file does not exist: " + taupPath);
-                else if (!taupFile.isFile()) errors.add("TauP model path is not a file: " + taupPath);
-                else {
-                    String ext = getFileExtension(taupPath);
-                    if (!ext.isEmpty() && !"nd".equalsIgnoreCase(ext) && !"taup".equalsIgnoreCase(ext) && !"tvel".equalsIgnoreCase(ext)) {
-                        errors.add("Velocity model file should have extension .nd or .tvel: " + taupPath);
-                    }
-                }
-            }
-        }
+        com.treloc.xtreloc.io.ConfigValidator.addTaupFileErrors(errors, cfg.taupFile, true);
         AppConfig.ModeConfig mc = cfg.getModes() != null ? cfg.getModes().get(mode) : null;
         if (mc == null) {
             errors.add("Mode configuration not found for: " + mode);
@@ -769,13 +820,15 @@ public class ConfigInputHelper {
     }
 
     private void saveFormStateForMode(String mode, TextBox stationFileBox, TextBox taupFileBox, TextBox hypBottomBox,
-            TextBox thresholdBox, TextBox numJobsBox, TextBox logLevelBox,
+            TextBox thresholdBox, TextBox pWeightBox, TextBox minDataCountBox, TextBox numJobsBox, TextBox logLevelBox,
             List<Component> modeComponents, List<Component> solverComponents) {
         Map<String, String> state = new HashMap<>();
         state.put("stationFile", stationFileBox != null ? stationFileBox.getText() : "");
         state.put("taupFile", taupFileBox != null ? taupFileBox.getText() : "");
         state.put("hypBottom", hypBottomBox != null ? hypBottomBox.getText() : "");
         state.put("threshold", thresholdBox != null ? thresholdBox.getText() : "");
+        state.put("pWeight", pWeightBox != null ? pWeightBox.getText() : "");
+        state.put("minDataCount", minDataCountBox != null ? minDataCountBox.getText() : "");
         state.put("numJobs", numJobsBox != null ? numJobsBox.getText() : "");
         state.put("logLevel", logLevelBox != null ? logLevelBox.getText() : "");
         if (modeComponents != null) {
@@ -794,7 +847,7 @@ public class ConfigInputHelper {
     }
     
     private void applyFormStateForMode(String mode, TextBox stationFileBox, TextBox taupFileBox, TextBox hypBottomBox,
-            TextBox thresholdBox, TextBox numJobsBox, TextBox logLevelBox,
+            TextBox thresholdBox, TextBox pWeightBox, TextBox minDataCountBox, TextBox numJobsBox, TextBox logLevelBox,
             List<Component> modeComponents, List<Component> solverComponents) {
         Map<String, String> state = modeFormStateCache.get(mode);
         // If target mode has no state, copy from GRD so we inherit I/O and params
@@ -810,6 +863,8 @@ public class ConfigInputHelper {
         if (taupFileBox != null && state.containsKey("taupFile")) taupFileBox.setText(state.get("taupFile"));
         if (hypBottomBox != null && state.containsKey("hypBottom")) hypBottomBox.setText(state.get("hypBottom"));
         if (thresholdBox != null && state.containsKey("threshold")) thresholdBox.setText(state.get("threshold"));
+        if (pWeightBox != null && state.containsKey("pWeight")) pWeightBox.setText(state.get("pWeight"));
+        if (minDataCountBox != null && state.containsKey("minDataCount")) minDataCountBox.setText(state.get("minDataCount"));
         if (numJobsBox != null && state.containsKey("numJobs")) numJobsBox.setText(state.get("numJobs"));
         if (logLevelBox != null && state.containsKey("logLevel")) logLevelBox.setText(state.get("logLevel"));
         if (modeComponents != null) {
@@ -845,6 +900,11 @@ public class ConfigInputHelper {
             case "threshold":
                 // SYN does not read .dat files with weight threshold
                 return !"SYN".equals(m);
+            case "pWeight":
+                return !("CLS".equals(m) || "SYN".equals(m));
+            case "minDataCount":
+                // Only location solvers that read weighted lag tables use this gate
+                return !("TRD".equals(m) || "CLS".equals(m) || "SYN".equals(m));
             case "numJobs":
                 // SYN does not batch process .dat files
                 return !"SYN".equals(m);
@@ -857,7 +917,9 @@ public class ConfigInputHelper {
      * Sets common parameter fields to read-only and dims their labels when not used by the mode.
      */
     private void applyCommonParamAvailability(String mode, Label hypBottomLabel, TextBox hypBottomBox,
-            Label thresholdLabel, TextBox thresholdBox, Label numJobsLabel, TextBox numJobsBox) {
+            Label thresholdLabel, TextBox thresholdBox, Label pWeightLabel, TextBox pWeightBox,
+            Label minDataCountLabel, TextBox minDataCountBox,
+            Label numJobsLabel, TextBox numJobsBox) {
         TextColor dimColor = TextColor.ANSI.BLACK;
         if (isCommonParamActive(mode, "hypBottom")) {
             hypBottomLabel.setForegroundColor(TextColor.ANSI.DEFAULT);
@@ -872,6 +934,20 @@ public class ConfigInputHelper {
         } else {
             thresholdLabel.setForegroundColor(dimColor);
             thresholdBox.setReadOnly(true);
+        }
+        if (isCommonParamActive(mode, "pWeight")) {
+            pWeightLabel.setForegroundColor(TextColor.ANSI.DEFAULT);
+            pWeightBox.setReadOnly(false);
+        } else {
+            pWeightLabel.setForegroundColor(dimColor);
+            pWeightBox.setReadOnly(true);
+        }
+        if (isCommonParamActive(mode, "minDataCount")) {
+            minDataCountLabel.setForegroundColor(TextColor.ANSI.DEFAULT);
+            minDataCountBox.setReadOnly(false);
+        } else {
+            minDataCountLabel.setForegroundColor(dimColor);
+            minDataCountBox.setReadOnly(true);
         }
         if (isCommonParamActive(mode, "numJobs")) {
             numJobsLabel.setForegroundColor(TextColor.ANSI.DEFAULT);
@@ -899,7 +975,7 @@ public class ConfigInputHelper {
             errors.add("TRD: iterNum is required (comma-separated integers, e.g. '10,10').");
         }
         if (!trd.has("distKm") || !trd.get("distKm").isArray() || trd.get("distKm").size() == 0) {
-            errors.add("TRD: distKm is required (comma-separated integers, e.g. '50,20').");
+            errors.add("TRD: distKm is required (comma-separated km, e.g. '0.5,20').");
         }
         if (!trd.has("dampFact") || !trd.get("dampFact").isArray() || trd.get("dampFact").size() == 0) {
             errors.add("TRD: dampFact is required (comma-separated integers, e.g. '0,1').");
@@ -918,8 +994,13 @@ public class ConfigInputHelper {
                 }
             }
             for (int i = 0; i < nd; i++) {
-                try { trd.get("distKm").get(i).asInt(); } catch (Exception e) {
-                    errors.add("TRD: distKm value at index " + i + " is not a valid integer.");
+                try {
+                    if (trd.get("distKm").get(i).asDouble() <= 0) {
+                        errors.add("TRD: distKm value at index " + i + " must be > 0.");
+                        break;
+                    }
+                } catch (Exception e) {
+                    errors.add("TRD: distKm value at index " + i + " is not a valid number.");
                     break;
                 }
             }
@@ -930,17 +1011,6 @@ public class ConfigInputHelper {
                 }
             }
         }
-    }
-    
-    private static boolean isBuiltinTaupModel(String name) {
-        return VelocityModelCatalog.isBundledModelName(name);
-    }
-    
-    private static String getFileExtension(String path) {
-        if (path == null) return "";
-        int i = path.lastIndexOf('.');
-        if (i >= 0 && i < path.length() - 1) return path.substring(i + 1).trim();
-        return "";
     }
     
     private void appendToLog(String message) {

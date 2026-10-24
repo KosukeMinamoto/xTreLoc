@@ -1,10 +1,17 @@
 package com.treloc.xtreloc.app.gui.view;
 
+import com.treloc.xtreloc.app.gui.model.CatalogOverlap;
+import com.treloc.xtreloc.app.gui.model.EventKey;
 import com.treloc.xtreloc.app.gui.model.Hypocenter;
+import com.treloc.xtreloc.app.gui.util.TableHighlightToggle;
+import com.treloc.xtreloc.app.gui.util.ToggleAscRowSorter;
+import com.treloc.xtreloc.solver.DatPair;
 import com.treloc.xtreloc.app.gui.service.CatalogLoader;
 import com.treloc.xtreloc.app.gui.service.CsvExporter;
 import com.treloc.xtreloc.app.gui.util.AppPanelStyle;
+import com.treloc.xtreloc.app.gui.util.EventSelectionModel;
 import com.treloc.xtreloc.app.gui.util.GuiExecutionLog;
+import com.treloc.xtreloc.app.gui.util.WorkingLayer;
 
 import javax.swing.*;
 import javax.swing.event.ListSelectionEvent;
@@ -39,7 +46,8 @@ public class CatalogTablePanel extends JPanel {
     private JLabel statusLabel;
     private MapView mapView;
     private java.util.List<CatalogLoadListener> catalogLoadListeners = new java.util.ArrayList<>();
-    private java.util.List<Runnable> onCatalogFileLoadedListeners = new java.util.ArrayList<>();
+    /** True while the table selection is being moved to follow {@link EventSelectionModel} (no echo back). */
+    private boolean syncingSelection;
     private java.util.List<Runnable> screeningChangeListeners = new java.util.ArrayList<>();
     /** Hist/Scatter refresh when map color column or scatter axes change */
     private java.util.List<Runnable> viewerChartChangeListeners = new java.util.ArrayList<>();
@@ -88,11 +96,15 @@ public class CatalogTablePanel extends JPanel {
     /** Model index of the column currently used for map color coding (-1 if none). */
     private int colorColumnIndex = -1;
 
-    /** Scatter X/Y: model indices (Latitude..rms = 2..8), chosen from table header context menu. */
+    /** Scatter X/Y: model indices (Time=1, Latitude..rms = 2..8), chosen from table header context menu. */
     private int scatterXColumnModelIndex = 2;
     private int scatterYColumnModelIndex = 4;
 
-    private static boolean isScatterAxisColumn(int modelIndex) {
+    private static boolean isScatterXColumn(int modelIndex) {
+        return modelIndex >= 1 && modelIndex <= 8;
+    }
+
+    private static boolean isScatterYColumn(int modelIndex) {
         return modelIndex >= 2 && modelIndex <= 8;
     }
     
@@ -115,16 +127,6 @@ public class CatalogTablePanel extends JPanel {
      */
     public void addCatalogLoadListener(CatalogLoadListener listener) {
         catalogLoadListeners.add(listener);
-    }
-
-    /**
-     * Adds a callback run when a new catalog file has been loaded and added to the UI.
-     * Use e.g. to switch the parent tab to "Catalog Data" so the user sees the result.
-     */
-    public void addOnCatalogFileLoaded(Runnable runnable) {
-        if (runnable != null) {
-            onCatalogFileLoadedListeners.add(runnable);
-        }
     }
 
     /**
@@ -179,6 +181,15 @@ public class CatalogTablePanel extends JPanel {
         this.mapView = mapView;
         setLayout(new BorderLayout());
         AppPanelStyle.setPanelBackground(this);
+        if (mapView != null) {
+            mapView.addColorMapClearedListener(() -> {
+                colorColumnIndex = -1;
+                if (dataTable != null) {
+                    dataTable.repaint();
+                }
+                fireViewerChartChanged();
+            });
+        }
 
         JSplitPane splitPane = new JSplitPane(JSplitPane.VERTICAL_SPLIT);
         splitPane.setResizeWeight(0.3);
@@ -223,14 +234,26 @@ public class CatalogTablePanel extends JPanel {
         
         catalogListTable.getSelectionModel().addListSelectionListener(e -> {
             if (!e.getValueIsAdjusting()) {
+                if (TableHighlightToggle.isClearing(catalogListTable)) {
+                    return;
+                }
                 int selectedRow = catalogListTable.getSelectedRow();
                 if (selectedRow >= 0 && selectedRow < catalogInfos.size()) {
                     com.treloc.xtreloc.app.gui.model.CatalogInfo selectedCatalog = catalogInfos.get(selectedRow);
                     displayCatalogDataAsync(selectedCatalog);
                     updateErrorEllipseCheckboxForSelection();
+                    highlightCatalog(selectedCatalog);
                 } else {
                     updateErrorEllipseCheckboxForSelection();
+                    if (mapView != null) {
+                        mapView.clearHighlight();
+                    }
                 }
+            }
+        });
+        TableHighlightToggle.install(catalogListTable, () -> {
+            if (mapView != null) {
+                mapView.clearHighlight();
             }
         });
         
@@ -257,6 +280,13 @@ public class CatalogTablePanel extends JPanel {
         dataTable.setFillsViewportHeight(true);
         dataTable.setRowHeight(20);
         dataTable.getTableHeader().setReorderingAllowed(false);
+        dataTable.getTableHeader().setToolTipText(
+            "Click a header to cycle sort: ascending, descending, original order");
+        ToggleAscRowSorter<DefaultTableModel> catalogSorter = new ToggleAscRowSorter<>(dataTableModel);
+        catalogSorter.timeColumns(1);
+        catalogSorter.numericColumns(0, 2, 3, 4, 5, 6, 7, 8, 9);
+        catalogSorter.textColumns(10);
+        dataTable.setRowSorter(catalogSorter);
         AppPanelStyle.styleTable(dataTable);
         dataTable.setSelectionBackground(AppPanelStyle.getPrimaryButtonColor());
         dataTable.setSelectionForeground(Color.WHITE);
@@ -301,9 +331,8 @@ public class CatalogTablePanel extends JPanel {
                 JPopupMenu menu = new JPopupMenu();
                 JMenuItem miX = new JMenuItem("Scatter: set as X axis");
                 JMenuItem miY = new JMenuItem("Scatter: set as Y axis");
-                boolean ok = isScatterAxisColumn(modelCol);
-                miX.setEnabled(ok);
-                miY.setEnabled(ok);
+                miX.setEnabled(isScatterXColumn(modelCol));
+                miY.setEnabled(isScatterYColumn(modelCol));
                 miX.addActionListener(ev -> {
                     scatterXColumnModelIndex = modelCol;
                     fireViewerChartChanged();
@@ -333,7 +362,11 @@ public class CatalogTablePanel extends JPanel {
                     // Cancel previous timer
                     selectionDebounceTimer.stop();
                     
-                    final int selectedRow = dataTable.getSelectedRow();
+                    if (syncingSelection || TableHighlightToggle.isClearing(dataTable)) {
+                        return;
+                    }
+                    final int selectedRow = ToggleAscRowSorter.modelRow(dataTable, dataTable.getSelectedRow());
+                    publishRowSelection(selectedRow);
                     
                     selectionDebounceTimer = new javax.swing.Timer(50, evt -> {
                         // Execute map update asynchronously to prevent UI freezing
@@ -345,10 +378,12 @@ public class CatalogTablePanel extends JPanel {
                                     int catalogRow = catalogListTable.getSelectedRow();
                                     if (catalogRow >= 0 && catalogRow < catalogInfos.size()) {
                                         com.treloc.xtreloc.app.gui.model.CatalogInfo catalogInfo = catalogInfos.get(catalogRow);
-                                        mapView.highlightPoint(h.lon, h.lat, null, 
-                                            catalogInfo.getSymbolType(), catalogInfo.getColor());
+                                        mapView.highlightPoint(h.lon, h.lat, null,
+                                            catalogInfo.getSymbolType(), catalogInfo.colorWithOpacity(),
+                                            "catalog-event|" + catalogInfo.getName() + "|" + selectedRow);
                                     } else {
-                                        mapView.highlightPoint(h.lon, h.lat);
+                                        mapView.highlightPoint(h.lon, h.lat, null, null, null,
+                                            "catalog-event|" + selectedRow);
                                     }
                                 } catch (Exception ex) {
                                 }
@@ -360,6 +395,16 @@ public class CatalogTablePanel extends JPanel {
                     selectionDebounceTimer.setRepeats(false);
                     selectionDebounceTimer.start();
                 }
+            }
+        });
+        EventSelectionModel.getInstance().addListener(m -> showSelectedEventInTable());
+        WorkingLayer.getInstance().addListener(l -> SwingUtilities.invokeLater(this::syncWorkingCatalog));
+        TableHighlightToggle.install(dataTable, () -> {
+            if (selectionDebounceTimer != null) {
+                selectionDebounceTimer.stop();
+            }
+            if (mapView != null) {
+                mapView.clearHighlight();
             }
         });
         
@@ -944,6 +989,89 @@ public class CatalogTablePanel extends JPanel {
      * 
      * @return the list of hypocenters, or null if no catalog is selected
      */
+    /** Mirrors the {@link WorkingLayer} as the catalog named "Working" (created when the layer first gets events). */
+    void syncWorkingCatalog() {
+        List<Hypocenter> list = new ArrayList<>(WorkingLayer.getInstance().hypocenters());
+        int row = -1;
+        for (int i = 0; i < catalogInfos.size(); i++) {
+            if ("Working".equals(catalogInfos.get(i).getName())) {
+                row = i;
+                break;
+            }
+        }
+        if (row < 0) {
+            if (!list.isEmpty()) {
+                addCatalogFromHypocenters(list, "Working", null);
+            }
+            return;
+        }
+        com.treloc.xtreloc.app.gui.model.CatalogInfo info = catalogInfos.get(row);
+        info.setHypocenters(list);
+        catalogListModel.setValueAt(String.valueOf(list.size()), row, 2);
+        if (catalogListTable.getSelectedRow() == row) {
+            displayCatalogData(info, buildTableRows(list));
+        }
+        if (mapView != null) {
+            mapView.reloadMap();
+        }
+        updateStatusLabel();
+    }
+
+    /** Publishes the event of the selected table row to the {@link EventSelectionModel}. */
+    private void publishRowSelection(int modelRow) {
+        List<Hypocenter> list = getCurrentHypocenters();
+        int catalogRow = catalogListTable.getSelectedRow();
+        if (modelRow < 0 || list == null || modelRow >= list.size()
+            || catalogRow < 0 || catalogRow >= catalogInfos.size()) {
+            return;
+        }
+        EventKey key = EventKey.of(catalogInfos.get(catalogRow), list.get(modelRow));
+        if (!key.equals(EventSelectionModel.getInstance().focus()) || EventSelectionModel.getInstance().size() != 1) {
+            EventSelectionModel.getInstance().select(key);
+        }
+    }
+
+    /** Moves the table selection to the focused event of the {@link EventSelectionModel} (if it is in this catalog). */
+    private void showSelectedEventInTable() {
+        EventKey focus = EventSelectionModel.getInstance().focus();
+        if (focus == null) {
+            return;
+        }
+        int catalogRow = catalogListTable.getSelectedRow();
+        List<Hypocenter> list = getCurrentHypocenters();
+        if (list == null || catalogRow < 0 || catalogRow >= catalogInfos.size()) {
+            return;
+        }
+        String name = catalogInfos.get(catalogRow).getName();
+        if (!name.equals(focus.catalog())) {
+            return;
+        }
+        int modelRow = -1;
+        for (int i = 0; i < list.size(); i++) {
+            if (focus.matches(name, list.get(i))) {
+                modelRow = i;
+                break;
+            }
+        }
+        if (modelRow < 0 || modelRow >= dataTable.getModel().getRowCount()) {
+            return;
+        }
+        int viewRow = dataTable.convertRowIndexToView(modelRow);
+        if (viewRow < 0 || viewRow == dataTable.getSelectedRow()) {
+            return;
+        }
+        syncingSelection = true;
+        try {
+            dataTable.setRowSelectionInterval(viewRow, viewRow);
+            dataTable.scrollRectToVisible(dataTable.getCellRect(viewRow, 0, true));
+        } finally {
+            syncingSelection = false;
+        }
+        if (mapView != null) {
+            mapView.clearHighlight();
+        }
+    }
+
     private List<Hypocenter> getCurrentHypocenters() {
         int selectedRow = catalogListTable.getSelectedRow();
         if (selectedRow >= 0 && selectedRow < catalogInfos.size()) {
@@ -1168,7 +1296,7 @@ public class CatalogTablePanel extends JPanel {
     /**
      * Opens a file chooser to select and load a catalog file.
      */
-    private void selectCatalogFile() {
+    public void selectCatalogFile() {
         JFileChooser fileChooser = new JFileChooser();
         fileChooser.setDialogTitle("Select Catalog File");
         fileChooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter(
@@ -1300,7 +1428,7 @@ public class CatalogTablePanel extends JPanel {
      * @param file the catalog file to load
      */
     public void loadCatalogFile(File file) {
-        if (catalogFiles.containsValue(file)) {
+        if (fileAlreadyLoaded(file)) {
             GuiExecutionLog.warning("Viewer: catalog already loaded — " + file.getName());
             JOptionPane.showMessageDialog(this,
                 "This catalog is already loaded: " + file.getName(),
@@ -1338,28 +1466,70 @@ public class CatalogTablePanel extends JPanel {
         }.execute();
     }
 
+    private static final java.awt.Color[] DEFAULT_CATALOG_COLORS = {
+        java.awt.Color.BLUE, java.awt.Color.RED, java.awt.Color.GREEN,
+        java.awt.Color.ORANGE, java.awt.Color.MAGENTA, java.awt.Color.CYAN,
+        java.awt.Color.YELLOW, java.awt.Color.PINK
+    };
+
+    /**
+     * Picks the symbol color for the next catalog: the user's default for the first catalog,
+     * then cycles through {@link #DEFAULT_CATALOG_COLORS}.
+     */
+    private java.awt.Color nextCatalogColor() {
+        if (catalogInfos.isEmpty()) {
+            try {
+                String hex = com.treloc.xtreloc.app.gui.util.AppSettingsCache.snapshot().getDefaultSymbolColor();
+                return parseHexColor(hex);
+            } catch (Exception e) {
+                logger.log(java.util.logging.Level.FINE, "Invalid default symbol color; using built-in default", e);
+                return DEFAULT_CATALOG_COLORS[0];
+            }
+        }
+        return DEFAULT_CATALOG_COLORS[catalogInfos.size() % DEFAULT_CATALOG_COLORS.length];
+    }
+
     /**
      * Adds already-loaded catalog data to the list and map (called on EDT after load).
      * Uses pre-built table rows so the table is updated in one setDataVector call.
      */
+    private boolean fileAlreadyLoaded(File file) {
+        if (file == null) {
+            return false;
+        }
+        for (File existing : catalogFiles.values()) {
+            if (CatalogOverlap.sameFile(existing, file)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private String uniqueCatalogName(String base) {
+        java.util.List<String> names = new java.util.ArrayList<>();
+        for (com.treloc.xtreloc.app.gui.model.CatalogInfo c : catalogInfos) {
+            names.add(c.getName());
+        }
+        return CatalogOverlap.uniqueName(base, names);
+    }
+
+    private void highlightCatalog(com.treloc.xtreloc.app.gui.model.CatalogInfo catalog) {
+        if (mapView == null || catalog == null || catalog.getHypocenters() == null || catalog.getHypocenters().isEmpty()) {
+            return;
+        }
+        Hypocenter h = catalog.getHypocenters().get(0);
+        mapView.highlightPoint(h.lon, h.lat, null, catalog.getSymbolType(), catalog.colorWithOpacity(),
+            "catalog|" + catalog.getName());
+    }
+
     private void addLoadedCatalogToUI(File file, CatalogLoadResult result) {
         List<Hypocenter> hypocenters = result.hypocenters;
         String name = file.getName();
         if (name.endsWith(".csv")) {
             name = name.substring(0, name.length() - 4);
         }
-        java.awt.Color[] defaultColors = {
-            java.awt.Color.BLUE, java.awt.Color.RED, java.awt.Color.GREEN,
-            java.awt.Color.ORANGE, java.awt.Color.MAGENTA, java.awt.Color.CYAN,
-            java.awt.Color.YELLOW, java.awt.Color.PINK
-        };
-        java.awt.Color color;
-        if (catalogInfos.isEmpty()) {
-            String hex = com.treloc.xtreloc.app.gui.util.AppSettingsCache.snapshot().getDefaultSymbolColor();
-            color = parseHexColor(hex);
-        } else {
-            color = defaultColors[catalogInfos.size() % defaultColors.length];
-        }
+        name = uniqueCatalogName(name);
+        java.awt.Color color = nextCatalogColor();
         com.treloc.xtreloc.app.gui.model.CatalogInfo.SymbolType symbolType =
             com.treloc.xtreloc.app.gui.model.CatalogInfo.SymbolType.values()[
                 catalogInfos.size() % com.treloc.xtreloc.app.gui.model.CatalogInfo.SymbolType.values().length];
@@ -1411,6 +1581,46 @@ public class CatalogTablePanel extends JPanel {
         return new java.util.ArrayList<>(catalogInfos);
     }
 
+    private final java.util.List<Runnable> catalogListChangeListeners = new java.util.ArrayList<>();
+
+    /**
+     * Registers a listener for changes of the catalog list (rows added or removed, visibility,
+     * counts). Runs on the EDT; used by the Layers tree to stay in sync with this table.
+     */
+    public void addCatalogListChangeListener(Runnable listener) {
+        if (listener == null) {
+            return;
+        }
+        if (catalogListChangeListeners.isEmpty()) {
+            catalogListModel.addTableModelListener(e -> {
+                for (Runnable r : new java.util.ArrayList<>(catalogListChangeListeners)) {
+                    r.run();
+                }
+            });
+        }
+        catalogListChangeListeners.add(listener);
+    }
+
+    /** Whether catalog {@code row} is currently shown on the map. */
+    public boolean isCatalogVisibleAt(int row) {
+        return row >= 0 && row < catalogListModel.getRowCount()
+            && Boolean.TRUE.equals(catalogListModel.getValueAt(row, 0));
+    }
+
+    /** Shows or hides catalog {@code row} through the same path as the Visible column. */
+    public void setCatalogVisibleAt(int row, boolean visible) {
+        if (row >= 0 && row < catalogListModel.getRowCount()) {
+            catalogListModel.setValueAt(visible, row, 0);
+        }
+    }
+
+    /** Selects catalog {@code row} in the list (shows its hypocenters in the data table). */
+    public void selectCatalogAt(int row) {
+        if (row >= 0 && row < catalogListTable.getRowCount()) {
+            catalogListTable.setRowSelectionInterval(row, row);
+        }
+    }
+
     /**
      * Adds hypocenters as a new catalog to the list (e.g. after Solver execution).
      * Updates the list table, map, and selects the new row. Call on EDT.
@@ -1421,23 +1631,13 @@ public class CatalogTablePanel extends JPanel {
      */
     public void addCatalogFromHypocenters(List<Hypocenter> hypocenters, String catalogName, File file) {
         if (hypocenters == null) return;
-        String name = catalogName != null && !catalogName.isEmpty() ? catalogName : "Solver result";
-        java.awt.Color[] defaultColors = {
-            java.awt.Color.BLUE, java.awt.Color.RED, java.awt.Color.GREEN,
-            java.awt.Color.ORANGE, java.awt.Color.MAGENTA, java.awt.Color.CYAN,
-            java.awt.Color.YELLOW, java.awt.Color.PINK
-        };
-        java.awt.Color color;
-        if (catalogInfos.isEmpty()) {
-            try {
-                String hex = com.treloc.xtreloc.app.gui.util.AppSettingsCache.snapshot().getDefaultSymbolColor();
-                color = parseHexColor(hex);
-            } catch (Exception e) {
-                color = defaultColors[0];
-            }
-        } else {
-            color = defaultColors[catalogInfos.size() % defaultColors.length];
+        if (fileAlreadyLoaded(file)) {
+            GuiExecutionLog.warning("Viewer: catalog already loaded — "
+                + (file != null ? file.getName() : catalogName));
+            return;
         }
+        String name = uniqueCatalogName(catalogName != null && !catalogName.isEmpty() ? catalogName : "Solver result");
+        java.awt.Color color = nextCatalogColor();
         com.treloc.xtreloc.app.gui.model.CatalogInfo.SymbolType symbolType =
             com.treloc.xtreloc.app.gui.model.CatalogInfo.SymbolType.values()[
                 catalogInfos.size() % com.treloc.xtreloc.app.gui.model.CatalogInfo.SymbolType.values().length];
@@ -1488,13 +1688,83 @@ public class CatalogTablePanel extends JPanel {
         String columnName = dataTableModel.getColumnName(columnIndex);
         
         if (columnIndex == 10) {
-            int selectedRow = dataTable.getSelectedRow();
+            int selectedRow = ToggleAscRowSorter.modelRow(dataTable, dataTable.getSelectedRow());
             if (selectedRow >= 0 && selectedRow < currentHypocenters.size()) {
                 Hypocenter h = currentHypocenters.get(selectedRow);
                 if (h.datFilePath != null && !h.datFilePath.isEmpty()) {
                     showTravelTimeData(h.datFilePath);
                 }
             }
+            return;
+        }
+
+        // Time column: colour by calendar date only when times parse as dates; otherwise do not apply.
+        if (columnIndex == 1) {
+            double[] values = new double[currentHypocenters.size()];
+            int parsed = 0;
+            for (int i = 0; i < currentHypocenters.size(); i++) {
+                Long ms = com.treloc.xtreloc.util.TimeFormatConverter.toEpochMillis(
+                    currentHypocenters.get(i).time);
+                if (ms != null) {
+                    values[i] = ms.doubleValue();
+                    parsed++;
+                } else {
+                    values[i] = Double.NaN;
+                }
+            }
+            if (parsed < 2) {
+                colorColumnIndex = -1;
+                final List<Hypocenter> hyposSnapshot = currentHypocenters;
+                final int nCatalogs = catalogInfos.size();
+                ViewerStatusBar.startLoading("Updating map...");
+                SwingUtilities.invokeLater(() -> {
+                    try {
+                        if (nCatalogs > 1) {
+                            mapView.clearColorMap();
+                            mapView.updateMultipleCatalogsDisplay();
+                        } else {
+                            try {
+                                mapView.showHypocenters(hyposSnapshot);
+                            } catch (Exception ex) {
+                                logger.log(Level.WARNING, "Failed to update display: " + ex.getMessage(), ex);
+                            }
+                        }
+                    } catch (Exception e) {
+                        logger.log(Level.WARNING, "Failed to update display: " + e.getMessage(), e);
+                    } finally {
+                        ViewerStatusBar.stopLoading();
+                    }
+                    dataTable.repaint();
+                    fireViewerChartChanged();
+                });
+                return;
+            }
+            colorColumnIndex = columnIndex;
+            final String colName = "Time";
+            final double[] valuesSnapshot = values;
+            final List<Hypocenter> hyposSnapshot = currentHypocenters;
+            final int nCatalogs = catalogInfos.size();
+            final int selectedCatalogRow = catalogListTable.getSelectedRow();
+            final com.treloc.xtreloc.app.gui.model.CatalogInfo catalogSnapshot =
+                (selectedCatalogRow >= 0 && selectedCatalogRow < catalogInfos.size())
+                    ? catalogInfos.get(selectedCatalogRow)
+                    : (nCatalogs == 1 ? catalogInfos.get(0) : null);
+            ViewerStatusBar.startLoading("Applying colors...");
+            SwingUtilities.invokeLater(() -> {
+                try {
+                    if (catalogSnapshot != null) {
+                        mapView.applyColorMapToCatalog(catalogSnapshot, colName, valuesSnapshot);
+                    } else {
+                        mapView.showHypocenters(hyposSnapshot, colName, valuesSnapshot);
+                    }
+                } catch (Exception e) {
+                    logger.log(Level.WARNING, "Failed to apply coloring: " + e.getMessage(), e);
+                } finally {
+                    ViewerStatusBar.stopLoading();
+                }
+                dataTable.repaint();
+                fireViewerChartChanged();
+            });
             return;
         }
         
@@ -1546,21 +1816,16 @@ public class CatalogTablePanel extends JPanel {
             final int nCatalogs = catalogInfos.size();
             final int selectedCatalogRow = catalogListTable.getSelectedRow();
             final com.treloc.xtreloc.app.gui.model.CatalogInfo catalogSnapshot =
-                (nCatalogs > 1 && selectedCatalogRow >= 0 && selectedCatalogRow < catalogInfos.size())
-                    ? catalogInfos.get(selectedCatalogRow) : null;
+                (selectedCatalogRow >= 0 && selectedCatalogRow < catalogInfos.size())
+                    ? catalogInfos.get(selectedCatalogRow)
+                    : (nCatalogs == 1 ? catalogInfos.get(0) : null);
             ViewerStatusBar.startLoading("Applying colors...");
             SwingUtilities.invokeLater(() -> {
                 try {
-                    if (nCatalogs > 1) {
-                        if (catalogSnapshot != null) {
-                            mapView.applyColorMapToCatalog(catalogSnapshot, colName, valuesSnapshot);
-                        }
+                    if (catalogSnapshot != null) {
+                        mapView.applyColorMapToCatalog(catalogSnapshot, colName, valuesSnapshot);
                     } else {
-                        try {
-                            mapView.showHypocenters(hyposSnapshot, colName, valuesSnapshot);
-                        } catch (Exception ex) {
-                            logger.log(Level.WARNING, "Failed to apply coloring: " + ex.getMessage(), ex);
-                        }
+                        mapView.showHypocenters(hyposSnapshot, colName, valuesSnapshot);
                     }
                 } catch (Exception e) {
                     logger.log(Level.WARNING, "Failed to apply coloring: " + e.getMessage(), e);
@@ -1621,7 +1886,11 @@ public class CatalogTablePanel extends JPanel {
                 lastModelColumn = -1;
             }
             boolean rowSelected = (table.getSelectedRow() == row);
-            Component c = super.getTableCellRendererComponent(table, value, isSelected || rowSelected, hasFocus, row, column);
+            // Time column (model column 1): display with the user-configured date/time format (display only).
+            Object shown = (lastModelColumn == 1 && value instanceof String)
+                ? com.treloc.xtreloc.util.TimeFormatConverter.formatForDisplay((String) value)
+                : value;
+            Component c = super.getTableCellRendererComponent(table, shown, isSelected || rowSelected, hasFocus, row, column);
             setOpaque(true);
             return c;
         }
@@ -1767,59 +2036,46 @@ public class CatalogTablePanel extends JPanel {
      * @param codeStrings the station codes
      */
     private void showTravelTimeDataTable(double[][] lagTable, String[] codeStrings) {
-        if (travelTimeDataPanel != null) {
-            travelTimeDataPanel.setData(lagTable, codeStrings);
-        } else {
-            JFrame frame = new JFrame("Travel Time Data: " + (hypocenters != null && dataTable.getSelectedRow() >= 0 ? 
-                hypocenters.get(dataTable.getSelectedRow()).datFilePath : ""));
-            frame.setSize(600, 400);
-            frame.setLocationRelativeTo(this);
-            
-            String[] columnNames = {"Station 1", "Station 2", "Travel Time Difference (sec)", "Weight"};
-            DefaultTableModel model = new DefaultTableModel(columnNames, 0) {
-                @Override
-                public boolean isCellEditable(int row, int column) {
-                    return false;
-                }
-            };
-            
-            for (double[] lag : lagTable) {
-                int idx1 = (int) lag[0];
-                int idx2 = (int) lag[1];
-                double lagTime = lag[2];
-                double weight = lag.length > 3 ? lag[3] : 1.0;
-                
-                String code1 = idx1 < codeStrings.length ? codeStrings[idx1] : "?";
-                String code2 = idx2 < codeStrings.length ? codeStrings[idx2] : "?";
-                
-                model.addRow(new Object[]{
-                    code1,
-                    code2,
-                    String.format("%.3f", lagTime),
-                    String.format("%.3f", weight)
-                });
+        int selectedModelRow = ToggleAscRowSorter.modelRow(dataTable, dataTable.getSelectedRow());
+        JFrame frame = new JFrame("Travel Time Data: " + (hypocenters != null && selectedModelRow >= 0
+            && selectedModelRow < hypocenters.size() ? hypocenters.get(selectedModelRow).datFilePath : ""));
+        frame.setSize(600, 400);
+        frame.setLocationRelativeTo(this);
+
+        String[] columnNames = {"Station 1", "Station 2", "Phase", "Travel Time Difference (sec)", "Weight"};
+        DefaultTableModel model = new DefaultTableModel(columnNames, 0) {
+            @Override
+            public boolean isCellEditable(int row, int column) {
+                return false;
             }
-            
-            JTable table = new JTable(model);
-            table.setAutoResizeMode(JTable.AUTO_RESIZE_ALL_COLUMNS);
-            JScrollPane scrollPane = new JScrollPane(table);
-            
-            frame.add(scrollPane, BorderLayout.CENTER);
-            frame.setVisible(true);
+        };
+
+        for (double[] lag : lagTable) {
+            int idx1 = (int) lag[0];
+            int idx2 = (int) lag[1];
+            double lagTime = lag[2];
+            double weight = lag.length > 3 ? lag[3] : 1.0;
+
+            String code1 = idx1 < codeStrings.length ? codeStrings[idx1] : "?";
+            String code2 = idx2 < codeStrings.length ? codeStrings[idx2] : "?";
+
+            model.addRow(new Object[]{
+                code1,
+                code2,
+                DatPair.label(lag),
+                String.format("%.3f", lagTime),
+                String.format("%.3f", weight)
+            });
         }
+
+        JTable table = new JTable(model);
+        table.setAutoResizeMode(JTable.AUTO_RESIZE_ALL_COLUMNS);
+        JScrollPane scrollPane = new JScrollPane(table);
+
+        frame.add(scrollPane, BorderLayout.CENTER);
+        frame.setVisible(true);
     }
-    
-    /**
-     * Sets the travel time data panel for displaying travel time data.
-     * 
-     * @param panel the travel time data panel
-     */
-    public void setTravelTimeDataPanel(TravelTimeDataPanel panel) {
-        this.travelTimeDataPanel = panel;
-    }
-    
-    private TravelTimeDataPanel travelTimeDataPanel;
-    
+
     /**
      * @return the current catalog file, or null if no file is loaded
      */

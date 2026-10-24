@@ -23,6 +23,8 @@ public abstract class SolverBase extends HypoUtils {
     protected String[] codeStrings;
     protected double stnBottom;
     protected double threshold;
+    protected double pWeight;
+    protected int minDataCount;
     
     /**
      * Constructs a SolverBase object with the specified configuration.
@@ -34,6 +36,8 @@ public abstract class SolverBase extends HypoUtils {
     protected SolverBase(AppConfig appConfig) throws VelocityModelLoadException {
         super(appConfig);
         this.threshold = appConfig.threshold;
+        this.pWeight = HypoUtils.sanitizePWeight(appConfig.pWeight);
+        this.minDataCount = appConfig.minDataCount;
         loadStationData(appConfig);
     }
 
@@ -48,6 +52,8 @@ public abstract class SolverBase extends HypoUtils {
     protected SolverBase(AppConfig appConfig, StationRepository stationRepo) throws VelocityModelLoadException {
         super(appConfig);
         this.threshold = appConfig.threshold;
+        this.pWeight = HypoUtils.sanitizePWeight(appConfig.pWeight);
+        this.minDataCount = appConfig.minDataCount;
         this.stationTable = stationRepo.getStationTable();
         this.codeStrings = stationRepo.getCodes();
         this.stnBottom = stationRepo.getBottomDepth();
@@ -84,7 +90,7 @@ public abstract class SolverBase extends HypoUtils {
      */
     protected Point loadPointFromDatFile(String datFile) throws IOException {
         PointsHandler handler = new PointsHandler();
-        handler.readDatFile(datFile, codeStrings, threshold);
+        handler.readDatFile(datFile, codeStrings, threshold, minDataCount);
         return handler.getMainPoint();
     }
 }

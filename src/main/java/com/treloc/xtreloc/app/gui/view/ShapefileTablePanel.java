@@ -393,14 +393,49 @@ public class ShapefileTablePanel extends JPanel {
         }
     }
 
-    /** Returns the first selected shapefile (for backward compatibility). */
-    public File getSelectedShapefile() {
-        return shapefiles.isEmpty() ? null : shapefiles.get(0);
-    }
-
     /** Returns all loaded shapefiles. */
     public List<File> getShapefiles() {
         return new ArrayList<>(shapefiles);
+    }
+
+    private final List<Runnable> listChangeListeners = new ArrayList<>();
+
+    /**
+     * Registers a listener for changes of the shapefile list (rows added or removed, visibility,
+     * status). Runs on the EDT; used by the Layers tree to stay in sync with this table.
+     */
+    public void addListChangeListener(Runnable listener) {
+        if (listener == null) {
+            return;
+        }
+        if (listChangeListeners.isEmpty()) {
+            tableModel.addTableModelListener(e -> {
+                for (Runnable r : new ArrayList<>(listChangeListeners)) {
+                    r.run();
+                }
+            });
+        }
+        listChangeListeners.add(listener);
+    }
+
+    /** Whether shapefile {@code row} is currently shown on the map. */
+    public boolean isVisibleAt(int row) {
+        return row >= 0 && row < tableModel.getRowCount()
+            && Boolean.TRUE.equals(tableModel.getValueAt(row, 0));
+    }
+
+    /** Shows or hides shapefile {@code row} through the same path as the Visible column. */
+    public void setVisibleAt(int row, boolean visible) {
+        if (row >= 0 && row < tableModel.getRowCount()) {
+            tableModel.setValueAt(visible, row, 0);
+        }
+    }
+
+    /** Selects shapefile {@code row} in the list (shows its attributes in the data table). */
+    public void selectAt(int row) {
+        if (row >= 0 && row < table.getRowCount()) {
+            table.setRowSelectionInterval(row, row);
+        }
     }
 }
 

@@ -51,6 +51,8 @@ public class HypoDifferentialEvolution extends SolverBase {
     private int maxGenerations; // G: Maximum number of generations
     private double scalingFactor; // F: Scaling factor for mutation (typically 0.5-1.0)
     private double crossoverRate; // CR: Crossover probability (typically 0.5-1.0)
+    private double rangeSigma;
+    private JsonNode deSolver;
     private ConvergenceCallback convergenceCallback;
     
     /**
@@ -136,8 +138,11 @@ public class HypoDifferentialEvolution extends SolverBase {
             SolverLogger.warning("DE: Crossover rate out of range, using 0.9.");
             this.crossoverRate = 0.9;
         }
-        SolverLogger.info(String.format("DE: Parameters: populationSize=%d, maxGenerations=%d, scalingFactor=%.3f, crossoverRate=%.3f",
-            populationSize, maxGenerations, scalingFactor, crossoverRate));
+        this.deSolver = deSolver;
+        this.rangeSigma = HypoUtils.readRangeSigma(deSolver);
+        SolverLogger.info(String.format(
+            "DE: Parameters: populationSize=%d, maxGenerations=%d, scalingFactor=%.3f, crossoverRate=%.3f, rangeSigma=%.2f",
+            populationSize, maxGenerations, scalingFactor, crossoverRate, rangeSigma));
         logger.info(String.format("DE parameters: populationSize=%d, maxGenerations=%d, scalingFactor=%.3f, crossoverRate=%.3f",
             populationSize, maxGenerations, scalingFactor, crossoverRate));
     }
@@ -185,28 +190,43 @@ public class HypoDifferentialEvolution extends SolverBase {
         double initialDep = point.getDep();
         
         // Calculate initial residual
-        double[] sWaveTravelTime = travelTime(this.stationTable, usedIdx, point);
-        double[] travelTimeResidual = differentialTravelTimeResidual(lagTable, sWaveTravelTime);
-        double initialRes = HypoUtils.standardDeviation(travelTimeResidual);
+        double[] travelTimeResidual = pairResiduals(this.stationTable, usedIdx, point, lagTable);
+        double initialRes = HypoUtils.weightedRms(travelTimeResidual, lagTable, pWeight);
         
         logger.info(String.format("Initial hypocenter: (%.6f, %.6f, %.3f), residual: %.6f",
             initialLat, initialLon, initialDep, initialRes));
         
-        // Define search bounds
-        double latRange = 1.0; // degree
-        double lonRange = 1.0; // degree
-        double depRange = 10.0; // km
-        
-        double latMin = initialLat - latRange;
-        double latMax = initialLat + latRange;
-        double lonMin = initialLon - lonRange;
-        double lonMax = initialLon + lonRange;
-        double depMin = Math.max(stnBottom, initialDep - depRange);
-        double depMax = Math.min(hypBottom, initialDep + depRange);
+        double[] depthSeeds = HypoUtils.readDepthSeeds(deSolver, initialDep, stnBottom, hypBottom);
+        HypoUtils.StationSearchBox box = this.clipSearchBox(HypoUtils.searchBoxFromUsedStations(
+            this.stationTable, usedIdx, initialLat, initialLon, initialDep,
+            rangeSigma, depthSeeds[0], stnBottom, hypBottom));
+        SolverLogger.info("DE: Search box from threshold stations: " + box.summary());
+        SolverLogger.info("DE: Depth seeds (km): " + HypoUtils.formatDepthSeeds(depthSeeds));
+
+        double latMin = box.centerLat - box.latRange;
+        double latMax = box.centerLat + box.latRange;
+        double lonMin = box.centerLon - box.lonRange;
+        double lonMax = box.centerLon + box.lonRange;
+        double depMin = Double.POSITIVE_INFINITY;
+        double depMax = Double.NEGATIVE_INFINITY;
+        for (double seed : depthSeeds) {
+            depMin = Math.min(depMin, seed - box.depRange);
+            depMax = Math.max(depMax, seed + box.depRange);
+        }
+        depMin = Math.max(stnBottom, depMin);
+        depMax = Math.min(hypBottom, depMax);
         
         // Initialize population
         Individual[] population = initializePopulation(
             latMin, latMax, lonMin, lonMax, depMin, depMax, lagTable, usedIdx);
+        double seedLat = Math.max(latMin, Math.min(latMax, box.centerLat));
+        double seedLon = Math.max(lonMin, Math.min(lonMax, box.centerLon));
+        int nSeed = Math.min(depthSeeds.length, populationSize);
+        for (int i = 0; i < nSeed; i++) {
+            double seedDep = Math.max(depMin, Math.min(depMax, depthSeeds[i]));
+            population[i] = new Individual(seedLat, seedLon, seedDep,
+                evaluateFitness(seedLat, seedLon, seedDep, lagTable, usedIdx));
+        }
         
         // Find best individual in initial population
         Individual bestIndividual = findBestIndividual(population);
@@ -220,92 +240,91 @@ public class HypoDifferentialEvolution extends SolverBase {
         ExecutorService executor = BatchExecutorFactory.newFixedThreadPoolBounded(
                 nThreads, BatchExecutorFactory.suggestedQueueCapacity(populationSize));
         
-        for (generation = 0; generation < maxGenerations; generation++) {
-            // Check for interruption
-            if (Thread.currentThread().isInterrupted()) {
-                logger.info("Differential evolution interrupted by user");
-                SolverLogger.info("DE: Interrupted by user");
-                executor.shutdownNow();
-                throw new RuntimeException("Differential evolution was interrupted");
-            }
+        try {
+            for (generation = 0; generation < maxGenerations; generation++) {
+                // Check for interruption
+                if (Thread.currentThread().isInterrupted()) {
+                    logger.info("Differential evolution interrupted by user");
+                    SolverLogger.info("DE: Interrupted by user");
+                    throw new RuntimeException("Differential evolution was interrupted");
+                }
             
-            Individual[] newPopulation = new Individual[populationSize];
-            double[] trialLats = new double[populationSize];
-            double[] trialLons = new double[populationSize];
-            double[] trialDeps = new double[populationSize];
+                Individual[] newPopulation = new Individual[populationSize];
+                double[] trialLats = new double[populationSize];
+                double[] trialLons = new double[populationSize];
+                double[] trialDeps = new double[populationSize];
             
-            for (int i = 0; i < populationSize; i++) {
-                int r1, r2, r3;
-                do { r1 = random.nextInt(populationSize); } while (r1 == i);
-                do { r2 = random.nextInt(populationSize); } while (r2 == i || r2 == r1);
-                do { r3 = random.nextInt(populationSize); } while (r3 == i || r3 == r1 || r3 == r2);
-                Individual base = population[r1];
-                Individual diff1 = population[r2];
-                Individual diff2 = population[r3];
-                double mutantLat = Math.max(latMin, Math.min(latMax, base.lat + scalingFactor * (diff1.lat - diff2.lat)));
-                double mutantLon = Math.max(lonMin, Math.min(lonMax, base.lon + scalingFactor * (diff1.lon - diff2.lon)));
-                double mutantDep = Math.max(depMin, Math.min(depMax, base.dep + scalingFactor * (diff1.dep - diff2.dep)));
-                int jRand = random.nextInt(3);
-                trialLats[i] = (random.nextDouble() < crossoverRate || jRand == 0) ? mutantLat : population[i].lat;
-                trialLons[i] = (random.nextDouble() < crossoverRate || jRand == 1) ? mutantLon : population[i].lon;
-                trialDeps[i] = (random.nextDouble() < crossoverRate || jRand == 2) ? mutantDep : population[i].dep;
-            }
+                for (int i = 0; i < populationSize; i++) {
+                    int r1, r2, r3;
+                    do { r1 = random.nextInt(populationSize); } while (r1 == i);
+                    do { r2 = random.nextInt(populationSize); } while (r2 == i || r2 == r1);
+                    do { r3 = random.nextInt(populationSize); } while (r3 == i || r3 == r1 || r3 == r2);
+                    Individual base = population[r1];
+                    Individual diff1 = population[r2];
+                    Individual diff2 = population[r3];
+                    double mutantLat = Math.max(latMin, Math.min(latMax, base.lat + scalingFactor * (diff1.lat - diff2.lat)));
+                    double mutantLon = Math.max(lonMin, Math.min(lonMax, base.lon + scalingFactor * (diff1.lon - diff2.lon)));
+                    double mutantDep = Math.max(depMin, Math.min(depMax, base.dep + scalingFactor * (diff1.dep - diff2.dep)));
+                    int jRand = random.nextInt(3);
+                    trialLats[i] = (random.nextDouble() < crossoverRate || jRand == 0) ? mutantLat : population[i].lat;
+                    trialLons[i] = (random.nextDouble() < crossoverRate || jRand == 1) ? mutantLon : population[i].lon;
+                    trialDeps[i] = (random.nextDouble() < crossoverRate || jRand == 2) ? mutantDep : population[i].dep;
+                }
             
-            List<java.util.concurrent.Callable<Double>> tasks = new ArrayList<>(populationSize);
-            for (int i = 0; i < populationSize; i++) {
-                final int idx = i;
-                tasks.add(() -> evaluateFitness(trialLats[idx], trialLons[idx], trialDeps[idx], lagTable, usedIdx));
-            }
-            List<Future<Double>> futures;
-            try {
-                futures = executor.invokeAll(tasks);
-            } catch (InterruptedException e) {
-                executor.shutdownNow();
-                Thread.currentThread().interrupt();
-                throw new RuntimeException("Differential evolution was interrupted", e);
-            }
-            for (int i = 0; i < populationSize; i++) {
-                double trialFitness;
+                List<java.util.concurrent.Callable<Double>> tasks = new ArrayList<>(populationSize);
+                for (int i = 0; i < populationSize; i++) {
+                    final int idx = i;
+                    tasks.add(() -> evaluateFitness(trialLats[idx], trialLons[idx], trialDeps[idx], lagTable, usedIdx));
+                }
+                List<Future<Double>> futures;
                 try {
-                    trialFitness = futures.get(i).get();
+                    futures = executor.invokeAll(tasks);
                 } catch (InterruptedException e) {
-                    executor.shutdownNow();
                     Thread.currentThread().interrupt();
                     throw new RuntimeException("Differential evolution was interrupted", e);
-                } catch (ExecutionException e) {
-                    Throwable cause = e.getCause();
-                    if (cause instanceof RuntimeException) throw (RuntimeException) cause;
-                    throw new RuntimeException("DE fitness evaluation failed", cause);
                 }
-                if (trialFitness < population[i].fitness) {
-                    newPopulation[i] = new Individual(trialLats[i], trialLons[i], trialDeps[i], trialFitness);
-                } else {
-                    newPopulation[i] = new Individual(population[i]);
+                for (int i = 0; i < populationSize; i++) {
+                    double trialFitness;
+                    try {
+                        trialFitness = futures.get(i).get();
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        throw new RuntimeException("Differential evolution was interrupted", e);
+                    } catch (ExecutionException e) {
+                        Throwable cause = e.getCause();
+                        if (cause instanceof RuntimeException) throw (RuntimeException) cause;
+                        throw new RuntimeException("DE fitness evaluation failed", cause);
+                    }
+                    if (trialFitness < population[i].fitness) {
+                        newPopulation[i] = new Individual(trialLats[i], trialLons[i], trialDeps[i], trialFitness);
+                    } else {
+                        newPopulation[i] = new Individual(population[i]);
+                    }
+                }
+            
+                population = newPopulation;
+            
+                // Update best individual
+                Individual currentBest = findBestIndividual(population);
+                if (currentBest.fitness < bestIndividual.fitness) {
+                    bestIndividual = new Individual(currentBest);
+                }
+            
+                // Report convergence
+                if (convergenceCallback != null) {
+                    convergenceCallback.onResidualUpdate(generation, bestIndividual.fitness);
+                }
+            
+                // Log progress every 10 generations
+                if ((generation + 1) % 10 == 0 || generation == 0) {
+                    logger.info(String.format("Generation %d: best residual = %.6f, (%.6f, %.6f, %.3f)",
+                        generation + 1, bestIndividual.fitness, 
+                        bestIndividual.lat, bestIndividual.lon, bestIndividual.dep));
                 }
             }
-            
-            population = newPopulation;
-            
-            // Update best individual
-            Individual currentBest = findBestIndividual(population);
-            if (currentBest.fitness < bestIndividual.fitness) {
-                bestIndividual = new Individual(currentBest);
-            }
-            
-            // Report convergence
-            if (convergenceCallback != null) {
-                convergenceCallback.onResidualUpdate(generation, bestIndividual.fitness);
-            }
-            
-            // Log progress every 10 generations
-            if ((generation + 1) % 10 == 0 || generation == 0) {
-                logger.info(String.format("Generation %d: best residual = %.6f, (%.6f, %.6f, %.3f)",
-                    generation + 1, bestIndividual.fitness, 
-                    bestIndividual.lat, bestIndividual.lon, bestIndividual.dep));
-            }
+        } finally {
+            executor.shutdownNow();
         }
-        
-        executor.shutdown();
 
         logger.info(String.format("DE completed after %d generations. Best: (%.6f, %.6f, %.3f), residual: %.6f",
             maxGenerations, bestIndividual.lat, bestIndividual.lon, bestIndividual.dep, bestIndividual.fitness));
@@ -343,9 +362,8 @@ public class HypoDifferentialEvolution extends SolverBase {
         // Calculate final residual and weights
         Point finalPoint = new Point(time, bestIndividual.lat, bestIndividual.lon, bestIndividual.dep,
             0, 0, 0, 0, point.getFilePath(), "DE", point.getCid());
-        double[] finalSWaveTravelTime = travelTime(this.stationTable, usedIdx, finalPoint);
-        double[] finalTravelTimeResidual = differentialTravelTimeResidual(lagTable, finalSWaveTravelTime);
-        double finalRes = HypoUtils.standardDeviation(finalTravelTimeResidual);
+        double[] finalTravelTimeResidual = pairResiduals(this.stationTable, usedIdx, finalPoint, lagTable);
+        double finalRes = HypoUtils.weightedRms(finalTravelTimeResidual, lagTable, pWeight);
         
         double[] weight = residual2weight(finalTravelTimeResidual);
         for (int i = 0; i < weight.length; i++) {
@@ -363,6 +381,7 @@ public class HypoDifferentialEvolution extends SolverBase {
         point.setResidual(finalTravelTimeResidual);
         point.setLagTable(lagTable);
         point.setType("DE");
+        markIfOutOfRange(point);
         
         // Update pointsHandler
         pointsHandler.setMainPoint(point);
@@ -437,9 +456,8 @@ public class HypoDifferentialEvolution extends SolverBase {
                                    double[][] lagTable, int[] usedIdx) {
         try {
             Point testPoint = new Point("", lat, lon, dep, 0, 0, 0, 0, "", "", -999);
-            double[] sWaveTravelTime = travelTime(stationTable, usedIdx, testPoint);
-            double[] residual = differentialTravelTimeResidual(lagTable, sWaveTravelTime);
-            return HypoUtils.standardDeviation(residual);
+            double[] residual = pairResiduals(stationTable, usedIdx, testPoint, lagTable);
+            return HypoUtils.weightedRms(residual, lagTable, pWeight);
         } catch (Exception e) {
             logger.warning("Failed to calculate travel time: " + e.getMessage());
             SolverLogger.warning("DE: Failed to calculate travel time.");
@@ -461,23 +479,5 @@ public class HypoDifferentialEvolution extends SolverBase {
             }
         }
         return best;
-    }
-    
-    /**
-     * Calculates the differential travel time residual between observed and calculated travel times.
-     * 
-     * @param lagTable the lag table containing the observed travel times
-     * @param sWaveTravelTime the calculated travel times
-     * @return an array containing the differential travel time residuals
-     */
-    private static double[] differentialTravelTimeResidual(double[][] lagTable, double[] sWaveTravelTime) {
-        double[] diffTime = new double[lagTable.length];
-        for (int i = 0; i < lagTable.length; i++) {
-            double sTimeK = sWaveTravelTime[(int) lagTable[i][0]];
-            double sTimeL = sWaveTravelTime[(int) lagTable[i][1]];
-            double calcTime = sTimeL - sTimeK;
-            diffTime[i] = lagTable[i][2] - calcTime; // O-C time
-        }
-        return diffTime;
     }
 }

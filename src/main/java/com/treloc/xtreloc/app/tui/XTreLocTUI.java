@@ -469,6 +469,13 @@ public final class XTreLocTUI {
         });
     }
 
+    private static String formatKmListValue(double v) {
+        if (Double.isFinite(v) && v == Math.rint(v) && Math.abs(v) < 1e12) {
+            return Long.toString((long) Math.rint(v));
+        }
+        return java.math.BigDecimal.valueOf(v).stripTrailingZeros().toPlainString();
+    }
+
     private void showParameterInput(String mode) {
 
         textGUI.getGUIThread().invokeLater(() -> {
@@ -964,10 +971,12 @@ public final class XTreLocTUI {
                         com.treloc.xtreloc.util.SolverLogger.fine("Processing: " + datPath.getFileName());
                         task.run(dat, out, sharedStations);
                     } catch (Exception e) {
-                        appendToLog("ERROR: Failed to process " + datPath.getFileName() + ": "
+                        boolean skipAsWarning = isMinDataCountSkip(e);
+                        appendToLog((skipAsWarning ? "WARNING" : "ERROR") + ": Failed to process " + datPath.getFileName() + ": "
                             + e.getClass().getSimpleName() + ": " + String.valueOf(e.getMessage()));
                         appendToLog("(Full stack trace is in the application log file.)");
-                        logger.log(Level.SEVERE, "Failed to process file: " + datPath.getFileName(), e);
+                        logger.log(skipAsWarning ? Level.WARNING : Level.SEVERE,
+                            "Failed to process file: " + datPath.getFileName(), e);
                     } finally {
                         int done = progress.incrementAndGet();
                         updateProgress(done, datFiles.length, datPath.getFileName().toString());
@@ -1265,6 +1274,18 @@ public final class XTreLocTUI {
             });
         }
     }
+
+    private static boolean isMinDataCountSkip(Throwable t) {
+        Throwable cur = t;
+        while (cur != null) {
+            String msg = cur.getMessage();
+            if (msg != null && msg.contains("Insufficient data after weight screening")) {
+                return true;
+            }
+            cur = cur.getCause();
+        }
+        return false;
+    }
     
     private void appendToLog(String message) {
         // Initialize buffer if not already done (safety check)
@@ -1450,6 +1471,8 @@ public final class XTreLocTUI {
         String taupFile = cfg.taupFile != null ? cfg.taupFile : "";
         String hypBottom = String.valueOf(cfg.hypBottom);
         String threshold = String.valueOf(cfg.threshold);
+        String pWeight = String.valueOf(cfg.pWeight);
+        String minDataCount = String.valueOf(Math.max(cfg.minDataCount, 0));
         String numJobs = String.valueOf(cfg.numJobs > 0 ? cfg.numJobs : 1);
         String logLevel = cfg.logLevel != null && !cfg.logLevel.isEmpty() ? cfg.logLevel : "INFO";
 
@@ -1462,6 +1485,8 @@ public final class XTreLocTUI {
             state.put("taupFile", taupFile);
             state.put("hypBottom", hypBottom);
             state.put("threshold", threshold);
+            state.put("pWeight", pWeight);
+            state.put("minDataCount", minDataCount);
             state.put("numJobs", numJobs);
             state.put("logLevel", logLevel);
 
@@ -1508,6 +1533,21 @@ public final class XTreLocTUI {
                             if (solver.has("totalGrids")) state.put("solver0", String.valueOf(solver.get("totalGrids").asInt()));
                             else if (solver.has("numGrid")) state.put("solver0", String.valueOf(solver.get("numGrid").asInt()));
                             if (solver.has("numFocus")) state.put("solver1", String.valueOf(solver.get("numFocus").asInt()));
+                            if (solver.has("rangeSigma")) state.put("solver2", String.valueOf(solver.get("rangeSigma").asDouble()));
+                            if (solver.has("depthSeeds")) {
+                                if (solver.get("depthSeeds").isArray()) {
+                                    StringBuilder sb = new StringBuilder();
+                                    for (JsonNode x : solver.get("depthSeeds")) {
+                                        if (sb.length() > 0) sb.append(',');
+                                        sb.append(x.asDouble());
+                                    }
+                                    state.put("solver3", sb.toString());
+                                } else {
+                                    state.put("solver3", solver.get("depthSeeds").asText());
+                                }
+                            } else if (solver.has("defaultDepthKm")) {
+                                state.put("solver3", String.valueOf(solver.get("defaultDepthKm").asDouble()));
+                            }
                             break;
                         case "MCMC":
                             if (solver.has("nSamples")) state.put("solver0", String.valueOf(solver.get("nSamples").asInt()));
@@ -1520,6 +1560,21 @@ public final class XTreLocTUI {
                             if (solver.has("maxGenerations")) state.put("solver1", String.valueOf(solver.get("maxGenerations").asInt()));
                             if (solver.has("scalingFactor")) state.put("solver2", String.valueOf(solver.get("scalingFactor").asDouble()));
                             if (solver.has("crossoverRate")) state.put("solver3", String.valueOf(solver.get("crossoverRate").asDouble()));
+                            if (solver.has("rangeSigma")) state.put("solver4", String.valueOf(solver.get("rangeSigma").asDouble()));
+                            if (solver.has("depthSeeds")) {
+                                if (solver.get("depthSeeds").isArray()) {
+                                    StringBuilder sb = new StringBuilder();
+                                    for (JsonNode x : solver.get("depthSeeds")) {
+                                        if (sb.length() > 0) sb.append(',');
+                                        sb.append(x.asDouble());
+                                    }
+                                    state.put("solver5", sb.toString());
+                                } else {
+                                    state.put("solver5", solver.get("depthSeeds").asText());
+                                }
+                            } else if (solver.has("defaultDepthKm")) {
+                                state.put("solver5", String.valueOf(solver.get("defaultDepthKm").asDouble()));
+                            }
                             break;
                         case "TRD":
                             if (solver.has("iterNum") && solver.get("iterNum").isArray()) {
@@ -1534,7 +1589,7 @@ public final class XTreLocTUI {
                                 StringBuilder sb = new StringBuilder();
                                 for (int i = 0; i < solver.get("distKm").size(); i++) {
                                     if (i > 0) sb.append(",");
-                                    sb.append(solver.get("distKm").get(i).asInt());
+                                    sb.append(formatKmListValue(solver.get("distKm").get(i).asDouble()));
                                 }
                                 state.put("solver1", sb.toString());
                             }
@@ -1589,7 +1644,8 @@ public final class XTreLocTUI {
                             java.nio.file.Files.createDirectories(parent);
                         }
                         ObjectMapper mapper = JsonMapperHolder.getMapper();
-                        mapper.writeValue(file, config);
+                        AppConfig toWrite = currentInputConfig != null ? currentInputConfig : config;
+                        mapper.writeValue(file, toWrite);
                         appendToLog("Configuration exported to: " + file.getAbsolutePath());
                     }
                 } catch (Exception e) {

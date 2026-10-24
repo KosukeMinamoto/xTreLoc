@@ -5,6 +5,7 @@ import java.time.format.DateTimeFormatter;
 import java.time.ZoneId;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.Map;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileOutputStream;
@@ -13,7 +14,9 @@ import java.io.IOException;
 import java.io.OutputStreamWriter;
 import java.io.PrintWriter;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Paths;
 import java.text.SimpleDateFormat;
+import java.util.List;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -35,26 +38,6 @@ public class ArrivalTimeManager {
 
     private String createKey(String stationName, String phase) {
         return stationName + "_" + phase;
-    }
-
-    /**
-     * Updates or adds an arrival time for a station and phase.
-     * 
-     * @param stationName the station name
-     * @param component the component (e.g., "Z", "N", "E")
-     * @param phase the phase ("P" or "S")
-     * @param arrivalTime the arrival time
-     */
-    public void updateArrivalTime(String stationName, String component, String phase, Date arrivalTime) {
-        stationName = stationName.replace(" ", "");
-        String key = createKey(stationName, phase);
-        if (arrivalTimeMap.containsKey(key)) {
-            LOG.fine("Updated: " + stationName + " (" + phase + ") " + arrivalTime);
-            arrivalTimeMap.get(key).setArrivalTime(arrivalTime);
-        } else {
-            LOG.fine("Added: " + stationName + " (" + phase + ") " + arrivalTime);
-            arrivalTimeMap.put(key, new ArrivalTime(stationName, component, phase, arrivalTime));
-        }
     }
 
     /**
@@ -108,15 +91,6 @@ public class ArrivalTimeManager {
     }
 
     /**
-     * Prints all arrival times to the console.
-     */
-    public void printAllArrivalTimes() {
-        for (ArrivalTime arrival : arrivalTimeMap.values()) {
-            LOG.fine(String.valueOf(arrival));
-        }
-    }
-
-    /**
      * Writes arrival times to an .obs file.
      * 
      * @param fileName the output file name
@@ -147,6 +121,64 @@ public class ArrivalTimeManager {
         } catch (IOException e) {
             LOG.log(Level.WARNING, "Error writing .obs file: " + fileName, e);
         }
+    }
+
+    /**
+     * Writes the station-pair differential table ({@code stnk,stnl,lagt,coef}) for one phase; see
+     * {@link DifferentialDatWriter} for the sign / orientation convention (same as cross-correlation output).
+     *
+     * @param fileName  output path (e.g. {@code yyMMdd.HHmmss.dat})
+     * @param phase     {@code "P"} or {@code "S"}
+     * @param coords    optional station coordinates for the pair-distance filter (may be null/empty)
+     * @param maxDistKm maximum pair distance in km ({@code <= 0}: no filter)
+     * @return number of pair rows written, or 0 if fewer than two stations have a pick of that phase
+     */
+    public int outputDifferentialDat(String fileName, String phase,
+                                     Map<String, CrossCorrelationPickingService.StationCoord> coords,
+                                     double maxDistKm) throws IOException {
+        List<DifferentialDatWriter.Row> rows = DifferentialDatWriter.buildPairRows(
+            arrivalTimeMap.values(), phase, coords, maxDistKm);
+        if (rows.isEmpty()) {
+            LOG.warning("Differential .dat (" + phase + "): no station pair (need ≥2 stations with a "
+                + phase + " pick within the distance limit); skipping file.");
+            return 0;
+        }
+        try {
+            int n = DifferentialDatWriter.write(Paths.get(fileName), rows, coords);
+            LOG.info("Differential .dat (" + phase + ") written: " + fileName + " (" + n + " rows)");
+            return n;
+        } catch (IOException e) {
+            LOG.log(Level.WARNING, "Error writing differential .dat: " + fileName, e);
+            throw e;
+        }
+    }
+
+    /** Number of stations that have a pick of the given phase. */
+    public int countStations(String phase) {
+        int n = 0;
+        for (ArrivalTime a : arrivalTimeMap.values()) {
+            if (phase.equals(a.getPhaseDescriptor())) {
+                n++;
+            }
+        }
+        return n;
+    }
+
+    /**
+     * Earliest arrival of the given phase among stored picks, or null if none.
+     */
+    public Date earliestTime(String phase) {
+        Date best = null;
+        for (ArrivalTime a : arrivalTimeMap.values()) {
+            if (!phase.equals(a.getPhaseDescriptor())) {
+                continue;
+            }
+            Date t = a.getArrivalTime();
+            if (best == null || t.before(best)) {
+                best = t;
+            }
+        }
+        return best;
     }
 
     /**
@@ -192,16 +224,6 @@ public class ArrivalTimeManager {
      */
     public void clearArrivalTimes() {
         arrivalTimeMap.clear();
-    }
-
-    /**
-     * Checks if an arrival time exists for the given key.
-     * 
-     * @param key the key (stationName_phase)
-     * @return true if the arrival time exists
-     */
-    public boolean containsArrivalTime(String key) {
-        return arrivalTimeMap.containsKey(key);
     }
 }
 

@@ -45,20 +45,6 @@ public class ReportPanel extends JPanel {
         this(null);
     }
     
-    /**
-     * Returns the Excel-style table panel.
-     */
-    public JPanel getExcelTablePanel() {
-        return excelTablePanel;
-    }
-    
-    /**
-     * Returns the histogram panel wrapper.
-     */
-    public JPanel getHistogramPanel() {
-        return histogramPanelWrapper;
-    }
-    
     private void initComponents() {
         setLayout(new BorderLayout());
         setBorder(new TitledBorder("Report Generation"));

@@ -13,6 +13,7 @@ import org.geotools.map.*;
 import org.geotools.swing.JMapFrame;
 import org.geotools.api.feature.simple.SimpleFeature;
 import org.geotools.api.feature.simple.SimpleFeatureType;
+import org.geotools.feature.simple.SimpleFeatureBuilder;
 import org.geotools.api.style.Style;
 import org.locationtech.jts.geom.*;
 import org.geotools.geometry.jts.ReferencedEnvelope;
@@ -46,6 +47,23 @@ public class MapView {
 	private ScaleBarPanel scaleBarPanel;
 	
 	private java.util.List<Hypocenter> lastHypocenters = null;
+	/** Stations currently shown on the map (shared with the 3D map). */
+	private java.util.List<Station> lastStations = new java.util.ArrayList<>();
+	/** Use-checked stations drawn filled; others are outline-only. Null means all filled. */
+	private java.util.Set<Station> filledStations = null;
+	private final java.util.List<Runnable> overlayChangeListeners = new java.util.concurrent.CopyOnWriteArrayList<>();
+	private final java.util.List<Runnable> colorMapClearedListeners = new java.util.concurrent.CopyOnWriteArrayList<>();
+	private double highlightLon = Double.NaN;
+	private double highlightLat = Double.NaN;
+	private String highlightKey;
+	private com.treloc.xtreloc.app.gui.model.MapLayerStyle networkStyle =
+		com.treloc.xtreloc.app.gui.model.MapLayerStyle.defaultNetwork();
+	private com.treloc.xtreloc.app.gui.model.MapLayerStyle gridStyle =
+		com.treloc.xtreloc.app.gui.model.MapLayerStyle.defaultGrid();
+	private final java.util.Map<String, com.treloc.xtreloc.app.gui.model.MapLayerStyle> shapefileStyles =
+		new java.util.LinkedHashMap<>();
+	private java.util.List<StationStyleEntry> stationStyleEntries = new java.util.ArrayList<>();
+	private java.util.function.BiConsumer<String, com.treloc.xtreloc.app.gui.model.MapLayerStyle> stationStyleSink;
 	private String lastColorColumn = null;
 	private double[] lastColorValues = null;
 	
@@ -88,7 +106,9 @@ public class MapView {
 		PLASMA("Plasma"),
 		COOL_TO_WARM("Cool to Warm"),
 		RAINBOW("Rainbow"),
-		GRAYSCALE("Grayscale");
+		GRAYSCALE("Grayscale"),
+		/** Tomography convention: low values red, high values blue (also used by the 3D map). */
+		SEISMIC("Seismic (Red to Blue)");
 		
 		private final String displayName;
 		
@@ -143,6 +163,7 @@ public class MapView {
 		setupLegendPanel();
 		setupStationSymbolLegendPanel();
 		setupMouseListener();
+		installModeCursors();
 		
 		frame.setVisible(false);
 		
@@ -201,11 +222,367 @@ public class MapView {
 		return mapTopPanel;
 	}
 	
+
+	// ------------------------------------------------------------------ overlay data shared with the 3D map
+
+	/** A group of hypocentre positions with the catalog colour (and optional per-event colours). */
+	public static final class OverlayPoints {
+		public final String name;
+		public final Color color;
+		/** {@code {lon, lat, depthKm}} */
+		public final java.util.List<double[]> points;
+		/** Same length as {@code points} when a catalog column colormap is active; otherwise {@code null}. */
+		public final java.util.List<Color> pointColors;
+		/** Catalog / Style symbol size in pixels ({@code 0} = map default). */
+		public final int size;
+
+		OverlayPoints(String name, Color color, java.util.List<double[]> points) {
+			this(name, color, points, null, 0);
+		}
+
+		OverlayPoints(String name, Color color, java.util.List<double[]> points, java.util.List<Color> pointColors) {
+			this(name, color, points, pointColors, 0);
+		}
+
+		OverlayPoints(String name, Color color, java.util.List<double[]> points, java.util.List<Color> pointColors,
+				int size) {
+			this.name = name;
+			this.color = color;
+			this.points = points;
+			this.pointColors = pointColors;
+			this.size = size;
+		}
+	}
+
+	/** A shapefile layer of the map. */
+	public static final class ShapefileRef {
+		public final String title;
+		public final String name;
+		public final boolean visible;
+		public final org.geotools.api.data.FeatureSource<?, ?> source;
+		public final com.treloc.xtreloc.app.gui.model.MapLayerStyle style;
+
+		ShapefileRef(String title, String name, boolean visible, org.geotools.api.data.FeatureSource<?, ?> source,
+				com.treloc.xtreloc.app.gui.model.MapLayerStyle style) {
+			this.title = title;
+			this.name = name;
+			this.visible = visible;
+			this.source = source;
+			this.style = style != null ? style : com.treloc.xtreloc.app.gui.model.MapLayerStyle.defaultShapefile();
+		}
+	}
+
+	/** One scatter row for a station file or a single station. */
+	public static final class StationStyleEntry {
+		public final String id;
+		public final String label;
+		public final java.util.List<Station> stations;
+		public final com.treloc.xtreloc.app.gui.model.MapLayerStyle style;
+		public final boolean fileLevel;
+
+		public StationStyleEntry(String id, String label, java.util.List<Station> stations,
+				com.treloc.xtreloc.app.gui.model.MapLayerStyle style, boolean fileLevel) {
+			this.id = id;
+			this.label = label;
+			this.stations = stations != null ? stations : new java.util.ArrayList<>();
+			this.style = style != null ? style : com.treloc.xtreloc.app.gui.model.MapLayerStyle.defaultStation();
+			this.fileLevel = fileLevel;
+		}
+	}
+
+	/**
+	 * Registers a listener that runs on the EDT whenever the data shown on the map may have changed (catalogs,
+	 * stations, shapefiles). Used by the 3D map to stay in sync; listeners should debounce.
+	 */
+	public void addOverlayChangeListener(Runnable listener) {
+		overlayChangeListeners.add(listener);
+	}
+
+	/** Runs on the EDT when column-based hypocenter coloring is cleared in favor of layer style. */
+	public void addColorMapClearedListener(Runnable listener) {
+		if (listener != null) {
+			colorMapClearedListeners.add(listener);
+		}
+	}
+
+	private void fireColorMapCleared() {
+		for (Runnable r : colorMapClearedListeners) {
+			try {
+				r.run();
+			} catch (RuntimeException ex) {
+				logger.log(Level.WARNING, "Color-map listener failed: " + ex.getMessage(), ex);
+			}
+		}
+	}
+
+	/**
+	 * Drops column-based coloring so the catalog's Style-panel color/symbol wins on the map.
+	 * Pass {@code null} to clear any active color map.
+	 */
+	public void preferLayerStyleColors(com.treloc.xtreloc.app.gui.model.CatalogInfo catalog) {
+		boolean dropMap = catalog == null || colorMapCatalog == catalog;
+		if (dropMap && (colorMapCatalog != null || colorMapValues != null)) {
+			colorMapCatalog = null;
+			colorMapColumn = null;
+			colorMapValues = null;
+			fireColorMapCleared();
+		}
+		lastColorColumn = null;
+		lastColorValues = null;
+		updateMultipleCatalogsDisplay();
+	}
+
+	private void fireOverlayChanged() {
+		for (Runnable r : overlayChangeListeners) {
+			try {
+				r.run();
+			} catch (RuntimeException ex) {
+				logger.log(Level.WARNING, "Overlay listener failed: " + ex.getMessage(), ex);
+			}
+		}
+	}
+
+	/** Stations currently shown on the map. */
+	public java.util.List<Station> getDisplayedStations() {
+		return new java.util.ArrayList<>(lastStations);
+	}
+
+	/** Use-checked stations are filled; unchecked stations of a visible table are outline-only. */
+	public void setFilledStations(java.util.Collection<Station> filled) {
+		this.filledStations = filled == null ? null : new java.util.HashSet<>(filled);
+	}
+
+	public boolean isStationFilled(Station s) {
+		if (filledStations == null) {
+			return true;
+		}
+		return s != null && filledStations.contains(s);
+	}
+
+	/** Hypocentres currently shown on the map, grouped by catalog (visible catalogs, screening applied). */
+	public boolean isShowConnections() {
+		return showConnections;
+	}
+
+	/** Colour bar of the 2-D / 3-D maps (palette and range). */
+	public ColorBarPanel getColorBar() {
+		return colorBarPanel;
+	}
+
+	/** True when a catalog column colormap is active (Style solid color has not replaced it). */
+	public boolean hasCatalogColorMap() {
+		return (colorMapValues != null && colorMapColumn != null)
+			|| (lastColorValues != null && lastColorColumn != null);
+	}
+
+	/** Per-event colour used on the map (column colouring or catalog colour). */
+	public Color colorOf(com.treloc.xtreloc.app.gui.model.CatalogInfo catalog, Hypocenter h) {
+		Color mapped = colorFromValues(catalog != null ? catalog.getHypocenters() : null, h, colorMapValues);
+		if (mapped == null && lastColorValues != null && lastHypocenters != null) {
+			mapped = colorFromValues(lastHypocenters, h, lastColorValues);
+		}
+		if (mapped != null) {
+			if (catalog != null && catalog.getOpacity() < 0.999f) {
+				int a = Math.round(catalog.getOpacity() * mapped.getAlpha());
+				return new Color(mapped.getRed(), mapped.getGreen(), mapped.getBlue(), a);
+			}
+			return mapped;
+		}
+		return catalog != null ? catalog.colorWithOpacity() : new Color(255, 110, 0);
+	}
+
+	private Color colorFromValues(java.util.List<Hypocenter> hypos, Hypocenter h, double[] values) {
+		if (hypos == null || h == null || values == null || hypos.size() != values.length) {
+			return null;
+		}
+		int i = hypos.indexOf(h);
+		if (i < 0) {
+			return null;
+		}
+		double colorValue = values[i];
+		if (!Double.isFinite(colorValue)) {
+			return MAP_COLOR_VALUE_MISSING;
+		}
+		double min;
+		double max;
+		if (colorBarPanel != null && hasCatalogColorMap()) {
+			min = colorBarPanel.getMinValue();
+			max = colorBarPanel.getMaxValue();
+		} else {
+			double[] autoRange = ColorScaleUtils.computeAutoColorRange(values, 0.02, 0.98);
+			min = autoRange[0];
+			max = autoRange[1];
+		}
+		float normalized = normalizedColorRatio(colorValue, min, max);
+		return getColorFromPalette(normalized);
+	}
+
+	/** Network segments {@code {lon1, lat1, lon2, lat2}} between catalogs that share a time. */
+	public java.util.List<double[]> connectionSegments() {
+		java.util.List<double[]> out = new java.util.ArrayList<>();
+		if (!showConnections || catalogInfos.size() < 2) {
+			return out;
+		}
+		java.util.List<com.treloc.xtreloc.app.gui.model.CatalogInfo> visible = new java.util.ArrayList<>();
+		for (com.treloc.xtreloc.app.gui.model.CatalogInfo info : catalogInfos) {
+			if (info.isVisible() && info.getHypocenters() != null && !info.getHypocenters().isEmpty()) {
+				visible.add(info);
+			}
+		}
+		if (visible.size() < 2) {
+			return out;
+		}
+		java.util.Map<String, java.util.Map<com.treloc.xtreloc.app.gui.model.CatalogInfo, Hypocenter>> byTime =
+			new java.util.HashMap<>();
+		for (com.treloc.xtreloc.app.gui.model.CatalogInfo catalog : visible) {
+			for (Hypocenter h : catalog.getHypocenters()) {
+				String t = com.treloc.xtreloc.app.gui.model.CatalogInfo.normalizeTime(h.time);
+				byTime.computeIfAbsent(t, k -> new java.util.HashMap<>()).putIfAbsent(catalog, h);
+			}
+		}
+		for (java.util.Map<com.treloc.xtreloc.app.gui.model.CatalogInfo, Hypocenter> m : byTime.values()) {
+			if (m.size() < 2) {
+				continue;
+			}
+			java.util.List<Hypocenter> pts = new java.util.ArrayList<>(m.values());
+			for (int i = 0; i < pts.size() - 1; i++) {
+				Hypocenter a = pts.get(i);
+				Hypocenter b = pts.get(i + 1);
+				if (isFiniteLonLat(a.lon, a.lat) && isFiniteLonLat(b.lon, b.lat)) {
+					out.add(new double[] {a.lon, a.lat, b.lon, b.lat});
+				}
+			}
+		}
+		return out;
+	}
+
+	public java.util.List<OverlayPoints> getDisplayedHypocenters() {
+		java.util.List<OverlayPoints> out = new java.util.ArrayList<>();
+		if (!catalogInfos.isEmpty()) {
+			for (com.treloc.xtreloc.app.gui.model.CatalogInfo c : catalogInfos) {
+				if (!c.isVisible() || c.getHypocenters() == null) {
+					continue;
+				}
+				out.add(overlayPointsFor(c.getName(), c.getColor(), c, c.getHypocenters()));
+			}
+			return out;
+		}
+		if (lastHypocenters != null && !lastHypocenters.isEmpty()) {
+			out.add(overlayPointsFor("Hypocenters", new Color(255, 110, 0), null, lastHypocenters));
+		}
+		return out;
+	}
+
+	private OverlayPoints overlayPointsFor(String name, Color fallback, com.treloc.xtreloc.app.gui.model.CatalogInfo catalog,
+			java.util.List<Hypocenter> hypos) {
+		java.util.List<double[]> pts = new java.util.ArrayList<>();
+		java.util.List<Color> cols = hasCatalogColorMap() ? new java.util.ArrayList<>() : null;
+		for (Hypocenter h : hypos) {
+			if (Double.isFinite(h.lon) && Double.isFinite(h.lat) && Double.isFinite(h.depth)) {
+				pts.add(new double[] {h.lon, h.lat, h.depth});
+				if (cols != null) {
+					cols.add(colorOf(catalog, h));
+				}
+			}
+		}
+		int size = catalog != null && catalog.getSymbolSize() > 0 ? catalog.getSymbolSize() : symbolSize;
+		return new OverlayPoints(name, fallback, pts, cols, size);
+	}
+
+	/** Shapefile layers of the map (visible or not). */
+	public java.util.List<ShapefileRef> getShapefileLayers() {
+		java.util.List<ShapefileRef> out = new java.util.ArrayList<>();
+		for (Layer layer : map.layers()) {
+			String t = layer.getTitle();
+			if (t != null && t.startsWith("ShapefileLayer_") && layer instanceof FeatureLayer) {
+				String name = t.substring("ShapefileLayer_".length());
+				int us = name.lastIndexOf('_');
+				if (us > 0) {
+					name = name.substring(0, us);
+				}
+				out.add(new ShapefileRef(t, name, layer.isVisible(), ((FeatureLayer) layer).getFeatureSource(),
+					shapefileStyles.getOrDefault(t, com.treloc.xtreloc.app.gui.model.MapLayerStyle.defaultShapefile())));
+			}
+		}
+		return out;
+	}
+
+	public com.treloc.xtreloc.app.gui.model.MapLayerStyle getNetworkStyle() {
+		return networkStyle;
+	}
+
+	public void setNetworkStyle(com.treloc.xtreloc.app.gui.model.MapLayerStyle style) {
+		this.networkStyle = style != null ? style : com.treloc.xtreloc.app.gui.model.MapLayerStyle.defaultNetwork();
+		updateMultipleCatalogsDisplay();
+	}
+
+	public com.treloc.xtreloc.app.gui.model.MapLayerStyle getGridStyle() {
+		return gridStyle;
+	}
+
+	public void setGridStyle(com.treloc.xtreloc.app.gui.model.MapLayerStyle style) {
+		this.gridStyle = style != null ? style : com.treloc.xtreloc.app.gui.model.MapLayerStyle.defaultGrid();
+		fireOverlayChanged();
+	}
+
+	public void setShapefileStyle(String layerTitle, com.treloc.xtreloc.app.gui.model.MapLayerStyle style) {
+		if (layerTitle == null) {
+			return;
+		}
+		com.treloc.xtreloc.app.gui.model.MapLayerStyle s =
+			style != null ? style : com.treloc.xtreloc.app.gui.model.MapLayerStyle.defaultShapefile();
+		shapefileStyles.put(layerTitle, s);
+		for (Layer layer : map.layers()) {
+			if (layerTitle.equals(layer.getTitle()) && layer instanceof FeatureLayer) {
+				((FeatureLayer) layer).setStyle(StyleFactory.createLineStyle(s));
+			}
+		}
+		forceMapRepaint();
+		fireOverlayChanged();
+	}
+
+	public void setStationStyleSink(
+			java.util.function.BiConsumer<String, com.treloc.xtreloc.app.gui.model.MapLayerStyle> sink) {
+		this.stationStyleSink = sink;
+	}
+
+	public void applyStationStyle(String id, com.treloc.xtreloc.app.gui.model.MapLayerStyle style) {
+		if (stationStyleSink != null) {
+			stationStyleSink.accept(id, style);
+		}
+	}
+
+	public void setStationStyleEntries(java.util.List<StationStyleEntry> entries) {
+		this.stationStyleEntries = entries != null ? new java.util.ArrayList<>(entries) : new java.util.ArrayList<>();
+	}
+
+	public java.util.List<StationStyleEntry> getStationStyleEntries() {
+		return new java.util.ArrayList<>(stationStyleEntries);
+	}
+
+	public com.treloc.xtreloc.app.gui.model.MapLayerStyle styleForStation(Station s) {
+		if (s == null) {
+			return com.treloc.xtreloc.app.gui.model.MapLayerStyle.defaultStation();
+		}
+		for (StationStyleEntry e : stationStyleEntries) {
+			if (!e.fileLevel) {
+				continue;
+			}
+			for (Station st : e.stations) {
+				if (st == s || (st.getCode() != null && st.getCode().equalsIgnoreCase(s.getCode()))) {
+					return e.style;
+				}
+			}
+		}
+		return com.treloc.xtreloc.app.gui.model.MapLayerStyle.defaultStation();
+	}
+
 	/** Repaints the map frame (e.g. after screening filter change). */
 	public void repaintMap() {
 		if (frame != null) {
 			frame.repaint();
 		}
+		fireOverlayChanged();
 	}
 
 	/**
@@ -213,6 +590,11 @@ public class MapView {
 	 * Use after data or style changes to refresh the map.
 	 */
 	public void reloadMap() {
+		if (!catalogInfos.isEmpty()) {
+			updateMultipleCatalogsDisplay();
+			repaintMap();
+			return;
+		}
 		if (lastHypocenters != null && !lastHypocenters.isEmpty()) {
 			try {
 				showHypocenters(lastHypocenters, lastColorColumn, lastColorValues);
@@ -263,6 +645,55 @@ public class MapView {
 		}
 	}
 	
+	/**
+	 * Shows a cursor that matches the active map tool (pointer = crosshair, zoom in / out = magnifier,
+	 * pan = move arrows, info = "i"). GeoTools sets its own small icons when a tool is chosen and again on
+	 * mouse-enter; our listeners run after those so the clearer cursors win.
+	 */
+	private void installModeCursors() {
+		try {
+			MapPane mapPane = frame.getMapPane();
+			if (mapPane == null) {
+				return;
+			}
+			Component mapComponent = (Component) mapPane;
+			mapComponent.addMouseListener(new MouseAdapter() {
+				@Override
+				public void mouseEntered(MouseEvent e) {
+					applyModeCursor();
+				}
+			});
+			javax.swing.JToolBar tb = frame.getToolBar();
+			if (tb != null) {
+				for (Component c : tb.getComponents()) {
+					if (c instanceof javax.swing.AbstractButton) {
+						((javax.swing.AbstractButton) c).addActionListener(
+							ev -> SwingUtilities.invokeLater(this::applyModeCursor));
+					}
+				}
+			}
+			applyModeCursor();
+		} catch (Exception ex) {
+			logger.log(Level.FINE, "Could not install map mode cursors: " + ex.getMessage(), ex);
+		}
+	}
+
+	private void applyModeCursor() {
+		MapPane mapPane = frame.getMapPane();
+		if (mapPane == null) {
+			return;
+		}
+		((Component) mapPane).setCursor(
+			com.treloc.xtreloc.app.gui.util.MapCursors.forTool(mapPane.getCursorTool()));
+	}
+
+	/** Repaints the colour bar after the date/time display format changed. */
+	public void refreshTimeLabels() {
+		if (colorBarPanel != null) {
+			colorBarPanel.repaint();
+		}
+	}
+
 	private void updateCoordinates(MouseEvent e) {
 		try {
 			org.geotools.swing.MapPane mapPane = frame.getMapPane();
@@ -310,7 +741,9 @@ public class MapView {
 			throw new IllegalArgumentException("File and FeatureSource must be non-null");
 		}
 		String layerTitle = "ShapefileLayer_" + shp.getName() + "_" + System.currentTimeMillis();
-		Style shapefileStyle = StyleFactory.createShapefileStyleForGeometry(featureSource);
+		com.treloc.xtreloc.app.gui.model.MapLayerStyle stored =
+			shapefileStyles.computeIfAbsent(layerTitle, k -> com.treloc.xtreloc.app.gui.model.MapLayerStyle.defaultShapefile());
+		Style shapefileStyle = StyleFactory.createLineStyle(stored);
 		try {
 			FeatureLayer layer = new FeatureLayer(featureSource, shapefileStyle);
 			layer.setTitle(layerTitle);
@@ -394,8 +827,9 @@ public class MapView {
 			}
 			
 			String layerTitle = "ShapefileLayer_" + shp.getName() + "_" + System.currentTimeMillis();
-			
-			Style shapefileStyle = StyleFactory.createShapefileStyleForGeometry(featureSource);
+			com.treloc.xtreloc.app.gui.model.MapLayerStyle stored =
+				shapefileStyles.computeIfAbsent(layerTitle, k -> com.treloc.xtreloc.app.gui.model.MapLayerStyle.defaultShapefile());
+			Style shapefileStyle = StyleFactory.createLineStyle(stored);
 			
 			try {
 				FeatureLayer layer = new FeatureLayer(featureSource, shapefileStyle);
@@ -473,7 +907,11 @@ public class MapView {
 			}
 			map.removeLayer(layer);
 		}
+		if (layerTitle != null) {
+			shapefileStyles.remove(layerTitle);
+		}
 		forceMapRepaint();
+		fireOverlayChanged();
 	}
 
 	public void showHypocenters(List<Hypocenter> hypos) throws Exception {
@@ -482,11 +920,21 @@ public class MapView {
 	
 	public void addCatalog(com.treloc.xtreloc.app.gui.model.CatalogInfo catalogInfo) {
 		catalogInfos.add(catalogInfo);
+		forgetStandaloneHypocenters();
 		updateMultipleCatalogsDisplay();
 	}
 	
 	public void removeCatalog(com.treloc.xtreloc.app.gui.model.CatalogInfo catalogInfo) {
 		catalogInfos.remove(catalogInfo);
+		if (colorMapCatalog == catalogInfo) {
+			colorMapCatalog = null;
+			colorMapColumn = null;
+			colorMapValues = null;
+			fireColorMapCleared();
+		}
+		if (catalogInfos.isEmpty()) {
+			forgetStandaloneHypocenters();
+		}
 		updateMultipleCatalogsDisplay();
 	}
 	
@@ -495,7 +943,18 @@ public class MapView {
 	 */
 	public void clearAllCatalogs() {
 		catalogInfos.clear();
+		colorMapCatalog = null;
+		colorMapColumn = null;
+		colorMapValues = null;
+		forgetStandaloneHypocenters();
 		updateMultipleCatalogsDisplay();
+	}
+
+	/** Drops leftover {@link #lastHypocenters} so a removed catalog cannot reappear on 2-D / 3-D overlays. */
+	private void forgetStandaloneHypocenters() {
+		lastHypocenters = null;
+		lastColorColumn = null;
+		lastColorValues = null;
 	}
 	
 	/**
@@ -568,6 +1027,14 @@ public class MapView {
 	 * and {@code forceMapRepaint} without inline {@code updateGraticule} — caused pan/zoom display issues.</p>
 	 */
 	public void updateMultipleCatalogsDisplay() {
+		try {
+			updateMultipleCatalogsDisplayImpl();
+		} finally {
+			fireOverlayChanged();
+		}
+	}
+
+	private void updateMultipleCatalogsDisplayImpl() {
 		if (cachedSymbolSizeFromSettings < 0) {
 			cachedSymbolSizeFromSettings = com.treloc.xtreloc.app.gui.util.AppSettingsCache.snapshot().getSymbolSize();
 		}
@@ -598,10 +1065,13 @@ public class MapView {
 		SimpleFeatureType hypoType;
 		SimpleFeatureType connectionType;
 		SimpleFeatureType errorBarType;
+		final SimpleFeatureType hypoColorType;
 		
 		try {
 			hypoType = DataUtilities.createType("Hypo", 
 				"geom:Point,time:String,depth:Double");
+			hypoColorType = DataUtilities.createType("HypoColor",
+				"geom:Point,time:String,depth:Double,color:String,opacity:Double");
 			connectionType = DataUtilities.createType("Connection", 
 				"geom:LineString");
 			errorBarType = DataUtilities.createType("ErrorBar", "geom:LineString");
@@ -675,8 +1145,12 @@ public class MapView {
 			boolean isColorMapCatalog = (catalogInfo == colorMapCatalog);
 			
 			if (isColorMapCatalog && !colorMap.isEmpty()) {
-				java.util.Map<Color, DefaultFeatureCollection> colorCollections = new java.util.HashMap<>();
-				final String catalogName = catalogInfo.getName();
+				// One layer for the whole catalog; color/opacity are per-feature attributes.
+				// (One layer per distinct color made GeoTools re-render once per addLayer and the
+				// map kept reloading for continuous color values.)
+				DefaultFeatureCollection colored = new DefaultFeatureCollection(
+					"HypoLayer_" + catalogInfo.getName() + "_ColorMap", hypoColorType);
+				SimpleFeatureBuilder fb = new SimpleFeatureBuilder(hypoColorType);
 				
 				for (Hypocenter h : catalogInfo.getHypocenters()) {
 					if (!isFiniteLonLat(h.lon, h.lat)) {
@@ -686,37 +1160,29 @@ public class MapView {
 					if (color == null) {
 						color = catalogInfo.getColor();
 					}
-					final Color finalColor = color;
-					
-					DefaultFeatureCollection col = colorCollections.computeIfAbsent(finalColor, 
-						k -> new DefaultFeatureCollection("HypoLayer_" + catalogName + "_" + finalColor.hashCode(), hypoType));
-					
-					SimpleFeature f = DataUtilities.template(hypoType);
-					f.setDefaultGeometry(gf.createPoint(new Coordinate(h.lon, h.lat)));
-					f.setAttribute("time", h.time);
-					f.setAttribute("depth", h.depth);
-					col.add(f);
+					fb.add(gf.createPoint(new Coordinate(h.lon, h.lat)));
+					fb.add(h.time);
+					fb.add(h.depth);
+					fb.add(String.format("#%02X%02X%02X", color.getRed(), color.getGreen(), color.getBlue()));
+					fb.add(Math.max(0.0, Math.min(1.0, color.getAlpha() / 255.0)));
+					colored.add(fb.buildFeature(null));
 				}
 				
-				com.treloc.xtreloc.app.gui.model.CatalogInfo.SymbolType symbolType = catalogInfo.getSymbolType();
-				for (java.util.Map.Entry<Color, DefaultFeatureCollection> entry : colorCollections.entrySet()) {
-					Color color = entry.getKey();
-					DefaultFeatureCollection col = entry.getValue();
-					if (col.isEmpty()) {
-						continue;
-					}
-					Style style = com.treloc.xtreloc.app.gui.service.StyleFactory.createSymbolStyle(
-						symbolType, color, symbolSize);
-					FeatureLayer layer = new FeatureLayer(col, style);
-					layer.setTitle("HypoLayer_" + catalogInfo.getName() + "_ColorMap");
+				if (!colored.isEmpty()) {
+					int catSize = catalogInfo.getSymbolSize() > 0 ? catalogInfo.getSymbolSize() : symbolSize;
+					Style style = com.treloc.xtreloc.app.gui.service.StyleFactory.createSymbolStyleByAttribute(
+						catalogInfo.getSymbolType(), catSize);
+					FeatureLayer layer = new FeatureLayer(colored, style);
+					layer.setTitle("HypoLayer_" + System.identityHashCode(catalogInfo) + "_ColorMap");
 					map.addLayer(layer);
 				}
 			} else {
 				DefaultFeatureCollection hypoCollection = new DefaultFeatureCollection(
 					"HypoLayer_" + catalogInfo.getName(), hypoType);
 				
-				Color color = catalogInfo.getColor();
+				Color color = catalogInfo.colorWithOpacity();
 				com.treloc.xtreloc.app.gui.model.CatalogInfo.SymbolType symbolType = catalogInfo.getSymbolType();
+				int catSize = catalogInfo.getSymbolSize() > 0 ? catalogInfo.getSymbolSize() : symbolSize;
 				
 				for (Hypocenter h : catalogInfo.getHypocenters()) {
 					if (!isFiniteLonLat(h.lon, h.lat)) {
@@ -731,9 +1197,9 @@ public class MapView {
 				
 				if (!hypoCollection.isEmpty()) {
 					Style style = com.treloc.xtreloc.app.gui.service.StyleFactory.createSymbolStyle(
-						symbolType, color, symbolSize);
+						symbolType, color, catSize);
 					FeatureLayer layer = new FeatureLayer(hypoCollection, style);
-					layer.setTitle("HypoLayer_" + catalogInfo.getName());
+					layer.setTitle("HypoLayer_" + System.identityHashCode(catalogInfo));
 					map.addLayer(layer);
 				}
 			}
@@ -792,9 +1258,7 @@ public class MapView {
 			}
 			
 			if (!connectionCollection.isEmpty()) {
-				Color connectionColor = new Color(128, 128, 128, 128);
-				Style connectionStyle = com.treloc.xtreloc.app.gui.service.StyleFactory.createConnectionLineStyle(
-					connectionColor, 1.0f);
+				Style connectionStyle = com.treloc.xtreloc.app.gui.service.StyleFactory.createLineStyle(networkStyle);
 				FeatureLayer connectionLayer = new FeatureLayer(connectionCollection, connectionStyle);
 				connectionLayer.setTitle("ConnectionLayer");
 				map.addLayer(connectionLayer);
@@ -821,6 +1285,7 @@ public class MapView {
 					java.util.logging.Logger.getLogger(MapView.class.getName())
 						.warning("Failed to repaint map: " + e.getMessage());
 				}
+				fireOverlayChanged();
 			});
 		} catch (Exception e) {
 			java.util.logging.Logger.getLogger(MapView.class.getName())
@@ -920,61 +1385,6 @@ public class MapView {
 		stationSymbolLegendPanel.setOpaque(true);
 		stationSymbolLegendPanel.setBackground(new Color(255, 255, 255, 220));
 		stationSymbolLegendPanel.setVisible(false);
-	}
-	
-	/**
-	 * Updates the station symbol legend panel.
-	 */
-	private void updateStationSymbolLegend() {
-		if (stationSymbolLegendPanel == null) {
-			return;
-		}
-		
-		stationSymbolLegendPanel.removeAll();
-		
-		boolean hasStations = false;
-		for (Layer layer : map.layers()) {
-			if ("StationLayer".equals(layer.getTitle())) {
-				hasStations = true;
-				break;
-			}
-		}
-		
-		if (hasStations) {
-			JPanel itemPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 5, 2));
-			itemPanel.setOpaque(false);
-			
-			JLabel symbolLabel = new JLabel() {
-				@Override
-				protected void paintComponent(Graphics g) {
-					super.paintComponent(g);
-					Graphics2D g2 = (Graphics2D) g.create();
-					g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-					g2.setColor(Color.BLACK);
-					int size = 12;
-					int x = (getWidth() - size) / 2;
-					int y = (getHeight() - size) / 2;
-					int[] xPoints = {x + size/2, x, x + size};
-					int[] yPoints = {y + size, y, y};
-					g2.fillPolygon(xPoints, yPoints, 3);
-					g2.dispose();
-				}
-			};
-			symbolLabel.setPreferredSize(new java.awt.Dimension(20, 20));
-			itemPanel.add(symbolLabel);
-			
-			JLabel nameLabel = new JLabel("Station");
-			nameLabel.setFont(UiFonts.uiPlain(11f));
-			itemPanel.add(nameLabel);
-			
-			stationSymbolLegendPanel.add(itemPanel);
-			stationSymbolLegendPanel.setVisible(true);
-		} else {
-			stationSymbolLegendPanel.setVisible(false);
-		}
-		
-		stationSymbolLegendPanel.revalidate();
-		stationSymbolLegendPanel.repaint();
 	}
 	
 	/**
@@ -1200,13 +1610,43 @@ public class MapView {
 	 * Clears the color map display and returns to normal catalog display mode.
 	 */
 	public void clearColorMap() {
+		boolean had = colorMapCatalog != null || colorMapValues != null;
 		colorMapCatalog = null;
 		colorMapColumn = null;
 		colorMapValues = null;
+		if (had) {
+			fireColorMapCleared();
+		}
 		updateMultipleCatalogsDisplay();
 	}
 	
 	public void showHypocenters(List<Hypocenter> hypos, String colorColumn, double[] colorValues) throws Exception {
+		try {
+			if (!catalogInfos.isEmpty()) {
+				lastHypocenters = null;
+				lastColorColumn = null;
+				lastColorValues = null;
+				com.treloc.xtreloc.app.gui.model.CatalogInfo match = null;
+				for (com.treloc.xtreloc.app.gui.model.CatalogInfo c : catalogInfos) {
+					if (c.getHypocenters() == hypos || c.getHypocentersFull() == hypos) {
+						match = c;
+						break;
+					}
+				}
+				if (match != null && colorValues != null) {
+					applyColorMapToCatalog(match, colorColumn, colorValues);
+				} else {
+					updateMultipleCatalogsDisplay();
+				}
+				return;
+			}
+			showHypocentersImpl(hypos, colorColumn, colorValues);
+		} finally {
+			fireOverlayChanged();
+		}
+	}
+
+	private void showHypocentersImpl(List<Hypocenter> hypos, String colorColumn, double[] colorValues) throws Exception {
 		lastHypocenters = hypos;
 		lastColorColumn = colorColumn;
 		lastColorValues = colorValues;
@@ -1264,7 +1704,11 @@ public class MapView {
 		String label = (colorColumn != null) ? colorColumn : "Depth (km)";
 		setColorRange(minValue, maxValue, label);
 		
-		java.util.Map<Color, DefaultFeatureCollection> colorCollections = new java.util.HashMap<>();
+		// Single layer with per-feature color/opacity (one layer per color re-rendered the map per addLayer).
+		SimpleFeatureType colorType = DataUtilities.createType("HypoColor",
+			"geom:Point,time:String,depth:Double,color:String,opacity:Double");
+		DefaultFeatureCollection coloredCollection = new DefaultFeatureCollection("HypoLayer_Colored", colorType);
+		SimpleFeatureBuilder featureBuilder = new SimpleFeatureBuilder(colorType);
 		
 		SimpleFeatureType errorBarType = DataUtilities.createType("ErrorBar", "geom:LineString");
 		DefaultFeatureCollection errorBarCollection = new DefaultFeatureCollection("ErrorBarLayer", errorBarType);
@@ -1273,15 +1717,13 @@ public class MapView {
 			Hypocenter h = hypos.get(i);
 			Color color = colors.get(i);
 			
-			DefaultFeatureCollection col = colorCollections.computeIfAbsent(color, 
-				k -> new DefaultFeatureCollection("HypoLayer_" + color.hashCode(), type));
-			
 			if (isFiniteLonLat(h.lon, h.lat)) {
-				SimpleFeature f = DataUtilities.template(type);
-				f.setDefaultGeometry(gf.createPoint(new Coordinate(h.lon, h.lat)));
-				f.setAttribute("time", h.time);
-				f.setAttribute("depth", h.depth);
-				col.add(f);
+				featureBuilder.add(gf.createPoint(new Coordinate(h.lon, h.lat)));
+				featureBuilder.add(h.time);
+				featureBuilder.add(h.depth);
+				featureBuilder.add(String.format("#%02X%02X%02X", color.getRed(), color.getGreen(), color.getBlue()));
+				featureBuilder.add(Math.max(0.0, Math.min(1.0, color.getAlpha() / 255.0)));
+				coloredCollection.add(featureBuilder.buildFeature(null));
 			}
 			
 			if (showErrorEllipse && (h.xerr > 0 || h.yerr > 0) && isFiniteLonLat(h.lon, h.lat)) {
@@ -1302,16 +1744,11 @@ public class MapView {
 			map.addLayer(errorBarLayer);
 		}
 		
-		for (java.util.Map.Entry<Color, DefaultFeatureCollection> entry : colorCollections.entrySet()) {
-			Color color = entry.getKey();
-			DefaultFeatureCollection col = entry.getValue();
-			if (col.isEmpty()) {
-				continue;
-			}
-			Style style = StyleFactory.createColorStyle(color.getRed(), color.getGreen(), color.getBlue(),
-				color.getAlpha(), symbolSize);
-			FeatureLayer layer = new FeatureLayer(col, style);
-			layer.setTitle("HypoLayer_" + color.hashCode());
+		if (!coloredCollection.isEmpty()) {
+			Style style = StyleFactory.createSymbolStyleByAttribute(
+				com.treloc.xtreloc.app.gui.model.CatalogInfo.SymbolType.CIRCLE, symbolSize);
+			FeatureLayer layer = new FeatureLayer(coloredCollection, style);
+			layer.setTitle("HypoLayer_Colored");
 			map.addLayer(layer);
 		}
 		
@@ -1455,6 +1892,8 @@ public class MapView {
 				int gray = Math.max(0, Math.min(255, Math.round(255 * rr)));
 				return new Color(gray, gray, gray);
 			}
+			case SEISMIC:
+				return new Color(com.treloc.xtreloc.app.gui.volume3d.ColorMaps.SEISMIC.rgb(ratio));
 			case BLUE_TO_RED:
 			default:
 				return interpolateColor(Color.BLUE, Color.RED, ratio);
@@ -1536,6 +1975,7 @@ public class MapView {
 					String currentLabel = colorBarPanel.getLabel();
 					setColorRange(min, max, currentLabel);
 					refreshMapColors();
+					fireOverlayChanged();
 				});
 				colorBarPanel.setPaletteChangeCallback(() -> {
 					currentPalette = colorBarPanel.getPalette();
@@ -1544,6 +1984,7 @@ public class MapView {
 						try {
 							updateMultipleCatalogsDisplay();
 							repaintMap();
+							fireOverlayChanged();
 						} finally {
 							ViewerStatusBar.stopLoading();
 						}
@@ -1865,7 +2306,7 @@ public class MapView {
 				}
 
 				// Reload map button: re-build map layers from current data
-				ImageIcon reloadIcon = loadIconFromResource("/images/Reload.png");
+				ImageIcon reloadIcon = loadIconFromResource("/images/Refresh.png");
 				if (reloadIcon != null) {
 					if (reloadMapButton != null && reloadMapButton.getParent() != null) {
 						reloadMapButton.getParent().remove(reloadMapButton);
@@ -2035,6 +2476,7 @@ public class MapView {
 	}
 	
 	public void showStations(List<Station> stations, String colorColumn, double[] colorValues) throws Exception {
+		lastStations = stations == null ? new java.util.ArrayList<>() : new java.util.ArrayList<>(stations);
 		java.util.List<Layer> layersToRemove = new java.util.ArrayList<>();
 		for (Layer layer : map.layers()) {
 			if ("StationLayer".equals(layer.getTitle())) {
@@ -2103,11 +2545,18 @@ public class MapView {
 				setColorRange(minValue, maxValue, label);
 			}
 		} else {
-			DefaultFeatureCollection col = new DefaultFeatureCollection("StationLayer", type);
+			java.util.Map<java.util.AbstractMap.SimpleImmutableEntry<com.treloc.xtreloc.app.gui.model.MapLayerStyle, Boolean>,
+					DefaultFeatureCollection> byStyle = new java.util.LinkedHashMap<>();
 			for (Station s : stations) {
 				if (!isFiniteLonLat(s.getLon(), s.getLat())) {
 					continue;
 				}
+				com.treloc.xtreloc.app.gui.model.MapLayerStyle st = styleForStation(s);
+				boolean filled = isStationFilled(s);
+				java.util.AbstractMap.SimpleImmutableEntry<com.treloc.xtreloc.app.gui.model.MapLayerStyle, Boolean> key =
+					new java.util.AbstractMap.SimpleImmutableEntry<>(st, filled);
+				DefaultFeatureCollection col = byStyle.computeIfAbsent(key,
+					k -> new DefaultFeatureCollection("StationLayer", type));
 				SimpleFeature f = DataUtilities.template(type);
 				f.setDefaultGeometry(gf.createPoint(new Coordinate(s.getLon(), s.getLat())));
 				f.setAttribute("code", s.getCode());
@@ -2116,8 +2565,13 @@ public class MapView {
 				f.setAttribute("dep", s.getDep());
 				col.add(f);
 			}
-			if (!col.isEmpty()) {
-				FeatureLayer layer = new FeatureLayer(col, StyleFactory.stationStyle());
+			for (java.util.Map.Entry<java.util.AbstractMap.SimpleImmutableEntry<com.treloc.xtreloc.app.gui.model.MapLayerStyle, Boolean>,
+					DefaultFeatureCollection> e : byStyle.entrySet()) {
+				if (e.getValue().isEmpty()) {
+					continue;
+				}
+				FeatureLayer layer = new FeatureLayer(e.getValue(),
+					StyleFactory.createStationStyle(e.getKey().getKey(), e.getKey().getValue()));
 				layer.setTitle("StationLayer");
 				map.addLayer(layer);
 			}
@@ -2136,13 +2590,33 @@ public class MapView {
 		highlightPoint(lon, lat, type, null, null);
 	}
 	
+	/** Selected hypocentre / station, or {@code null}. */
+	public double[] selectedPoint() {
+		return Double.isFinite(highlightLon) && Double.isFinite(highlightLat)
+			? new double[] {highlightLon, highlightLat} : null;
+	}
+
 	public void highlightPoint(double lon, double lat, String type, 
 			com.treloc.xtreloc.app.gui.model.CatalogInfo.SymbolType symbolType, Color color) {
+		highlightPoint(lon, lat, type, symbolType, color, null);
+	}
+
+	public void highlightPoint(double lon, double lat, String type,
+			com.treloc.xtreloc.app.gui.model.CatalogInfo.SymbolType symbolType, Color color, String key) {
+		if (key != null && key.equals(highlightKey) && Double.isFinite(highlightLon)
+			&& Math.abs(highlightLon - lon) < 1e-8 && Math.abs(highlightLat - lat) < 1e-8) {
+			clearHighlight();
+			return;
+		}
 		clearHighlight();
 
 		if (!isFiniteLonLat(lon, lat)) {
 			return;
 		}
+		highlightLon = lon;
+		highlightLat = lat;
+		highlightKey = key;
+		fireOverlayChanged();
 
 		try {
 			SimpleFeatureType highlightType = DataUtilities.createType("Highlight", "geom:Point");
@@ -2171,7 +2645,11 @@ public class MapView {
 	}
 	
 	public void clearHighlight() {
+		highlightLon = Double.NaN;
+		highlightLat = Double.NaN;
+		highlightKey = null;
 		removeHighlightLayer();
+		fireOverlayChanged();
 	}
 	
 	private void removeHighlightLayer() {
@@ -2340,6 +2818,27 @@ public class MapView {
 		public void setRangeChangeListener(RangeChangeListener listener) {
 			this.rangeChangeListener = listener;
 		}
+
+		private final java.util.List<Runnable> changeListeners = new java.util.concurrent.CopyOnWriteArrayList<>();
+
+		/**
+		 * Listener run after {@link #setRange} or {@link #setPalette}; independent of the map's own range
+		 * listener, so other views (3D map) can follow edits made in the colour map dialog.
+		 */
+		public void addChangeListener(Runnable listener) {
+			changeListeners.add(listener);
+		}
+
+		private void fireChanged() {
+			for (Runnable r : changeListeners) {
+				r.run();
+			}
+		}
+
+		/** Opens the colour map settings dialog (same as clicking the bar). */
+		public void showSettingsDialog() {
+			openSettingsDialog();
+		}
 		
 		public void setPaletteChangeCallback(Runnable callback) {
 			this.paletteChangeCallback = callback;
@@ -2374,6 +2873,8 @@ public class MapView {
 					}
 					int gray = Math.max(0, Math.min(255, Math.round(255 * rr)));
 					return new Color(gray, gray, gray);
+				case SEISMIC:
+					return new Color(com.treloc.xtreloc.app.gui.volume3d.ColorMaps.SEISMIC.rgb(ratio));
 				case BLUE_TO_RED:
 				default:
 					return interpolateColor(Color.BLUE, Color.RED, ratio);
@@ -2547,6 +3048,12 @@ public class MapView {
 				}
 				
 				private String formatLabel(double value) {
+					// Time colouring uses epoch millis; labels follow the Date/Time format settings
+					// (date, time, or date + time depending on the range in Auto mode).
+					if (label != null && "Time".equalsIgnoreCase(label.trim())) {
+						return com.treloc.xtreloc.util.TimeFormatConverter.formatColorBarTime(
+							value, minValue, maxValue);
+					}
 					double range = maxValue - minValue;
 					if (range == 0) {
 						return String.format(Locale.US, "%.1f", value);
@@ -2580,6 +3087,7 @@ public class MapView {
 			if (colorBarDrawingPanel != null) {
 				colorBarDrawingPanel.repaint();
 			}
+			fireChanged();
 		}
 		
 		public void setPalette(ColorPalette palette) {
@@ -2591,6 +3099,7 @@ public class MapView {
 			if (colorBarDrawingPanel != null) {
 				colorBarDrawingPanel.repaint();
 			}
+			fireChanged();
 		}
 		
 		public void setLabelsVisible(boolean visible) {
@@ -2633,6 +3142,22 @@ public class MapView {
 		
 		public Color[] getColorArray() {
 			return colorArray != null ? colorArray.clone() : null;
+		}
+
+		/** Colour of {@code value} on this bar (clamped to the current range). */
+		public Color colorAt(double value) {
+			double span = maxValue - minValue;
+			float ratio = span == 0.0 ? 0.0f : (float) ((value - minValue) / span);
+			if (ratio < 0.0f) {
+				ratio = 0.0f;
+			} else if (ratio > 1.0f) {
+				ratio = 1.0f;
+			}
+			if (colorArray != null && colorArray.length > 1) {
+				int i = Math.round(ratio * (colorArray.length - 1));
+				return colorArray[i];
+			}
+			return getColorFromPalette(ratio);
 		}
 		
 		private void openSettingsDialog() {

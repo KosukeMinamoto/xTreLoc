@@ -30,6 +30,8 @@ public class HypoGridSearch extends SolverBase {
     private double hypBottom;
     private int totalGrids;
     private int numFocus;
+    private double rangeSigma;
+    private JsonNode grdSolver;
 
     private ConvergenceCallback convergenceCallback;
 
@@ -59,6 +61,7 @@ public class HypoGridSearch extends SolverBase {
 
     private void initGrdParams(AppConfig appConfig) {
         JsonNode grdSolver = appConfig.getParams() != null ? appConfig.getParams().get("GRD") : null;
+        this.grdSolver = grdSolver;
         if (grdSolver != null) {
             if (grdSolver.has("totalGrids") && grdSolver.has("numFocus")) {
                 this.totalGrids = grdSolver.get("totalGrids").asInt();
@@ -84,8 +87,10 @@ public class HypoGridSearch extends SolverBase {
             SolverLogger.warning("GRD: numFocus invalid; using 1.");
             this.numFocus = 1;
         }
-        SolverLogger.fine(String.format("GRD: Grid search parameters: totalGrids=%d, numFocus=%d, gridsPerFocus=%d",
-            totalGrids, numFocus, totalGrids / numFocus));
+        this.rangeSigma = HypoUtils.readRangeSigma(grdSolver);
+        SolverLogger.fine(String.format(
+            "GRD: Grid search parameters: totalGrids=%d, numFocus=%d, gridsPerFocus=%d, rangeSigma=%.2f",
+            totalGrids, numFocus, totalGrids / numFocus, rangeSigma));
     }
 
     /**
@@ -128,114 +133,54 @@ public class HypoGridSearch extends SolverBase {
         double edep = point.getEdep();
         double res = point.getRes();
 
-        double latRange = 1; // degree
-        double lonRange = 1; // degree
-        double depRange = 10; // km
+        double[] depthSeeds = HypoUtils.readDepthSeeds(grdSolver, dep, stnBottom, hypBottom);
+        HypoUtils.StationSearchBox box = this.clipSearchBox(HypoUtils.searchBoxFromUsedStations(
+            this.stationTable, usedIdx, lat, lon, dep, rangeSigma, depthSeeds[0], stnBottom, hypBottom));
+        SolverLogger.info("GRD: Search box from threshold stations: " + box.summary());
+        SolverLogger.info("GRD: Depth seeds (km): " + HypoUtils.formatDepthSeeds(depthSeeds));
 
         int gridsPerFocus = totalGrids / numFocus;
         
-        double[] sWaveTravelTime = travelTime(this.stationTable, usedIdx, point);
-        double[] travelTimeResidual = differentialTravelTimeResidual(lagTable, sWaveTravelTime);
-        double initialRes = HypoUtils.standardDeviation(travelTimeResidual);
+        double[] travelTimeResidual = pairResiduals(this.stationTable, usedIdx, point, lagTable);
+        double initialRes = HypoUtils.weightedRms(travelTimeResidual, lagTable, pWeight);
         
-        if (res <= 0.0 || res >= 999.0) {
-            res = initialRes;
-            SolverLogger.fine(String.format("Initial residual calculated: %.6f (input res was %.6f)", res, point.getRes()));
-        } else {
-            res = initialRes;
-            SolverLogger.fine(String.format("Initial residual calculated: %.6f (input res was %.6f, using calculated value)", res, point.getRes()));
-        }
+        res = initialRes;
+        SolverLogger.fine(String.format("Initial residual calculated: %.6f (input res was %.6f)", res, point.getRes()));
         if (convergenceCallback != null) {
             convergenceCallback.onIterationUpdate(0, 1, res, null);
         }
         int nThreads = Math.max(1, Math.min(4, Runtime.getRuntime().availableProcessors()));
         ExecutorService executor = BatchExecutorFactory.newFixedThreadPoolBounded(
-                nThreads, BatchExecutorFactory.suggestedQueueCapacity(totalGrids));
-        for (int focus = 0; focus < numFocus; focus++) {
-            if (Thread.currentThread().isInterrupted()) {
-                executor.shutdownNow();
-                SolverLogger.info("GRD: Interrupted by user");
-                throw new RuntimeException("Grid search was interrupted");
-            }
-            
-            double rangeFactor = Math.pow(0.5, focus);
-            double[] latGrids = generateRandomGrid(
-                lat - latRange * rangeFactor, 
-                lat + latRange * rangeFactor, 
-                gridsPerFocus);
-            double[] lonGrids = generateRandomGrid(
-                lon - lonRange * rangeFactor, 
-                lon + lonRange * rangeFactor, 
-                gridsPerFocus);
-            double[] depGrids = generateRandomGrid(
-                Math.max(stnBottom, dep - depRange * rangeFactor), 
-                Math.min(hypBottom, dep + depRange * rangeFactor), 
-                gridsPerFocus);
-
-            final double[][] stnTableRef = this.stationTable;
-            final int[] usedIdxRef = usedIdx;
-            final String timeRef = time;
-            List<Callable<double[]>> tasks = new ArrayList<>(gridsPerFocus);
-            for (int i = 0; i < gridsPerFocus; i++) {
-                final int idx = i;
-                tasks.add(() -> {
-                    if (Thread.currentThread().isInterrupted()) {
-                        throw new RuntimeException("Grid search was interrupted");
-                    }
-                    Point pointNew = new Point(timeRef, latGrids[idx], lonGrids[idx], depGrids[idx],
-                        0, 0, 0, 0, "", "", -999);
-                    double[] newSWaveTravelTime = travelTime(stnTableRef, usedIdxRef, pointNew);
-                    double[] trLocal = differentialTravelTimeResidual(lagTable, newSWaveTravelTime);
-                    double res2 = HypoUtils.standardDeviation(trLocal);
-                    return new double[]{ res2, pointNew.getLat(), pointNew.getLon(), pointNew.getDep(), idx };
-                });
-            }
-            List<Future<double[]>> futures;
-            try {
-                futures = executor.invokeAll(tasks);
-            } catch (InterruptedException e) {
-                executor.shutdownNow();
-                Thread.currentThread().interrupt();
-                SolverLogger.info("GRD: Interrupted by user");
-                throw new RuntimeException("Grid search was interrupted", e);
-            }
-            for (int i = 0; i < futures.size(); i++) {
+                nThreads, BatchExecutorFactory.suggestedQueueCapacity(totalGrids * depthSeeds.length));
+        int evaluated = 0;
+        try {
+            for (int s = 0; s < depthSeeds.length; s++) {
                 if (Thread.currentThread().isInterrupted()) {
-                    executor.shutdownNow();
                     SolverLogger.info("GRD: Interrupted by user");
                     throw new RuntimeException("Grid search was interrupted");
                 }
-                double[] row;
-                try {
-                    row = futures.get(i).get();
-                } catch (InterruptedException e) {
-                    executor.shutdownNow();
-                    Thread.currentThread().interrupt();
-                    throw new RuntimeException("Grid search was interrupted", e);
-                } catch (ExecutionException e) {
-                    Throwable cause = e.getCause();
-                    if (cause instanceof RuntimeException) throw (RuntimeException) cause;
-                    throw new RuntimeException("Grid search task failed", cause);
-                }
-                double res2 = row[0];
-                if (res2 < res) {
-                    res = res2;
-                    lat = row[1];
-                    lon = row[2];
-                    dep = row[3];
-                    if (convergenceCallback != null) {
-                        int gridIdx = focus * gridsPerFocus + (int) row[4];
-                        convergenceCallback.onIterationUpdate(gridIdx, gridIdx + 1, res, null);
-                    }
+                double[] local = runFromDepthSeed(
+                    box.centerLat, box.centerLon, depthSeeds[s],
+                    box.latRange, box.lonRange, box.depRange,
+                    lagTable, usedIdx, time, executor, gridsPerFocus, s * totalGrids);
+                evaluated += totalGrids;
+                SolverLogger.info(String.format(java.util.Locale.ROOT,
+                    "GRD: seed dep=%.2f km -> %.4f, %.4f, %.2f km  res=%.6f",
+                    depthSeeds[s], local[1], local[2], local[3], local[0]));
+                if (local[0] < res) {
+                    res = local[0];
+                    lat = local[1];
+                    lon = local[2];
+                    dep = local[3];
                 }
             }
+        } finally {
+            executor.shutdownNow();
         }
-        executor.shutdown();
 
         Point bestPoint = new Point(time, lat, lon, dep, 0, 0, 0, 0, "", "", -999);
-        double[] bestSWaveTravelTime = travelTime(this.stationTable, usedIdx, bestPoint);
-        travelTimeResidual = differentialTravelTimeResidual(lagTable, bestSWaveTravelTime);
-        res = HypoUtils.standardDeviation(travelTimeResidual);
+        travelTimeResidual = pairResiduals(this.stationTable, usedIdx, bestPoint, lagTable);
+        res = HypoUtils.weightedRms(travelTimeResidual, lagTable, pWeight);
         
         double[] weight = residual2weight(travelTimeResidual);
         for (int i = 0; i < weight.length; i++) {
@@ -250,11 +195,12 @@ public class HypoGridSearch extends SolverBase {
         point.setElon(0);
         point.setEdep(0);
         point.setType("GRD");
+        markIfOutOfRange(point);
         
         try {
             dataHandler.writeDatFile(outFile, codeStrings);
             long ms = (System.nanoTime() - wallT0) / 1_000_000L;
-            SolverRunMetricsContext.set(new SolverRunMetrics(totalGrids, totalGrids, ms, res));
+            SolverRunMetricsContext.set(new SolverRunMetrics(evaluated, evaluated, ms, res));
             SolverLogger.info("GRD: Completed. File=" + fileName);
         } catch (IOException e) {
             StringBuilder errorMsg = new StringBuilder("Failed to write output file in GRD mode:\n");
@@ -273,6 +219,96 @@ public class HypoGridSearch extends SolverBase {
     }
 
     /**
+     * Independent GRD from one depth seed. Returns {res, lat, lon, dep} of the local best.
+     */
+    private double[] runFromDepthSeed(double seedLat, double seedLon, double seedDep,
+            double latRange, double lonRange, double depRange,
+            double[][] lagTable, int[] usedIdx, String time,
+            ExecutorService executor, int gridsPerFocus, int gridOffset) {
+        double lat = seedLat;
+        double lon = seedLon;
+        double dep = Math.max(stnBottom, Math.min(hypBottom, seedDep));
+        double res = Double.POSITIVE_INFINITY;
+        final double[][] stnTableRef = this.stationTable;
+        final int[] usedIdxRef = usedIdx;
+        final String timeRef = time;
+        final double pW = pWeight;
+        for (int focus = 0; focus < numFocus; focus++) {
+            if (Thread.currentThread().isInterrupted()) {
+                SolverLogger.info("GRD: Interrupted by user");
+                throw new RuntimeException("Grid search was interrupted");
+            }
+            double rangeFactor = Math.pow(0.5, focus);
+            double cLat = focus == 0 ? seedLat : lat;
+            double cLon = focus == 0 ? seedLon : lon;
+            double cDep = dep;
+            double[] latGrids = generateRandomGrid(
+                cLat - latRange * rangeFactor,
+                cLat + latRange * rangeFactor,
+                gridsPerFocus);
+            double[] lonGrids = generateRandomGrid(
+                cLon - lonRange * rangeFactor,
+                cLon + lonRange * rangeFactor,
+                gridsPerFocus);
+            double[] depGrids = generateRandomGrid(
+                Math.max(stnBottom, cDep - depRange * rangeFactor),
+                Math.min(hypBottom, cDep + depRange * rangeFactor),
+                gridsPerFocus);
+            List<Callable<double[]>> tasks = new ArrayList<>(gridsPerFocus);
+            for (int i = 0; i < gridsPerFocus; i++) {
+                final int idx = i;
+                tasks.add(() -> {
+                    if (Thread.currentThread().isInterrupted()) {
+                        throw new RuntimeException("Grid search was interrupted");
+                    }
+                    Point pointNew = new Point(timeRef, latGrids[idx], lonGrids[idx], depGrids[idx],
+                        0, 0, 0, 0, "", "", -999);
+                    double[] trLocal = pairResiduals(stnTableRef, usedIdxRef, pointNew, lagTable);
+                    double res2 = HypoUtils.weightedRms(trLocal, lagTable, pW);
+                    return new double[]{ res2, pointNew.getLat(), pointNew.getLon(), pointNew.getDep(), idx };
+                });
+            }
+            List<Future<double[]>> futures;
+            try {
+                futures = executor.invokeAll(tasks);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                SolverLogger.info("GRD: Interrupted by user");
+                throw new RuntimeException("Grid search was interrupted", e);
+            }
+            for (int i = 0; i < futures.size(); i++) {
+                if (Thread.currentThread().isInterrupted()) {
+                    SolverLogger.info("GRD: Interrupted by user");
+                    throw new RuntimeException("Grid search was interrupted");
+                }
+                double[] row;
+                try {
+                    row = futures.get(i).get();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new RuntimeException("Grid search was interrupted", e);
+                } catch (ExecutionException e) {
+                    Throwable cause = e.getCause();
+                    if (cause instanceof RuntimeException) throw (RuntimeException) cause;
+                    throw new RuntimeException("Grid search task failed", cause);
+                }
+                double res2 = row[0];
+                if (res2 < res) {
+                    res = res2;
+                    lat = row[1];
+                    lon = row[2];
+                    dep = row[3];
+                    if (convergenceCallback != null) {
+                        int gridIdx = gridOffset + focus * gridsPerFocus + (int) row[4];
+                        convergenceCallback.onIterationUpdate(gridIdx, gridIdx + 1, res, null);
+                    }
+                }
+            }
+        }
+        return new double[]{ res, lat, lon, dep };
+    }
+
+    /**
      * Generate a random grid of values between a minimum and maximum value.
      *
      * @param minVal the minimum value of the grid
@@ -286,24 +322,6 @@ public class HypoGridSearch extends SolverBase {
             grid[i] = minVal + (maxVal - minVal) * Math.random();
         }
         return grid;
-    }
-
-    /**
-     * Calculate the differential travel time residual between observed and calculated travel times.
-     *
-     * @param lagTable the lag table containing the observed travel times
-     * @param sWaveTravelTime the travel times
-     * @return an array containing the differential travel time residuals
-     */
-    private static double[] differentialTravelTimeResidual(double[][] lagTable, double[] sWaveTravelTime) {
-        double[] diffTime = new double[lagTable.length];
-        for (int i = 0; i < lagTable.length; i++) {
-            double sTimeK = sWaveTravelTime[(int) lagTable[i][0]];
-            double sTimeL = sWaveTravelTime[(int) lagTable[i][1]];
-            double calcTime = sTimeL - sTimeK;
-            diffTime[i] = lagTable[i][2] - calcTime; // O-C time
-        }
-        return diffTime;
     }
 }
 

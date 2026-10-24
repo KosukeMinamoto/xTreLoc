@@ -1,1337 +1,803 @@
 package com.treloc.xtreloc.app.gui.view;
 
-import org.jfree.chart.ChartFactory;
-import org.jfree.chart.JFreeChart;
-import org.jfree.chart.ChartPanel;
-import org.jfree.chart.plot.PlotOrientation;
-import org.jfree.chart.plot.XYPlot;
-import org.jfree.chart.renderer.xy.XYLineAndShapeRenderer;
-import org.jfree.chart.axis.NumberAxis;
-import org.jfree.data.xy.XYSeries;
-import org.jfree.data.xy.XYSeriesCollection;
-import com.treloc.xtreloc.util.ModeNameMapper;
+import com.treloc.xtreloc.app.gui.util.AppPanelStyle;
 import com.treloc.xtreloc.app.gui.util.AppSettingsCache;
 import com.treloc.xtreloc.app.gui.util.ChartAppearanceSettings;
+import com.treloc.xtreloc.app.gui.util.OverlayHandle;
 import com.treloc.xtreloc.app.gui.util.UiFonts;
-
-import javax.swing.*;
-import javax.swing.event.PopupMenuEvent;
-import javax.swing.event.PopupMenuListener;
-import java.awt.*;
+import com.treloc.xtreloc.util.ModeNameMapper;
+import java.awt.BasicStroke;
+import java.awt.BorderLayout;
+import java.awt.Color;
+import java.awt.Dimension;
+import java.awt.FlowLayout;
+import java.awt.Font;
+import java.awt.FontMetrics;
+import java.awt.Graphics;
+import java.awt.Graphics2D;
+import java.awt.RenderingHints;
+import java.awt.Stroke;
+import java.awt.event.HierarchyEvent;
 import java.awt.event.ItemEvent;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
+import java.awt.event.MouseWheelEvent;
 import java.awt.image.BufferedImage;
-import java.util.Map;
-import java.util.HashMap;
-import java.util.List;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.Set;
-import java.util.HashSet;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import javax.swing.BorderFactory;
+import javax.swing.JCheckBoxMenuItem;
+import javax.swing.JComponent;
+import javax.swing.JFileChooser;
+import javax.swing.JLabel;
+import javax.swing.JMenuItem;
+import javax.swing.JPanel;
+import javax.swing.JPopupMenu;
+import javax.swing.SwingUtilities;
+import javax.swing.Timer;
 
 /**
- * Convergence plot area for the Solver tab: residual charts (GRD, LMO, MCMC, DE, TRD),
- * optional split multi-event view (DE/TRD), and CLS k-distance — all use the same central {@link #residualPlotContainer}.
- * 
- * @author xTreLoc Development Team
- * @version 1.0
+ * Solver convergence plot: custom canvas (no JFreeChart) so iteration updates stay cheap.
  */
 public class ResidualPlotPanel extends JPanel {
     private static final Logger log = Logger.getLogger(ResidualPlotPanel.class.getName());
+    private static final Color RESIDUAL_COLOR = new Color(50, 150, 200);
+    private static final Color LIKELIHOOD_COLOR = new Color(200, 100, 50);
+    private static final Color TRD_CLUSTER_COLOR = new Color(150, 200, 100);
+    private static final Color INACTIVE = new Color(200, 200, 200);
 
-    private ChartPanel chartPanel;
-    private JFreeChart chart;
-    private XYSeries residualSeries;
-    private XYSeriesCollection dataset;
+    private final Map<String, Polyline> residuals = new ConcurrentHashMap<>();
+    private final Map<String, Polyline> likelihoods = new ConcurrentHashMap<>();
+    private final Polyline defaultResidual = new Polyline("Residual", RESIDUAL_COLOR, false);
+    private final PlotCanvas canvas = new PlotCanvas();
+    private final JPanel residualPlotContainer = new JPanel(new BorderLayout());
+    private final JLabel activeEventLabel = new JLabel("Active: None");
+    private final KDistancePlotPanel kDistancePlotPanel = new KDistancePlotPanel();
+
     private String mode;
+    private volatile String activeEventName;
     private int maxDataPoints = 1000;
-    private boolean autoScale = true;
-    
-    private XYSeries mcmcLikelihoodSeries;
-    private XYSeries trdClusterSeries;
-    
-    private Map<String, EventSeriesInfo> eventSeriesMap;
-    private String activeEventName;
     private int maxHistoryEvents = 3;
-    private JLabel activeEventLabel;
-    
-    private JPanel splitViewPanel;
-    private Map<String, EventChartInfo> eventChartMap;
-    private Map<String, JPanel> eventPanelMap;
-    private boolean useSplitView = true;
-    private int maxParallelJobs = 4;
-    private Set<String> activeProcessingEvents;
-    
-    private JPanel residualPlotContainer;
-    /** Strip above the main chart: Residual only, or + Log-Likelihood (MCMC), or + Per Cluster (TRD). */
-    private JPanel externalLegendPanel;
-    private KDistancePlotPanel kDistancePlotPanel;
-    
-    private volatile long lastRepaintRequestTime = 0;
-    private Timer repaintThrottleTimer;
+    private int totalEventCount;
+    private int completedEventCount;
+    private boolean autoScale = true;
+    private boolean showLegend = true;
+    private final OverlayHandle legendHandle = new OverlayHandle(OverlayHandle.Corner.NW, 8);
+    private String pendingBorderTitle = "Residual Convergence Plot";
+    private boolean pendingEventLabelVisible = true;
 
-    /**
-     * Reads {@link ChartAppearanceSettings#getConvergenceRepaintThrottleMs()}: 0 = no throttle;
-     * positive values are clamped to {@code [16, 60000]} ms.
-     */
-    private static int effectiveConvergenceRepaintThrottleMs() {
-        try {
-            int v = AppSettingsCache.chartAppearance().getConvergenceRepaintThrottleMs();
-            if (v <= 0) {
-                return 0;
-            }
-            return Math.max(16, Math.min(60_000, v));
-        } catch (Exception e) {
-            return 350;
-        }
-    }
+    private final ConcurrentLinkedQueue<Sample> pending = new ConcurrentLinkedQueue<>();
+    private final AtomicInteger pendingCount = new AtomicInteger();
+    private final AtomicBoolean flushScheduled = new AtomicBoolean();
+    private Timer flushTimer;
 
-    /**
-     * Lets the chart scale to the full {@link ChartPanel} size. Defaults (e.g. max width 1024) leave empty
-     * margins so the plot no longer matches the outer frame.
-     */
-    private static void configureChartPanelScaling(ChartPanel panel) {
-        ChartAppearanceSettings.applyResponsiveChartPanelSizing(panel);
-    }
-    
-    /**
-     * Schedules a repaint with throttling to reduce EDT load during convergence updates.
-     * Interval comes from chart appearance settings ({@code convergenceRepaintThrottleMs}).
-     */
-    private void requestRepaint() {
-        int throttleMs = effectiveConvergenceRepaintThrottleMs();
-        if (throttleMs <= 0) {
-            SwingUtilities.invokeLater(this::doThrottledRepaint);
-            return;
-        }
-        long now = System.currentTimeMillis();
-        synchronized (this) {
-            if (now - lastRepaintRequestTime >= throttleMs) {
-                lastRepaintRequestTime = now;
-                if (repaintThrottleTimer != null && repaintThrottleTimer.isRunning()) {
-                    repaintThrottleTimer.stop();
-                }
-                SwingUtilities.invokeLater(this::doThrottledRepaint);
-                return;
-            }
-            if (repaintThrottleTimer == null || !repaintThrottleTimer.isRunning()) {
-                repaintThrottleTimer = new Timer(throttleMs, e -> {
-                    lastRepaintRequestTime = System.currentTimeMillis();
-                    doThrottledRepaint();
-                });
-                repaintThrottleTimer.setRepeats(false);
-                repaintThrottleTimer.start();
-            }
-        }
-    }
-    
-    private void doThrottledRepaint() {
-        if (chartPanel != null) chartPanel.repaint();
-        if (splitViewPanel != null) {
-            splitViewPanel.revalidate();
-            splitViewPanel.repaint();
-        }
-        if (residualPlotContainer != null) {
-            residualPlotContainer.revalidate();
-            residualPlotContainer.repaint();
-        }
-        revalidate();
-        repaint();
-    }
-    
-    /**
-     * Information about an event's series
-     */
-    private static class EventSeriesInfo {
-        XYSeries series;
-        XYSeries likelihoodSeries;
-        boolean isActive;
-        long lastUpdateTime;
-        
-        EventSeriesInfo(XYSeries series) {
-            this.series = series;
-            this.likelihoodSeries = null;
-            this.isActive = true;
-            this.lastUpdateTime = System.currentTimeMillis();
-        }
-    }
-    
-    /**
-     * Information about an event's individual chart (for split view)
-     */
-    private static class EventChartInfo {
-        JFreeChart chart;
-        ChartPanel chartPanel;
-        /** Chart plus external legend strip (same layout as the main convergence plot). */
-        JPanel plotHost;
-        XYSeries series;
-        XYSeries likelihoodSeries;
-        XYSeriesCollection dataset;
-        boolean isActive;
-        long lastUpdateTime;
-        
-        EventChartInfo(String eventName, String mode) {
-            this.series = new XYSeries(eventName);
-            this.likelihoodSeries = null;
-            this.dataset = new XYSeriesCollection(this.series);
-            this.isActive = true;
-            this.lastUpdateTime = System.currentTimeMillis();
-            
-            this.chart = ChartFactory.createXYLineChart(
-                eventName + " - Residual Convergence",
-                "Iteration",
-                "RMS Residual (s)",
-                dataset,
-                PlotOrientation.VERTICAL,
-                true,
-                true,
-                false
-            );
-            
-            ResidualPlotPanel.applyChartAppearance(this.chart);
-            
-            XYPlot plot = this.chart.getXYPlot();
-            XYLineAndShapeRenderer renderer = new XYLineAndShapeRenderer(true, false);
-            renderer.setSeriesPaint(0, ResidualPlotPanel.RESIDUAL_LEGEND_COLOR);
-            
-            ChartAppearanceSettings settings = AppSettingsCache.chartAppearance();
-            renderer.setSeriesStroke(0, new BasicStroke(settings.getLineWidth()));
-            plot.setRenderer(renderer);
-            
-            NumberAxis xAxis = (NumberAxis) plot.getDomainAxis();
-            xAxis.setAutoRange(true);
-            xAxis.setLabelFont(settings.getAxisLabelFont());
-            xAxis.setTickLabelFont(settings.getTickLabelFont());
-            
-            NumberAxis yAxis = (NumberAxis) plot.getRangeAxis();
-            yAxis.setAutoRange(true);
-            yAxis.setLabelFont(settings.getAxisLabelFont());
-            yAxis.setTickLabelFont(settings.getTickLabelFont());
-            yAxis.setLabelPaint(ResidualPlotPanel.RESIDUAL_LEGEND_COLOR);
-            yAxis.setTickLabelPaint(ResidualPlotPanel.RESIDUAL_LEGEND_COLOR);
-            
-            this.chartPanel = new ChartPanel(this.chart);
-            configureChartPanelScaling(this.chartPanel);
-            this.chartPanel.setMinimumSize(new Dimension(200, 100));
-            this.chartPanel.setMouseWheelEnabled(true);
-            this.chartPanel.setMouseZoomable(true);
-            
-            if ("MCMC".equals(mode)) {
-                this.likelihoodSeries = new XYSeries(eventName + " (Log-Likelihood)");
-                this.dataset.addSeries(this.likelihoodSeries);
-                
-                NumberAxis likelihoodAxis = new NumberAxis("Log-Likelihood");
-                likelihoodAxis.setAutoRange(true);
-                likelihoodAxis.setLabelPaint(ResidualPlotPanel.LIKELIHOOD_LEGEND_COLOR);
-                likelihoodAxis.setTickLabelPaint(ResidualPlotPanel.LIKELIHOOD_LEGEND_COLOR);
-                plot.setRangeAxis(1, likelihoodAxis);
-                plot.mapDatasetToRangeAxis(1, 1);
-                
-                renderer.setSeriesPaint(1, ResidualPlotPanel.LIKELIHOOD_LEGEND_COLOR);
-                renderer.setSeriesStroke(1, new BasicStroke(1.5f));
-            }
-            
-            if (this.chart.getLegend() != null) {
-                this.chart.getLegend().setVisible(false);
-            }
-            JPanel legendStrip = ResidualPlotPanel.createSplitEventLegendStrip(mode);
-            this.plotHost = new JPanel(new BorderLayout());
-            this.plotHost.setOpaque(false);
-            this.plotHost.add(legendStrip, BorderLayout.NORTH);
-            this.plotHost.add(this.chartPanel, BorderLayout.CENTER);
-        }
-    }
-    
     public ResidualPlotPanel() {
         setLayout(new BorderLayout());
         setBorder(BorderFactory.createTitledBorder("Residual Convergence Plot"));
-        
-        eventSeriesMap = new HashMap<>();
-        eventChartMap = new HashMap<>();
-        eventPanelMap = new HashMap<>();
-        activeProcessingEvents = new HashSet<>();
-        
-        splitViewPanel = new JPanel();
-        splitViewPanel.setLayout(new BoxLayout(splitViewPanel, BoxLayout.Y_AXIS));
-        JScrollPane splitScrollPane = new JScrollPane(splitViewPanel);
-        splitScrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED);
-        splitScrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
-        
-        createEmptyChart();
-        
-        kDistancePlotPanel = new KDistancePlotPanel();
-        
-        residualPlotContainer = new JPanel(new BorderLayout());
-        residualPlotContainer.add(chartPanel, BorderLayout.CENTER);
-
-        JPopupMenu plotContextMenu = new JPopupMenu();
-        plotContextMenu.addPopupMenuListener(new PopupMenuListener() {
-            @Override
-            public void popupMenuWillBecomeVisible(PopupMenuEvent e) {
-                fillResidualPlotContextMenu(plotContextMenu);
-            }
-
-            @Override
-            public void popupMenuWillBecomeInvisible(PopupMenuEvent e) {
-            }
-
-            @Override
-            public void popupMenuCanceled(PopupMenuEvent e) {
-            }
-        });
-        residualPlotContainer.setComponentPopupMenu(plotContextMenu);
-
-        JPanel controlPanel = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 2));
-        activeEventLabel = new JLabel("Active: None");
+        AppPanelStyle.setPanelBackground(this);
         activeEventLabel.setFont(UiFonts.uiPlain(11f));
-        controlPanel.add(activeEventLabel);
+        JPanel control = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 2));
+        AppPanelStyle.setPanelBackground(control);
+        control.add(activeEventLabel);
 
-        add(controlPanel, BorderLayout.NORTH);
-        add(residualPlotContainer, BorderLayout.CENTER);
-        
-        setVisible(true);
-        setOpaque(true);
-        
-        SwingUtilities.invokeLater(() -> {
-            updateChart();
-            if (chartPanel != null) {
-                requestRepaint();
-            }
-        });
-    }
-
-    /**
-     * Right-click on the plot area: Split view / Auto scale / Clear / Export (CLS: Export only).
-     */
-    private void fillResidualPlotContextMenu(JPopupMenu popup) {
-        popup.removeAll();
-        boolean cls = "CLS".equals(mode);
-        if (cls) {
-            JMenuItem export = new JMenuItem("Export image…");
-            export.addActionListener(e -> exportChartImage());
-            popup.add(export);
-            return;
-        }
-        boolean locationMode = "GRD".equals(mode) || "LMO".equals(mode) || "MCMC".equals(mode)
-            || "DE".equals(mode) || "TRD".equals(mode);
-        if (!locationMode) {
-            JMenuItem export = new JMenuItem("Export image…");
-            export.addActionListener(e -> exportChartImage());
-            popup.add(export);
-            return;
-        }
-
-        if (isSplitViewSupported(mode)) {
-            JCheckBoxMenuItem splitItem = new JCheckBoxMenuItem("Split view", useSplitView);
-            splitItem.addItemListener(e -> {
-                if (e.getStateChange() == ItemEvent.SELECTED || e.getStateChange() == ItemEvent.DESELECTED) {
-                    useSplitView = splitItem.isSelected();
-                    updateViewMode();
-                }
-            });
-            popup.add(splitItem);
-        }
-
-        JCheckBoxMenuItem autoItem = new JCheckBoxMenuItem("Auto scale", autoScale);
-        autoItem.addItemListener(e -> {
-            if (e.getStateChange() == ItemEvent.SELECTED || e.getStateChange() == ItemEvent.DESELECTED) {
-                autoScale = autoItem.isSelected();
-                updateChart();
-                updateSplitViewCharts();
-            }
-        });
-        popup.add(autoItem);
-
-        popup.addSeparator();
-        JMenuItem clearItem = new JMenuItem("Clear");
-        clearItem.addActionListener(e -> clearData());
-        popup.add(clearItem);
-        JMenuItem exportItem = new JMenuItem("Export image…");
-        exportItem.addActionListener(e -> exportChartImage());
-        popup.add(exportItem);
-    }
-    
-    private static final Color RESIDUAL_LEGEND_COLOR = new Color(50, 150, 200);
-    private static final Color LIKELIHOOD_LEGEND_COLOR = new Color(200, 100, 50);
-    private static final Color TRD_CLUSTER_LEGEND_COLOR = new Color(150, 200, 100);
-
-    private static boolean isResidualLocationMode(String m) {
-        return "GRD".equals(m) || "LMO".equals(m) || "MCMC".equals(m) || "DE".equals(m) || "TRD".equals(m);
-    }
-
-    /** GRD/LMO/MCMC use a single combined chart (no split view); DE/TRD may use split for parallel events. */
-    private static boolean isSplitViewSupported(String m) {
-        return !"MCMC".equals(m) && !"LMO".equals(m) && !"GRD".equals(m);
-    }
-
-    private static JPanel createLineSwatch(Color color, boolean dashed, float lineWidth) {
-        JPanel swatch = new JPanel() {
+        residualPlotContainer.setBackground(AppPanelStyle.getPanelBg());
+        residualPlotContainer.add(canvas, BorderLayout.CENTER);
+        JPopupMenu menu = new JPopupMenu();
+        canvas.setComponentPopupMenu(menu);
+        canvas.addMouseListener(new MouseAdapter() {
             @Override
-            protected void paintComponent(Graphics g) {
-                super.paintComponent(g);
-                Graphics2D g2 = (Graphics2D) g.create();
-                try {
-                    g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-                    g2.setColor(color);
-                    if (dashed) {
-                        g2.setStroke(new BasicStroke(lineWidth, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND,
-                            1.0f, new float[]{5.0f, 5.0f}, 0.0f));
-                    } else {
-                        g2.setStroke(new BasicStroke(lineWidth));
-                    }
-                    int midY = getHeight() / 2;
-                    g2.drawLine(0, midY, getWidth(), midY);
-                } finally {
-                    g2.dispose();
+            public void mousePressed(MouseEvent e) {
+                if (e.isPopupTrigger()) {
+                    fillMenu(menu);
+                    menu.show(canvas, e.getX(), e.getY());
                 }
             }
-        };
-        swatch.setPreferredSize(new Dimension(24, 12));
-        swatch.setOpaque(false);
-        return swatch;
-    }
 
-    private static void addExternalLegendResidual(JPanel row, Font labelFont) {
-        row.add(createLineSwatch(RESIDUAL_LEGEND_COLOR, false, 2.5f));
-        JLabel lab = new JLabel("Residual");
-        lab.setForeground(RESIDUAL_LEGEND_COLOR);
-        lab.setFont(labelFont);
-        row.add(lab);
-    }
+            @Override
+            public void mouseReleased(MouseEvent e) {
+                if (e.isPopupTrigger()) {
+                    fillMenu(menu);
+                    menu.show(canvas, e.getX(), e.getY());
+                }
+            }
+        });
 
-    private static void addExternalLegendSecondSeries(JPanel row, String text, Color color, boolean dashed,
-                                                      float lineWidth, Font labelFont) {
-        row.add(createLineSwatch(color, dashed, lineWidth));
-        JLabel lab = new JLabel(text);
-        lab.setForeground(color);
-        lab.setFont(labelFont);
-        row.add(lab);
+        add(control, BorderLayout.NORTH);
+        add(residualPlotContainer, BorderLayout.CENTER);
+        setMinimumSize(new Dimension(200, 120));
+        addHierarchyListener(e -> {
+            if ((e.getChangeFlags() & HierarchyEvent.SHOWING_CHANGED) != 0 && isShowing()) {
+                applyPendingChrome();
+            }
+        });
     }
 
     /**
-     * Legend strip above the main convergence chart for GRD/LMO/DE (residual only), MCMC (+ likelihood), TRD (+ per cluster).
-     */
-    private static JPanel createExternalLegendStrip(String mode) {
-        JPanel panel = new JPanel(new FlowLayout(FlowLayout.LEFT, 16, 4));
-        panel.setOpaque(false);
-        Font labelFont = UiFonts.getLabelFont();
-        addExternalLegendResidual(panel, labelFont);
-        if ("MCMC".equals(mode)) {
-            addExternalLegendSecondSeries(panel, "Log-Likelihood", LIKELIHOOD_LEGEND_COLOR, false, 1.5f, labelFont);
-        } else if ("TRD".equals(mode)) {
-            addExternalLegendSecondSeries(panel, "Per Cluster", TRD_CLUSTER_LEGEND_COLOR, true, 1.5f, labelFont);
-        }
-        return panel;
-    }
-
-    /**
-     * Compact strip for split-view per-event charts (TRD mini-charts only show RMS residual, not the dashed cluster line).
-     */
-    private static JPanel createSplitEventLegendStrip(String mode) {
-        JPanel panel = new JPanel(new FlowLayout(FlowLayout.LEFT, 16, 4));
-        panel.setOpaque(false);
-        Font labelFont = UiFonts.uiPlain(11f);
-        addExternalLegendResidual(panel, labelFont);
-        if ("MCMC".equals(mode)) {
-            addExternalLegendSecondSeries(panel, "Log-Likelihood", LIKELIHOOD_LEGEND_COLOR, false, 1.5f, labelFont);
-        }
-        return panel;
-    }
-    
-    /**
-     * Creates an empty chart.
-     */
-    private void createEmptyChart() {
-        residualSeries = new XYSeries("Residual");
-        residualSeries.add(0, 0);
-        dataset = new XYSeriesCollection(residualSeries);
-        
-        chart = ChartFactory.createXYLineChart(
-            "Residual Convergence",
-            "Iteration",
-            "RMS Residual (s)",
-            dataset,
-            PlotOrientation.VERTICAL,
-            true,
-            true,
-            false
-        );
-        
-        applyChartAppearance(chart);
-        
-        XYPlot plot = chart.getXYPlot();
-        XYLineAndShapeRenderer renderer = new XYLineAndShapeRenderer(true, false);
-        renderer.setSeriesPaint(0, RESIDUAL_LEGEND_COLOR);
-        
-        // Get line width from settings
-        ChartAppearanceSettings settings = AppSettingsCache.chartAppearance();
-        renderer.setSeriesStroke(0, new BasicStroke(settings.getLineWidth()));
-        plot.setRenderer(renderer);
-        
-        // Configure axes
-        NumberAxis xAxis = (NumberAxis) plot.getDomainAxis();
-        xAxis.setAutoRange(true);
-        xAxis.setLabelFont(settings.getAxisLabelFont());
-        xAxis.setTickLabelFont(settings.getTickLabelFont());
-        
-        NumberAxis yAxis = (NumberAxis) plot.getRangeAxis();
-        yAxis.setAutoRange(autoScale);
-        yAxis.setLabelFont(settings.getAxisLabelFont());
-        yAxis.setTickLabelFont(settings.getTickLabelFont());
-        yAxis.setLabelPaint(RESIDUAL_LEGEND_COLOR);
-        yAxis.setTickLabelPaint(RESIDUAL_LEGEND_COLOR);
-        
-        chartPanel = new ChartPanel(chart);
-        configureChartPanelScaling(chartPanel);
-        chartPanel.setMinimumSize(new Dimension(200, 100));
-        chartPanel.setMouseWheelEnabled(true);
-        chartPanel.setMouseZoomable(true);
-        chartPanel.setVisible(true);
-    }
-    
-    /**
-     * Sets the mode and initializes appropriate series.
-     * 
-     * @param mode the solver mode (LMO, MCMC, TRD, GRD, DE, SYN, CLS)
+     * Updates series chrome for the solver method. Does not request focus or revalidate
+     * while this panel is in a hidden viewer tab (that would steal the JTabbedPane selection).
      */
     public void setMode(String mode) {
         this.mode = mode;
-        if (!isSplitViewSupported(mode)) {
-            useSplitView = false;
-        }
-        
-        boolean isLocationMode = "GRD".equals(mode) || "LMO".equals(mode) || 
-                                "MCMC".equals(mode) || "DE".equals(mode) || "TRD".equals(mode);
-        
         if ("CLS".equals(mode)) {
-            String clsTitle = ModeNameMapper.getDisplayName("CLS");
-            if (clsTitle == null) {
-                clsTitle = "CLS";
-            }
-            setBorder(BorderFactory.createTitledBorder(clsTitle + " — k-distance"));
+            String title = ModeNameMapper.getDisplayName("CLS");
+            pendingBorderTitle = (title == null ? "CLS" : title) + " — k-distance";
+            pendingEventLabelVisible = false;
             updateViewMode();
-            refreshPlotToolbarForMode();
+            applyChromeIfShowing();
             return;
         }
-        
-        setBorder(BorderFactory.createTitledBorder("Residual Convergence Plot"));
-        
-        if (isLocationMode) {
-            dataset.removeAllSeries();
-            eventSeriesMap.clear();
-            activeEventName = null;
-            mcmcLikelihoodSeries = null;
-            trdClusterSeries = null;
-            
-            residualSeries = new XYSeries("Residual");
-            residualSeries.add(0, 0);
-            dataset.addSeries(residualSeries);
-            XYPlot plot = chart.getXYPlot();
-            // Clear stale secondary axis/series mappings when switching away from MCMC/TRD.
-            plot.setRangeAxis(1, null);
-            for (int i = 1; i < dataset.getSeriesCount(); i++) {
-                plot.mapDatasetToRangeAxis(i, 0);
-            }
-            
-            if ("MCMC".equals(mode)) {
-                mcmcLikelihoodSeries = new XYSeries("Log-Likelihood");
-                dataset.addSeries(mcmcLikelihoodSeries);
-                
-                XYLineAndShapeRenderer renderer = (XYLineAndShapeRenderer) plot.getRenderer();
-                renderer.setSeriesPaint(1, LIKELIHOOD_LEGEND_COLOR);
-                renderer.setSeriesStroke(1, new BasicStroke(1.5f));
-                
-                NumberAxis likelihoodAxis = new NumberAxis("Log-Likelihood");
-                likelihoodAxis.setAutoRange(true);
-                likelihoodAxis.setLabelPaint(LIKELIHOOD_LEGEND_COLOR);
-                likelihoodAxis.setTickLabelPaint(LIKELIHOOD_LEGEND_COLOR);
-                plot.setRangeAxis(1, likelihoodAxis);
-                plot.mapDatasetToRangeAxis(1, 1);
-            } else if ("TRD".equals(mode)) {
-                trdClusterSeries = new XYSeries("Per Cluster");
-                dataset.addSeries(trdClusterSeries);
-                
-                XYLineAndShapeRenderer renderer = (XYLineAndShapeRenderer) plot.getRenderer();
-                renderer.setSeriesPaint(1, TRD_CLUSTER_LEGEND_COLOR);
-                renderer.setSeriesStroke(1, new BasicStroke(1.5f, BasicStroke.CAP_ROUND, 
-                    BasicStroke.JOIN_ROUND, 1.0f, new float[]{5.0f, 5.0f}, 0.0f));
-            }
-            
-            if (chart.getLegend() != null) {
-                chart.getLegend().setVisible(false);
-            }
-            externalLegendPanel = createExternalLegendStrip(mode);
-            
-            updateChartTitle();
-            updateChart();
-            updateViewMode();
-        } else {
-            clearData();
-        }
-        refreshPlotToolbarForMode();
+        pendingBorderTitle = "Residual Convergence Plot";
+        pendingEventLabelVisible = true;
+        clearSeries();
+        updateViewMode();
+        applyChromeIfShowing();
+        requestVisibleRepaint();
     }
-    
-    private void refreshPlotToolbarForMode() {
-        boolean cls = "CLS".equals(mode);
-        if (activeEventLabel != null) {
-            activeEventLabel.setVisible(!cls);
+
+    private void applyChromeIfShowing() {
+        if (isShowing()) {
+            applyPendingChrome();
         }
     }
-    
-    /**
-     * Shows k-distance graph (for clustering mode).
-     * 
-     * @param kDistances list of k-distances
-     * @param estimatedEps estimated epsilon value
-     */
+
+    private void applyPendingChrome() {
+        setBorder(BorderFactory.createTitledBorder(pendingBorderTitle));
+        activeEventLabel.setVisible(pendingEventLabelVisible);
+        residualPlotContainer.revalidate();
+        residualPlotContainer.repaint();
+    }
+
     public void showKDistanceGraph(List<Double> kDistances, double estimatedEps) {
-        if (kDistancePlotPanel != null) {
-            SwingUtilities.invokeLater(() -> {
-                kDistancePlotPanel.setKDistances(kDistances, estimatedEps);
-                updateViewMode();
-            });
-        }
+        SwingUtilities.invokeLater(() -> {
+            kDistancePlotPanel.setKDistances(kDistances, estimatedEps);
+            updateViewMode();
+        });
     }
-    
-    /**
-     * Rebuilds the plot area (e.g. after external layout changes).
-     */
-    public void showResidualPlot() {
-        SwingUtilities.invokeLater(this::updateViewMode);
-    }
-    
-    /**
-     * Updates the chart title based on current mode.
-     */
-    private void updateChartTitle() {
-        String title;
-        String displayName = ModeNameMapper.getDisplayName(mode);
-        switch (mode) {
-            case "LMO":
-            case "GRD":
-                title = displayName + " - Residual Convergence";
-                break;
-            case "MCMC":
-                title = displayName + " - Residual & Log-Likelihood";
-                break;
-            case "TRD":
-                title = displayName + " - Residual Convergence (Per Cluster)";
-                break;
-            default:
-                title = (displayName != null ? displayName + " - " : "") + "Residual Convergence";
-        }
-        chart.setTitle(title);
-    }
-    
-    /**
-     * Adds a residual data point.
-     * 
-     * @param iteration iteration number
-     * @param residual residual value
-     */
+
     public void addResidualPoint(int iteration, double residual) {
-        if (activeEventName != null) {
-            addResidualPoint(activeEventName, iteration, residual);
-        } else {
-            SwingUtilities.invokeLater(() -> {
-                if (residualSeries.getItemCount() == 1 && residualSeries.getX(0).doubleValue() == 0 && 
-                    residualSeries.getY(0).doubleValue() == 0) {
-                    residualSeries.clear();
-                }
-                residualSeries.add(iteration, residual);
-                
-                if (residualSeries.getItemCount() > maxDataPoints) {
-                    residualSeries.remove(0);
-                }
-                
-                updateChart();
-            });
-        }
+        enqueue(Sample.RESIDUAL, activeEventName, iteration, residual);
     }
-    
-    /**
-     * Adds a residual data point for a specific event (for parallel processing).
-     * 
-     * @param eventName name of the event (e.g., filename)
-     * @param iteration iteration number
-     * @param residual residual value
-     */
+
     public void addResidualPoint(String eventName, int iteration, double residual) {
-        SwingUtilities.invokeLater(() -> {
-            EventSeriesInfo info = eventSeriesMap.get(eventName);
-            if (info == null) {
-                registerEvent(eventName);
-                info = eventSeriesMap.get(eventName);
-            }
-            
-            if (info.series.getItemCount() == 1 && info.series.getX(0).doubleValue() == 0 && 
-                info.series.getY(0).doubleValue() == 0) {
-                info.series.clear();
-            }
-            info.series.add(iteration, residual);
-            info.lastUpdateTime = System.currentTimeMillis();
-            
-            if (info.series.getItemCount() > maxDataPoints) {
-                info.series.remove(0);
-            }
-            
-            if (eventName.equals(activeEventName)) {
-                updateSeriesColor(eventName, true);
-            }
-            
-            if (useSplitView) {
-                EventChartInfo chartInfo = eventChartMap.get(eventName);
-                if (chartInfo == null) {
-                    if (activeProcessingEvents.contains(eventName)) {
-                        chartInfo = new EventChartInfo(eventName, mode);
-                        eventChartMap.put(eventName, chartInfo);
-                        
-                        JPanel eventPanel = new JPanel(new BorderLayout());
-                        eventPanel.setBorder(BorderFactory.createTitledBorder(eventName + " (Processing)"));
-                        eventPanel.add(chartInfo.plotHost, BorderLayout.CENTER);
-                        splitViewPanel.add(eventPanel);
-                        eventPanelMap.put(eventName, eventPanel);
-                        requestRepaint();
-                    } else {
-                        return;
-                    }
-                }
-                
-                if (chartInfo.series.getItemCount() == 1 && chartInfo.series.getX(0).doubleValue() == 0 && 
-                    chartInfo.series.getY(0).doubleValue() == 0) {
-                    chartInfo.series.clear();
-                }
-                chartInfo.series.add(iteration, residual);
-                chartInfo.lastUpdateTime = System.currentTimeMillis();
-                
-                if (chartInfo.series.getItemCount() > maxDataPoints) {
-                    chartInfo.series.remove(0);
-                }
-                
-                XYPlot plot = chartInfo.chart.getXYPlot();
-                NumberAxis yAxis = (NumberAxis) plot.getRangeAxis();
-                yAxis.setAutoRange(autoScale);
-                requestRepaint();
-            }
-            
-            updateChart();
-        });
+        enqueue(Sample.RESIDUAL, eventName, iteration, residual);
     }
-    
-    /**
-     * Registers a new event and creates its series.
-     * 
-     * @param eventName name of the event
-     */
-    public void registerEvent(String eventName) {
-        if (!eventSeriesMap.containsKey(eventName)) {
-            XYSeries series = new XYSeries(eventName);
-            EventSeriesInfo info = new EventSeriesInfo(series);
-            eventSeriesMap.put(eventName, info);
-            dataset.addSeries(series);
-            
-            int seriesIndex = dataset.getSeriesCount() - 1;
-            XYPlot plot = chart.getXYPlot();
-            XYLineAndShapeRenderer renderer = (XYLineAndShapeRenderer) plot.getRenderer();
-            if (eventName.equals(activeEventName)) {
-                renderer.setSeriesPaint(seriesIndex, RESIDUAL_LEGEND_COLOR);
-                renderer.setSeriesStroke(seriesIndex, new BasicStroke(2.5f));
-            } else {
-                renderer.setSeriesPaint(seriesIndex, new Color(200, 200, 200));
-                renderer.setSeriesStroke(seriesIndex, new BasicStroke(1.0f, BasicStroke.CAP_ROUND, 
-                    BasicStroke.JOIN_ROUND, 1.0f, new float[]{3.0f, 3.0f}, 0.0f));
-            }
-            
-            if ("MCMC".equals(mode) && plot.getRangeAxis(1) == null) {
-                NumberAxis likelihoodAxis = new NumberAxis("Log-Likelihood");
-                likelihoodAxis.setAutoRange(true);
-                plot.setRangeAxis(1, likelihoodAxis);
-            }
-        }
+
+    public void addLikelihoodPoint(int sample, double logLikelihood) {
+        enqueue(Sample.LIKELIHOOD, activeEventName, sample, logLikelihood);
     }
-    
-    /**
-     * Sets the maximum number of parallel jobs.
-     * 
-     * @param maxJobs maximum number of parallel jobs
-     */
-    public void setMaxParallelJobs(int maxJobs) {
-        this.maxParallelJobs = maxJobs;
+
+    public void addLikelihoodPoint(String eventName, int sample, double logLikelihood) {
+        enqueue(Sample.LIKELIHOOD, eventName, sample, logLikelihood);
     }
-    
-    /**
-     * Starts processing an event (adds it to active processing set).
-     * 
-     * @param eventName name of the event
-     */
+
     public void startProcessingEvent(String eventName) {
-        SwingUtilities.invokeLater(() -> {
-            activeProcessingEvents.add(eventName);
-            
-            if (useSplitView) {
-                EventChartInfo chartInfo = eventChartMap.get(eventName);
-                if (chartInfo == null) {
-                    chartInfo = new EventChartInfo(eventName, mode);
-                    eventChartMap.put(eventName, chartInfo);
-                    
-                    JPanel eventPanel = new JPanel(new BorderLayout());
-                    eventPanel.setBorder(BorderFactory.createTitledBorder(eventName + " (Processing)"));
-                    eventPanel.add(chartInfo.plotHost, BorderLayout.CENTER);
-                    splitViewPanel.add(eventPanel);
-                    eventPanelMap.put(eventName, eventPanel);
-                    requestRepaint();
-                }
-                chartInfo.isActive = true;
-                
-                updateVisibleEvents();
-                
-                if (eventChartMap.size() > 0) {
-                    updateViewMode();
-                }
-            }
-            
-            activeEventName = eventName;
-            if (!eventSeriesMap.containsKey(eventName)) {
-                registerEvent(eventName);
-            }
-            
-            EventSeriesInfo info = eventSeriesMap.get(eventName);
-            info.isActive = true;
-            updateSeriesColor(eventName, true);
-            
-            activeEventLabel.setText("Active: " + eventName + " (" + activeProcessingEvents.size() + " processing)");
-            
-            updateChart();
+        activeEventName = eventName;
+        runEdt(() -> {
+            Polyline line = residuals.computeIfAbsent(eventName, n -> new Polyline(n, RESIDUAL_COLOR, false));
+            line.active = true;
+            line.color = RESIDUAL_COLOR;
+            line.dashed = false;
+            updateActiveEventStatusLabel();
+            requestVisibleRepaint();
         });
     }
-    
-    /**
-     * Stops processing an event (removes it from active processing set).
-     * 
-     * @param eventName name of the event
-     */
+
     public void stopProcessingEvent(String eventName) {
-        SwingUtilities.invokeLater(() -> {
-            activeProcessingEvents.remove(eventName);
-            
-            if (useSplitView) {
-                JPanel eventPanel = eventPanelMap.get(eventName);
-                if (eventPanel != null) {
-                    eventPanel.setBorder(BorderFactory.createTitledBorder(eventName + " (Completed)"));
-                    updateVisibleEvents();
-                }
-                
-                EventChartInfo chartInfo = eventChartMap.get(eventName);
-                if (chartInfo != null) {
-                    chartInfo.isActive = false;
-                }
+        runEdt(() -> {
+            Polyline line = residuals.get(eventName);
+            if (line != null) {
+                line.active = false;
+                line.color = INACTIVE;
+                line.dashed = true;
             }
-            
-            if (eventSeriesMap.containsKey(eventName)) {
-                EventSeriesInfo info = eventSeriesMap.get(eventName);
-                info.isActive = false;
-                updateSeriesColor(eventName, false);
-            }
-            
-            if (activeProcessingEvents.isEmpty()) {
-                activeEventLabel.setText("Active: None");
-            } else {
-                activeEventLabel.setText("Active: " + activeProcessingEvents.size() + " processing");
-            }
-            
-            updateChart();
+            completedEventCount = Math.min(totalEventCount, completedEventCount + 1);
+            updateActiveEventStatusLabel();
+            cleanupOldEvents();
+            requestVisibleRepaint();
         });
     }
-    
-    /**
-     * Updates visible events in split view (shows only processing events and recent completed ones).
-     */
-    private void updateVisibleEvents() {
-        for (String eventName : activeProcessingEvents) {
-            JPanel eventPanel = eventPanelMap.get(eventName);
-            if (eventPanel != null) {
-                eventPanel.setVisible(true);
-            }
-        }
-        
-        List<String> completedEvents = new ArrayList<>();
-        for (String eventName : eventChartMap.keySet()) {
-            if (!activeProcessingEvents.contains(eventName)) {
-                completedEvents.add(eventName);
-            }
-        }
-        
-        Collections.sort(completedEvents, (a, b) -> {
-            EventChartInfo infoA = eventChartMap.get(a);
-            EventChartInfo infoB = eventChartMap.get(b);
-            return Long.compare(infoB.lastUpdateTime, infoA.lastUpdateTime);
-        });
-        
-        int visibleCount = 0;
-        for (String eventName : completedEvents) {
-            JPanel eventPanel = eventPanelMap.get(eventName);
-            if (eventPanel != null) {
-                if (visibleCount < maxParallelJobs) {
-                    eventPanel.setVisible(true);
-                    visibleCount++;
-                } else {
-                    eventPanel.setVisible(false);
-                }
-            }
-        }
-        
-        requestRepaint();
-    }
-    
-    /**
-     * Sets the active event (currently being processed).
-     * 
-     * @param eventName name of the active event
-     */
+
     public void setActiveEvent(String eventName) {
         startProcessingEvent(eventName);
     }
-    
-    /**
-     * Marks an event as completed.
-     * 
-     * @param eventName name of the completed event
-     */
+
     public void markEventCompleted(String eventName) {
         stopProcessingEvent(eventName);
     }
-    
-    /**
-     * Updates the color and style of a series based on its active status.
-     */
-    private void updateSeriesColor(String eventName, boolean isActive) {
-        EventSeriesInfo info = eventSeriesMap.get(eventName);
-        if (info == null) return;
-        
-        XYPlot plot = chart.getXYPlot();
-        XYLineAndShapeRenderer renderer = (XYLineAndShapeRenderer) plot.getRenderer();
-        
-        int seriesIndex = -1;
-        for (int i = 0; i < dataset.getSeriesCount(); i++) {
-            if (dataset.getSeries(i).getKey().equals(eventName)) {
-                seriesIndex = i;
-                break;
-            }
-        }
-        
-        if (seriesIndex >= 0) {
-            if (isActive) {
-                renderer.setSeriesPaint(seriesIndex, RESIDUAL_LEGEND_COLOR);
-                renderer.setSeriesStroke(seriesIndex, new BasicStroke(2.5f));
-            } else {
-                renderer.setSeriesPaint(seriesIndex, new Color(200, 200, 200));
-                renderer.setSeriesStroke(seriesIndex, new BasicStroke(1.0f, BasicStroke.CAP_ROUND, 
-                    BasicStroke.JOIN_ROUND, 1.0f, new float[]{3.0f, 3.0f}, 0.0f));
-            }
+
+    public void setTotalEventCount(int total) {
+        totalEventCount = Math.max(total, 0);
+        completedEventCount = 0;
+        updateActiveEventStatusLabel();
+    }
+
+    public void clearData() {
+        pending.clear();
+        pendingCount.set(0);
+        clearSeries();
+        activeEventName = null;
+        totalEventCount = 0;
+        completedEventCount = 0;
+        updateActiveEventStatusLabel();
+        updateViewMode();
+        requestVisibleRepaint();
+    }
+
+    public void setAutoScale(boolean on) {
+        autoScale = on;
+        if (isShowing()) {
+            canvas.repaint();
         }
     }
-    
-    /**
-     * Finds the next active event (if any).
-     */
-    private void findNextActiveEvent() {
-        String nextActive = null;
-        long latestTime = 0;
-        
-        for (Map.Entry<String, EventSeriesInfo> entry : eventSeriesMap.entrySet()) {
-            if (entry.getValue().isActive && entry.getValue().lastUpdateTime > latestTime) {
-                nextActive = entry.getKey();
-                latestTime = entry.getValue().lastUpdateTime;
-            }
-        }
-        
-        if (nextActive != null) {
-            activeEventName = nextActive;
-            activeEventLabel.setText("Active: " + nextActive);
-        } else {
-            activeEventName = null;
-            activeEventLabel.setText("Active: None");
+
+    public void setShowLegend(boolean on) {
+        showLegend = on;
+        if (isShowing()) {
+            canvas.repaint();
         }
     }
-    
-    /**
-     * Cleans up old completed events, keeping only the most recent ones.
-     */
-    private void cleanupOldEvents() {
-        List<Map.Entry<String, EventSeriesInfo>> inactiveEvents = new ArrayList<>();
-        for (Map.Entry<String, EventSeriesInfo> entry : eventSeriesMap.entrySet()) {
-            if (!entry.getValue().isActive) {
-                inactiveEvents.add(entry);
-            }
-        }
-        
-        Collections.sort(inactiveEvents, (a, b) -> 
-            Long.compare(a.getValue().lastUpdateTime, b.getValue().lastUpdateTime));
-        
-        while (inactiveEvents.size() > maxHistoryEvents) {
-            Map.Entry<String, EventSeriesInfo> oldest = inactiveEvents.remove(0);
-            EventSeriesInfo info = oldest.getValue();
-            
-            dataset.removeSeries(info.series);
-            if (info.likelihoodSeries != null) {
-                dataset.removeSeries(info.likelihoodSeries);
-            }
-            
-            eventSeriesMap.remove(oldest.getKey());
-        }
+
+    public void exportChartImage() {
+        exportImage();
     }
-    
-    /**
-     * Adds a residual data point for TRD mode (with cluster info).
-     * 
-     * @param iteration iteration number
-     * @param residual residual value
-     * @param clusterId cluster ID (for TRD mode)
-     */
-    public void addResidualPoint(int iteration, double residual, int clusterId) {
-        SwingUtilities.invokeLater(() -> {
-            residualSeries.add(iteration, residual);
-            
-            if (trdClusterSeries != null) {
-                trdClusterSeries.add(iteration, residual);
-                if (trdClusterSeries.getItemCount() > maxDataPoints) {
-                    trdClusterSeries.remove(0);
-                }
-            }
-            
-            if (residualSeries.getItemCount() > maxDataPoints) {
-                residualSeries.remove(0);
-            }
-            
-            updateChart();
-        });
+
+    private void clearSeries() {
+        residuals.clear();
+        likelihoods.clear();
+        defaultResidual.clear();
     }
-    
-    /**
-     * Adds a log-likelihood point for MCMC mode.
-     * 
-     * @param sample sample number
-     * @param logLikelihood log-likelihood value
-     */
-    public void addLikelihoodPoint(int sample, double logLikelihood) {
-        if (activeEventName != null) {
-            addLikelihoodPoint(activeEventName, sample, logLikelihood);
-        } else {
-            if (mcmcLikelihoodSeries != null) {
-                SwingUtilities.invokeLater(() -> {
-                    mcmcLikelihoodSeries.add(sample, logLikelihood);
-                    
-                    if (mcmcLikelihoodSeries.getItemCount() > maxDataPoints) {
-                        mcmcLikelihoodSeries.remove(0);
-                    }
-                    
-                    updateChart();
-                });
-            }
-        }
-    }
-    
-    /**
-     * Adds a log-likelihood point for a specific event (for parallel processing in MCMC mode).
-     * 
-     * @param eventName name of the event (e.g., filename)
-     * @param sample sample number
-     * @param logLikelihood log-likelihood value
-     */
-    public void addLikelihoodPoint(String eventName, int sample, double logLikelihood) {
-        SwingUtilities.invokeLater(() -> {
-            EventSeriesInfo info = eventSeriesMap.get(eventName);
-            if (info == null) {
-                registerEvent(eventName);
-                info = eventSeriesMap.get(eventName);
-            }
-            
-            if (info.likelihoodSeries == null && "MCMC".equals(mode)) {
-                info.likelihoodSeries = new XYSeries(eventName + " (Log-Likelihood)");
-                dataset.addSeries(info.likelihoodSeries);
-                
-                XYPlot plot = chart.getXYPlot();
-                if (plot.getRangeAxis(1) == null) {
-                    NumberAxis likelihoodAxis = new NumberAxis("Log-Likelihood");
-                    likelihoodAxis.setAutoRange(true);
-                    plot.setRangeAxis(1, likelihoodAxis);
-                }
-                
-                int seriesIndex = dataset.getSeriesCount() - 1;
-                plot.mapDatasetToRangeAxis(seriesIndex, 1);
-                
-                XYLineAndShapeRenderer renderer = (XYLineAndShapeRenderer) plot.getRenderer();
-                Color eventColor = info.isActive ? RESIDUAL_LEGEND_COLOR : new Color(200, 200, 200);
-                renderer.setSeriesPaint(seriesIndex, new Color(eventColor.getRed(), eventColor.getGreen(), 
-                    eventColor.getBlue(), 150));
-                renderer.setSeriesStroke(seriesIndex, new BasicStroke(1.0f, BasicStroke.CAP_ROUND, 
-                    BasicStroke.JOIN_ROUND, 1.0f, new float[]{5.0f, 5.0f}, 0.0f));
-            }
-            
-            if (info.likelihoodSeries != null) {
-                info.likelihoodSeries.add(sample, logLikelihood);
-                
-                if (info.likelihoodSeries.getItemCount() > maxDataPoints) {
-                    info.likelihoodSeries.remove(0);
-                }
-            }
-            
-            updateChart();
-        });
-    }
-    
-    /**
-     * Applies chart appearance settings to a JFreeChart.
-     * Static method so it can be called from static inner classes.
-     * 
-     * @param chart the chart to apply settings to
-     */
-    private static void applyChartAppearance(JFreeChart chart) {
-        ChartAppearanceSettings settings = AppSettingsCache.chartAppearance();
-        
-        if (chart.getTitle() != null) {
-            chart.getTitle().setFont(settings.getTitleFont());
-        }
-        chart.setBackgroundPaint(ChartAppearanceSettings.TRANSPARENT_CHART_BACKGROUND);
-        
-        XYPlot plot = chart.getXYPlot();
-        if (plot != null) {
-            plot.setBackgroundPaint(ChartAppearanceSettings.TRANSPARENT_CHART_BACKGROUND);
-            plot.setDomainGridlinePaint(settings.getGridlineColorAsColor());
-            plot.setRangeGridlinePaint(settings.getGridlineColorAsColor());
-            plot.setDomainGridlineStroke(settings.getGridlineStroke());
-            plot.setRangeGridlineStroke(settings.getGridlineStroke());
-            plot.setDomainGridlinesVisible(true);
-            plot.setRangeGridlinesVisible(true);
-            
-            NumberAxis domainAxis = (NumberAxis) plot.getDomainAxis();
-            if (domainAxis != null) {
-                domainAxis.setLabelFont(settings.getAxisLabelFont());
-                domainAxis.setTickLabelFont(settings.getTickLabelFont());
-            }
-            
-            NumberAxis rangeAxis = (NumberAxis) plot.getRangeAxis();
-            if (rangeAxis != null) {
-                rangeAxis.setLabelFont(settings.getAxisLabelFont());
-                rangeAxis.setTickLabelFont(settings.getTickLabelFont());
-            }
-        }
-        
-        if (chart.getLegend() != null) {
-            chart.getLegend().setItemFont(settings.getLegendFont());
-        }
-    }
-    
-    /**
-     * Updates the chart display.
-     */
-    private void updateChart() {
-        if (chart != null && chartPanel != null) {
-            applyChartAppearance(chart);
-            
-            XYPlot plot = chart.getXYPlot();
-            NumberAxis yAxis = (NumberAxis) plot.getRangeAxis();
-            yAxis.setAutoRange(autoScale);
-            yAxis.setLabelPaint(RESIDUAL_LEGEND_COLOR);
-            yAxis.setTickLabelPaint(RESIDUAL_LEGEND_COLOR);
-            if ("MCMC".equals(mode) && plot.getRangeAxisCount() > 1) {
-                NumberAxis likelihoodAxis = (NumberAxis) plot.getRangeAxis(1);
-                if (likelihoodAxis != null) {
-                    likelihoodAxis.setLabelPaint(LIKELIHOOD_LEGEND_COLOR);
-                    likelihoodAxis.setTickLabelPaint(LIKELIHOOD_LEGEND_COLOR);
-                }
-            }
-            if (chart.getLegend() != null) {
-                chart.getLegend().setVisible(!isResidualLocationMode(mode));
-            }
-            requestRepaint();
-        }
-    }
-    
-    /**
-     * Updates the view mode (single chart vs split view).
-     */
+
     private void updateViewMode() {
-        if (residualPlotContainer == null) {
-            return;
-        }
         residualPlotContainer.removeAll();
         if ("CLS".equals(mode)) {
             residualPlotContainer.add(kDistancePlotPanel, BorderLayout.CENTER);
-            requestRepaint();
+        } else {
+            residualPlotContainer.add(canvas, BorderLayout.CENTER);
+        }
+        if (isShowing()) {
+            residualPlotContainer.revalidate();
+            residualPlotContainer.repaint();
+        }
+    }
+
+    private void updateActiveEventStatusLabel() {
+        if (totalEventCount <= 0) {
+            activeEventLabel.setText("Active: None");
             return;
         }
-        if (isSplitViewSupported(mode) && useSplitView && eventChartMap.size() > 0) {
-            JScrollPane splitScrollPane = new JScrollPane(splitViewPanel);
-            splitScrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED);
-            splitScrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
-            residualPlotContainer.add(splitScrollPane, BorderLayout.CENTER);
-        } else {
-            if (isResidualLocationMode(mode) && externalLegendPanel != null) {
-                residualPlotContainer.add(externalLegendPanel, BorderLayout.NORTH);
+        activeEventLabel.setText(String.format(Locale.ROOT, "Active: %d/%d (%.1f%%)",
+            completedEventCount, totalEventCount, 100.0 * completedEventCount / totalEventCount));
+    }
+
+    private void cleanupOldEvents() {
+        List<Polyline> inactive = new ArrayList<>();
+        for (Polyline p : residuals.values()) {
+            if (!p.active) {
+                inactive.add(p);
             }
-            residualPlotContainer.add(chartPanel, BorderLayout.CENTER);
         }
-        requestRepaint();
-    }
-    
-    /**
-     * Updates all charts in split view.
-     */
-    private void updateSplitViewCharts() {
-        for (EventChartInfo chartInfo : eventChartMap.values()) {
-            XYPlot plot = chartInfo.chart.getXYPlot();
-            NumberAxis yAxis = (NumberAxis) plot.getRangeAxis();
-            yAxis.setAutoRange(autoScale);
-            requestRepaint();
+        Collections.sort(inactive, (a, b) -> Long.compare(a.lastUpdate, b.lastUpdate));
+        while (inactive.size() > maxHistoryEvents) {
+            Polyline oldest = inactive.remove(0);
+            residuals.remove(oldest.name);
+            likelihoods.remove(oldest.name);
         }
     }
-    
-    /**
-     * Clears all data from the chart.
-     */
-    public void clearData() {
-        residualSeries.clear();
-        residualSeries.add(0, 0);
-        
-        if (mcmcLikelihoodSeries != null) {
-            mcmcLikelihoodSeries.clear();
+
+    private static int throttleMs() {
+        try {
+            int v = AppSettingsCache.chartAppearance().getConvergenceRepaintThrottleMs();
+            if (v <= 0) {
+                return 250;
+            }
+            return Math.max(80, Math.min(60_000, v));
+        } catch (RuntimeException e) {
+            return 250;
         }
-        if (trdClusterSeries != null) {
-            trdClusterSeries.clear();
-        }
-        
-        eventSeriesMap.clear();
-        activeEventName = null;
-        if (activeEventLabel != null) {
-            activeEventLabel.setText("Active: None");
-        }
-        
-        eventChartMap.clear();
-        splitViewPanel.removeAll();
-        
-        dataset.removeAllSeries();
-        
-        dataset.addSeries(residualSeries);
-        if (mcmcLikelihoodSeries != null) {
-            dataset.addSeries(mcmcLikelihoodSeries);
-        }
-        if (trdClusterSeries != null) {
-            dataset.addSeries(trdClusterSeries);
-        }
-        
-        updateChart();
-        updateViewMode();
     }
-    
-    /**
-     * Sets the maximum number of completed events to keep in history.
-     * 
-     * @param maxHistory maximum number of history events
-     */
-    public void setMaxHistoryEvents(int maxHistory) {
-        this.maxHistoryEvents = maxHistory;
-        cleanupOldEvents();
+
+    private static final class Sample {
+        static final byte RESIDUAL = 0;
+        static final byte LIKELIHOOD = 1;
+        final byte kind;
+        final String event;
+        final float x;
+        final float y;
+
+        Sample(byte kind, String event, float x, float y) {
+            this.kind = kind;
+            this.event = event;
+            this.x = x;
+            this.y = y;
+        }
     }
-    
-    /**
-     * Exports the chart as an image file.
-     * Exports either residual plot or k-distance graph depending on which is currently displayed.
-     * For residual view, exports the actually visible component (single chart or split view panel).
-     */
-    private void exportChartImage() {
-        JFileChooser fileChooser = new JFileChooser();
-        fileChooser.setDialogTitle("Export Chart Image");
-        fileChooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter(
-            "PNG Images", "png"));
+
+    private void enqueue(byte kind, String event, double x, double y) {
+        int n = pendingCount.get();
+        if (n > 6000 && (n & 3) != 0) {
+            return;
+        }
+        pending.add(new Sample(kind, event, (float) x, (float) y));
+        pendingCount.incrementAndGet();
+        scheduleFlush();
+    }
+
+    private void scheduleFlush() {
+        if (!flushScheduled.compareAndSet(false, true)) {
+            return;
+        }
+        if (SwingUtilities.isEventDispatchThread()) {
+            armFlushTimer();
+        } else {
+            SwingUtilities.invokeLater(this::armFlushTimer);
+        }
+    }
+
+    private void armFlushTimer() {
+        if (flushTimer == null) {
+            flushTimer = new Timer(throttleMs(), e -> flushPending());
+            flushTimer.setRepeats(false);
+        }
+        flushTimer.setInitialDelay(throttleMs());
+        if (!flushTimer.isRunning()) {
+            flushTimer.start();
+        }
+    }
+
+    private void flushPending() {
+        flushScheduled.set(false);
+        Sample s;
+        int drained = 0;
+        while ((s = pending.poll()) != null && drained < 4000) {
+            pendingCount.decrementAndGet();
+            applySample(s);
+            drained++;
+        }
+        if (pending.peek() != null) {
+            scheduleFlush();
+        }
+        if (drained > 0) {
+            requestVisibleRepaint();
+        }
+    }
+
+    private void applySample(Sample s) {
+        if (s.kind == Sample.LIKELIHOOD) {
+            String name = s.event == null ? "Log-Likelihood" : s.event;
+            likelihoods.computeIfAbsent(name, n -> new Polyline(
+                s.event == null ? n : n + " (LL)", LIKELIHOOD_COLOR, true))
+                .add(s.x, s.y, maxDataPoints);
+            return;
+        }
+        if (s.event == null) {
+            defaultResidual.add(s.x, s.y, maxDataPoints);
+            return;
+        }
+        Polyline line = residuals.computeIfAbsent(s.event, n -> new Polyline(n, RESIDUAL_COLOR, false));
+        line.add(s.x, s.y, maxDataPoints);
+        if (s.event.equals(activeEventName)) {
+            line.active = true;
+            line.color = RESIDUAL_COLOR;
+        }
+    }
+
+    private void requestVisibleRepaint() {
+        if (isShowing()) {
+            canvas.repaint();
+        }
+    }
+
+    private static void runEdt(Runnable r) {
+        if (SwingUtilities.isEventDispatchThread()) {
+            r.run();
+        } else {
+            SwingUtilities.invokeLater(r);
+        }
+    }
+
+    private void fillMenu(JPopupMenu popup) {
+        popup.removeAll();
+        if ("CLS".equals(mode)) {
+            JMenuItem export = new JMenuItem("Export image…");
+            export.addActionListener(e -> exportImage());
+            popup.add(export);
+            return;
+        }
+        JCheckBoxMenuItem autoItem = new JCheckBoxMenuItem("Auto scale", autoScale);
+        autoItem.addItemListener(e -> {
+            autoScale = e.getStateChange() == ItemEvent.SELECTED;
+            canvas.repaint();
+        });
+        popup.add(autoItem);
+        popup.addSeparator();
+        JMenuItem clear = new JMenuItem("Clear");
+        clear.addActionListener(e -> clearData());
+        popup.add(clear);
+        JMenuItem export = new JMenuItem("Export image…");
+        export.addActionListener(e -> exportImage());
+        popup.add(export);
+    }
+
+    private void exportImage() {
+        JFileChooser fc = new JFileChooser();
+        fc.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter("PNG Images", "png"));
+        fc.setSelectedFile(new java.io.File("CLS".equals(mode) ? "kdistance.png" : "residual_plot.png"));
         java.awt.Window parent = SwingUtilities.getWindowAncestor(this);
-        
-        if ("CLS".equals(mode) && kDistancePlotPanel != null) {
-            fileChooser.setSelectedFile(new java.io.File("kdistance.png"));
-            if (fileChooser.showSaveDialog(parent != null ? parent : this) == JFileChooser.APPROVE_OPTION) {
-                try {
-                    java.io.File file = fileChooser.getSelectedFile();
-                    kDistancePlotPanel.exportChartImageToFile(file);
-                    log.info("Solver chart export saved: " + file.getAbsolutePath());
-                } catch (Exception e) {
-                    log.log(Level.WARNING, "Solver chart export failed", e);
-                }
+        if (fc.showSaveDialog(parent != null ? parent : this) != JFileChooser.APPROVE_OPTION) {
+            return;
+        }
+        try {
+            java.io.File file = fc.getSelectedFile();
+            if (!file.getName().toLowerCase(Locale.ROOT).endsWith(".png")) {
+                file = new java.io.File(file.getAbsolutePath() + ".png");
             }
-        } else {
-            fileChooser.setSelectedFile(new java.io.File("residual_plot.png"));
-            if (fileChooser.showSaveDialog(parent != null ? parent : this) == JFileChooser.APPROVE_OPTION) {
-                try {
-                    java.io.File file = fileChooser.getSelectedFile();
-                    if (!file.getName().toLowerCase().endsWith(".png")) {
-                        file = new java.io.File(file.getAbsolutePath() + ".png");
+            if ("CLS".equals(mode)) {
+                kDistancePlotPanel.exportChartImageToFile(file);
+            } else {
+                BufferedImage img = new BufferedImage(1200, 800, BufferedImage.TYPE_INT_RGB);
+                Graphics2D g = img.createGraphics();
+                g.setColor(Color.WHITE);
+                g.fillRect(0, 0, 1200, 800);
+                canvas.paintPlot(g, 1200, 800);
+                g.dispose();
+                javax.imageio.ImageIO.write(img, "png", file);
+            }
+            log.info("Solver chart export saved: " + file.getAbsolutePath());
+            com.treloc.xtreloc.app.gui.util.GuiExecutionLog.info("Residual chart saved: " + file.getAbsolutePath());
+        } catch (Exception e) {
+            log.log(Level.WARNING, "Solver chart export failed", e);
+            com.treloc.xtreloc.app.gui.util.GuiExecutionLog.warning("Residual chart export failed: " + e.getMessage());
+        }
+    }
+
+    private void drawOnCanvasLegend(Graphics2D g, int canvasW, int canvasH) {
+        if (!showLegend || "CLS".equals(mode)) {
+            return;
+        }
+        List<String> names = new ArrayList<>();
+        List<Color> colors = new ArrayList<>();
+        names.add("Residual");
+        colors.add(RESIDUAL_COLOR);
+        if ("MCMC".equals(mode)) {
+            names.add("Log-Likelihood");
+            colors.add(LIKELIHOOD_COLOR);
+        } else if ("TRD".equals(mode)) {
+            names.add("Per Cluster");
+            colors.add(TRD_CLUSTER_COLOR);
+        }
+        g.setFont(g.getFont().deriveFont(Font.PLAIN, 11f));
+        FontMetrics fm = g.getFontMetrics();
+        int rowH = Math.max(14, fm.getHeight());
+        int box = 10;
+        int pad = 8;
+        int maxW = 0;
+        for (String n : names) {
+            maxW = Math.max(maxW, fm.stringWidth(n));
+        }
+        int lw = pad * 2 + box + 6 + maxW;
+        int lh = pad * 2 + names.size() * rowH;
+        int[] p = legendHandle.place(canvasW, canvasH, lw, lh);
+        int x = p[0];
+        int y = p[1];
+        g.setColor(new Color(255, 255, 255, 210));
+        g.fillRoundRect(x, y, lw, lh, 6, 6);
+        g.setColor(new Color(70, 75, 90, 140));
+        g.drawRoundRect(x, y, lw, lh, 6, 6);
+        int ty = y + pad + fm.getAscent();
+        for (int i = 0; i < names.size(); i++) {
+            g.setColor(colors.get(i));
+            g.fillRect(x + pad, ty - fm.getAscent() + 2, box, box);
+            g.setColor(new Color(35, 40, 52));
+            g.drawString(names.get(i), x + pad + box + 6, ty);
+            ty += rowH;
+        }
+    }
+
+    static final class Polyline {
+        final String name;
+        float[] x = new float[64];
+        float[] y = new float[64];
+        int n;
+        boolean active;
+        boolean dashed;
+        Color color;
+        long lastUpdate;
+
+        Polyline(String name, Color color, boolean dashed) {
+            this.name = name;
+            this.color = color;
+            this.dashed = dashed;
+        }
+
+        synchronized void add(double px, double py, int max) {
+            if (n == x.length) {
+                x = java.util.Arrays.copyOf(x, x.length * 2);
+                y = java.util.Arrays.copyOf(y, y.length * 2);
+            }
+            x[n] = (float) px;
+            y[n] = (float) py;
+            n++;
+            if (n > max) {
+                int keep = max;
+                System.arraycopy(x, n - keep, x, 0, keep);
+                System.arraycopy(y, n - keep, y, 0, keep);
+                n = keep;
+            }
+            lastUpdate = System.currentTimeMillis();
+        }
+
+        synchronized void clear() {
+            n = 0;
+        }
+
+        synchronized int copy(float[] xo, float[] yo) {
+            int c = Math.min(n, xo.length);
+            System.arraycopy(x, 0, xo, 0, c);
+            System.arraycopy(y, 0, yo, 0, c);
+            return c;
+        }
+    }
+
+    private final class PlotCanvas extends JComponent {
+        private double zoom = 1.0;
+        private double panX;
+        private double panY;
+
+        PlotCanvas() {
+            setOpaque(true);
+            addMouseWheelListener((MouseWheelEvent e) -> {
+                double n = e.getPreciseWheelRotation();
+                if (Math.abs(n) < 1e-6) {
+                    n = e.getWheelRotation();
+                }
+                zoom = Math.max(0.4, Math.min(20.0, zoom * Math.pow(1.12, -n)));
+                repaint();
+            });
+            MouseAdapter drag = new MouseAdapter() {
+                int lx;
+                int ly;
+                boolean movingLegend;
+
+                @Override
+                public void mousePressed(MouseEvent e) {
+                    lx = e.getX();
+                    ly = e.getY();
+                    movingLegend = showLegend && legendHandle.contains(e.getX(), e.getY());
+                }
+
+                @Override
+                public void mouseDragged(MouseEvent e) {
+                    if (movingLegend) {
+                        legendHandle.moveTo(legendHandle.x() + e.getX() - lx, legendHandle.y() + e.getY() - ly,
+                            getWidth(), getHeight());
+                        lx = e.getX();
+                        ly = e.getY();
+                        setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.MOVE_CURSOR));
+                        repaint();
+                        return;
                     }
-                    int width = 1200;
-                    int height = 800;
-                    BufferedImage image = createVisibleResidualImage(width, height);
-                    if (image != null) {
-                        javax.imageio.ImageIO.write(image, "png", file);
-                        log.info("Solver chart export saved: " + file.getAbsolutePath());
+                    panX += e.getX() - lx;
+                    panY += e.getY() - ly;
+                    lx = e.getX();
+                    ly = e.getY();
+                    repaint();
+                }
+
+                @Override
+                public void mouseMoved(MouseEvent e) {
+                    if (showLegend && legendHandle.contains(e.getX(), e.getY())) {
+                        setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.MOVE_CURSOR));
                     } else {
-                        log.warning("Solver chart export: no chart visible to capture.");
+                        setCursor(java.awt.Cursor.getDefaultCursor());
                     }
-                } catch (Exception e) {
-                    log.log(Level.WARNING, "Solver chart export failed", e);
+                }
+
+                @Override
+                public void mouseReleased(MouseEvent e) {
+                    movingLegend = false;
+                }
+
+                @Override
+                public void mouseClicked(MouseEvent e) {
+                    if (e.getClickCount() == 2) {
+                        zoom = 1.0;
+                        panX = 0;
+                        panY = 0;
+                        repaint();
+                    }
+                }
+            };
+            addMouseListener(drag);
+            addMouseMotionListener(drag);
+        }
+
+        @Override
+        protected void paintComponent(Graphics g0) {
+            Graphics2D g = (Graphics2D) g0.create();
+            try {
+                paintPlot(g, getWidth(), getHeight());
+            } finally {
+                g.dispose();
+            }
+        }
+
+        void paintPlot(Graphics2D g, int w, int h) {
+            g.setColor(AppPanelStyle.getPanelBg());
+            g.fillRect(0, 0, w, h);
+            g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            List<Polyline> left = collectLeft();
+            List<Polyline> right = "MCMC".equals(mode) ? new ArrayList<>(likelihoods.values()) : List.of();
+            if (left.isEmpty() && right.isEmpty()) {
+                g.setColor(AppPanelStyle.getMutedTextColor());
+                g.drawString("Residual convergence", 16, 24);
+                return;
+            }
+            double[] xb = rangeX(left, right);
+            double[] yb = rangeY(left);
+            double[] y2 = rangeY(right);
+            ChartAppearanceSettings s = AppSettingsCache.chartAppearance();
+            int leftM = 56;
+            int rightM = right.isEmpty() ? 16 : 56;
+            int top = 28;
+            int bot = 36;
+            int cw = Math.max(10, w - leftM - rightM);
+            int ch = Math.max(10, h - top - bot);
+            g.setColor(s.getGridlineColorAsColor());
+            Stroke prev = g.getStroke();
+            g.setStroke(s.getGridlineStroke());
+            for (int i = 1; i <= 4; i++) {
+                int x = leftM + cw * i / 5;
+                int y = top + ch * i / 5;
+                g.drawLine(x, top, x, top + ch);
+                g.drawLine(leftM, y, leftM + cw, y);
+            }
+            g.setStroke(prev);
+            g.setColor(s.getAxisLineColorAsColor());
+            g.drawLine(leftM, top + ch, leftM + cw, top + ch);
+            g.drawLine(leftM, top, leftM, top + ch);
+            if (!right.isEmpty()) {
+                g.setColor(LIKELIHOOD_COLOR);
+                g.drawLine(leftM + cw, top, leftM + cw, top + ch);
+            }
+            drawPolylines(g, left, xb, yb, leftM, top, cw, ch, s);
+            drawPolylines(g, right, xb, y2, leftM, top, cw, ch, s);
+            g.setFont(s.getTickLabelFont());
+            g.setColor(RESIDUAL_COLOR);
+            FontMetrics fm = g.getFontMetrics();
+            for (int i = 0; i <= 4; i++) {
+                double v = yb[0] + (yb[1] - yb[0]) * i / 4.0;
+                String lab = String.format(Locale.ROOT, "%.3g", v);
+                int y = top + ch - (int) (ch * i / 4.0);
+                g.drawString(lab, leftM - fm.stringWidth(lab) - 4, y + fm.getAscent() / 2);
+            }
+            g.setColor(s.getAxisLineColorAsColor());
+            for (int i = 0; i <= 4; i++) {
+                double v = xb[0] + (xb[1] - xb[0]) * i / 4.0;
+                String lab = String.format(Locale.ROOT, "%.0f", v);
+                int x = leftM + cw * i / 4;
+                g.drawString(lab, x - fm.stringWidth(lab) / 2, top + ch + fm.getAscent() + 4);
+            }
+            if (!right.isEmpty()) {
+                g.setColor(LIKELIHOOD_COLOR);
+                for (int i = 0; i <= 4; i++) {
+                    double v = y2[0] + (y2[1] - y2[0]) * i / 4.0;
+                    String lab = String.format(Locale.ROOT, "%.3g", v);
+                    int y = top + ch - (int) (ch * i / 4.0);
+                    g.drawString(lab, leftM + cw + 6, y + fm.getAscent() / 2);
+                }
+            }
+            g.setFont(s.getAxisLabelFont());
+            g.setColor(RESIDUAL_COLOR);
+            g.drawString("RMS Residual (s)", 8, 16);
+            g.setColor(s.getAxisLineColorAsColor());
+            String title = title();
+            g.setFont(s.getTitleFont());
+            g.drawString(title, Math.max(leftM, (w - g.getFontMetrics().stringWidth(title)) / 2), 18);
+            g.setFont(s.getAxisLabelFont());
+            g.drawString("Iteration", leftM + cw / 2 - 20, h - 6);
+            drawOnCanvasLegend(g, w, h);
+        }
+
+        private void drawPolylines(Graphics2D g, List<Polyline> lines, double[] xb, double[] yb,
+                                   int left, int top, int cw, int ch, ChartAppearanceSettings s) {
+            double dx = Math.max(1e-9, xb[1] - xb[0]);
+            double dy = Math.max(1e-9, yb[1] - yb[0]);
+            float[] xs = new float[Math.max(8, maxDataPoints + 8)];
+            float[] ys = new float[xs.length];
+            float w = Math.max(0.5f, s.getLineWidth());
+            for (Polyline p : lines) {
+                int n = p.copy(xs, ys);
+                if (n < 2) {
+                    continue;
+                }
+                g.setColor(p.color);
+                g.setStroke(p.dashed
+                    ? new BasicStroke(p.active ? w : Math.max(0.5f, w * 0.6f),
+                        BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND, 1, new float[] {4, 4}, 0)
+                    : new BasicStroke(p.active ? w : Math.max(0.5f, w * 0.7f)));
+                int px = 0;
+                int py = 0;
+                for (int i = 0; i < n; i++) {
+                    double tx = (xs[i] - xb[0]) / dx;
+                    double ty = (ys[i] - yb[0]) / dy;
+                    int x = left + (int) (tx * cw * zoom + panX);
+                    int y = top + ch - (int) (ty * ch * zoom - panY);
+                    if (i > 0) {
+                        g.drawLine(px, py, x, y);
+                    }
+                    px = x;
+                    py = y;
                 }
             }
         }
-    }
-    
-    /**
-     * Renders the currently visible residual view (single chart or split view) to a BufferedImage.
-     */
-    private BufferedImage createVisibleResidualImage(int width, int height) {
-        if ("CLS".equals(mode) && kDistancePlotPanel != null) {
-            BufferedImage img = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
-            Graphics2D g2 = img.createGraphics();
-            g2.setColor(Color.WHITE);
-            g2.fillRect(0, 0, width, height);
-            kDistancePlotPanel.setSize(width, height);
-            kDistancePlotPanel.doLayout();
-            kDistancePlotPanel.printAll(g2);
-            g2.dispose();
-            return img;
-        }
-        if (residualPlotContainer == null || residualPlotContainer.getComponentCount() == 0) {
-            return chart != null ? chart.createBufferedImage(width, height) : null;
-        }
-        JPanel residualContainer = residualPlotContainer;
-        if (residualContainer.getComponentCount() == 0) {
-            return chart != null ? chart.createBufferedImage(width, height) : null;
-        }
-        for (Component visible : residualContainer.getComponents()) {
-            if (visible instanceof ChartPanel) {
-                JFreeChart ch = ((ChartPanel) visible).getChart();
-                return ch != null ? ch.createBufferedImage(width, height) : null;
+
+        private List<Polyline> collectLeft() {
+            List<Polyline> out = new ArrayList<>();
+            if (defaultResidual.n > 0) {
+                out.add(defaultResidual);
             }
-            if (visible instanceof JScrollPane) {
-                Component view = ((JScrollPane) visible).getViewport().getView();
-                int w = Math.max(width, view.getWidth() > 0 ? view.getWidth() : width);
-                int h = Math.max(height, view.getHeight() > 0 ? view.getHeight() : height);
-                BufferedImage img = new BufferedImage(w, h, BufferedImage.TYPE_INT_RGB);
-                Graphics2D g2 = img.createGraphics();
-                g2.setColor(Color.WHITE);
-                g2.fillRect(0, 0, w, h);
-                view.paint(g2);
-                g2.dispose();
-                return img;
-            }
+            out.addAll(residuals.values());
+            return out;
         }
-        return chart != null ? chart.createBufferedImage(width, height) : null;
-    }
-    
-    /**
-     * Sets the maximum number of data points to keep.
-     * 
-     * @param maxPoints maximum number of points
-     */
-    public void setMaxDataPoints(int maxPoints) {
-        this.maxDataPoints = maxPoints;
+
+        private double[] rangeX(List<Polyline> a, List<Polyline> b) {
+            double lo = Double.POSITIVE_INFINITY;
+            double hi = Double.NEGATIVE_INFINITY;
+            for (List<Polyline> group : List.of(a, b)) {
+                for (Polyline p : group) {
+                    synchronized (p) {
+                        for (int i = 0; i < p.n; i++) {
+                            lo = Math.min(lo, p.x[i]);
+                            hi = Math.max(hi, p.x[i]);
+                        }
+                    }
+                }
+            }
+            if (!(hi > lo)) {
+                return new double[] {0, 1};
+            }
+            double pad = 0.04 * (hi - lo);
+            return new double[] {lo - pad, hi + pad};
+        }
+
+        private double[] rangeY(List<Polyline> lines) {
+            double lo = Double.POSITIVE_INFINITY;
+            double hi = Double.NEGATIVE_INFINITY;
+            for (Polyline p : lines) {
+                synchronized (p) {
+                    for (int i = 0; i < p.n; i++) {
+                        lo = Math.min(lo, p.y[i]);
+                        hi = Math.max(hi, p.y[i]);
+                    }
+                }
+            }
+            if (!(hi > lo)) {
+                return new double[] {0, 1};
+            }
+            double pad = autoScale ? 0.08 * (hi - lo) : 0;
+            return new double[] {lo - pad, hi + pad};
+        }
+
+        private String title() {
+            String n = ModeNameMapper.getDisplayName(mode);
+            if ("MCMC".equals(mode)) {
+                return (n == null ? "MCMC" : n) + " — Residual & Log-Likelihood";
+            }
+            if ("TRD".equals(mode)) {
+                return (n == null ? "TRD" : n) + " — Residual (Per Cluster)";
+            }
+            return (n == null ? "Residual" : n) + " — Residual Convergence";
+        }
     }
 }
+
 

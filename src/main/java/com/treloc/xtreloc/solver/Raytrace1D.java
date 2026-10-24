@@ -9,6 +9,7 @@ import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -16,26 +17,38 @@ import com.treloc.xtreloc.io.FileUtils;
 import com.treloc.xtreloc.io.VelocityModelCatalog;
 
 /**
- * One-dimensional, flat-layered S-wave ray tracer for hypocenter travel times and takeoff/incident angles.
+ * One-dimensional layered ray tracer (P or S) for hypocenter travel times and takeoff/incident angles.
  *
  * <h2>Velocity models</h2>
  * <ul>
  *   <li>TauP-style {@code .nd} and {@code .tvel} files (bundled under {@code velocity-models/} or on disk)</li>
- *   <li>HYPO {@code .aob} / VLSTR {@code struct} files via {@link #loadHypomhStructFile(java.io.File)}</li>
+ *   <li>WIN / hypomh structure files ({@code struct.tbl}, {@code .aob}): discrete P samples with a constant
+ *       gradient in each layer (linear interpolation); S = Vp/1.73. See {@link WinHypomhStruct}.</li>
  *   <li>Shorthand tokens {@code prem}, {@code iasp91}, {@code ak135} resolve to bundled tables</li>
  * </ul>
  *
- * <h2>Branch selection</h2>
- * For epicentral distance above 120 km the ray with the smallest positive
- * travel time among generated candidates is taken. At shorter distances the implementation may prefer the
- * candidate whose horizontal distance to the target best matches the requested range, then apply a
- * straight-ray fallback when no branch is numerically trustworthy (see source for thresholds).
+ * <h2>Algorithm</h2>
+ * <p>The model is a stack of layers with linear velocity {@code v(z)}. For {@code .nd}/{@code .tvel} models the
+ * stack is first mapped to a flat model with the exact Earth-flattening transform
+ * ({@code z_f = -R ln(1 - z/R)}, {@code v_f = v R/(R - z)}), so that the travel time and the ray parameter
+ * (s/km along the surface) agree with the spherical solution; HYPO {@code .aob} models are used as flat layers.
+ * Layers thicker than 50 km are subdivided to keep the flattened velocity piecewise linear to good accuracy.</p>
+ *
+ * <p>Inside each layer the range and travel time of a ray with horizontal slowness {@code p} are evaluated with
+ * the closed-form integrals for a constant-gradient medium (no gradient floor). Candidate rays are</p>
+ * <ol>
+ *   <li>the direct ray between the two depths (monotone in {@code p}, solved by bisection),</li>
+ *   <li>rays turning inside each layer below the deeper endpoint (solved on the turning velocity), and</li>
+ *   <li>head waves along constant-velocity layers.</li>
+ * </ol>
+ * <p>The candidate with the smallest travel time is returned. There is no straight-ray fallback: if no branch
+ * exists an {@link IllegalStateException} is thrown.</p>
  *
  * <h2>System properties</h2>
  * <ul>
  *   <li>{@code -Dxtreloc.raytrace.debug=true} — verbose ray construction on {@code System.err} and FINE logs</li>
- *   <li>{@code -Dxtreloc.raytrace.minlocBranchesOnly=true} — always use minimum positive-time branch (disables
- *       short-distance distance-root preference)</li>
+ *   <li>{@code -Dxtreloc.raytrace.flatEarth=true} — do not apply the Earth-flattening transform to
+ *       {@code .nd}/{@code .tvel} models (pure flat-layer model)</li>
  * </ul>
  *
  * <p>Spherical TauP is not used inside this class; application code may choose TauP via
@@ -46,6 +59,8 @@ import com.treloc.xtreloc.io.VelocityModelCatalog;
 public final class Raytrace1D {
 
     private static final Logger LOGGER = Logger.getLogger(Raytrace1D.class.getName());
+    private static final ConcurrentHashMap<String, Raytrace1D> LOAD_CACHE = new ConcurrentHashMap<>();
+    private static final ConcurrentHashMap<String, Dual> DUAL_CACHE = new ConcurrentHashMap<>();
 
     /** Set {@code -Dxtreloc.raytrace.debug=true} for stderr + FINE logs of raytracing steps. */
     private static boolean rayDebug() {
@@ -61,109 +76,154 @@ public final class Raytrace1D {
         LOGGER.log(Level.FINE, line);
     }
 
-    /**
-     * Minimum absolute velocity gradient magnitude for {@link VelocityGradientMode#ND_AND_TVEL} layers.
-     * Avoids division blow-ups in travel-time integrals when a layer is almost constant; HYPO VLSTR files use raw gradients.
-     */
-    private static final double EPS_SLOPE = 1e-3;
+    /** Earth radius used by the flattening transform (km); consistent with TauP's reference radius. */
+    private static final double R_EARTH = 6371.0;
+    /** Layers thicker than this (km, physical depth) are subdivided before flattening. */
+    private static final double MAX_SUBLAYER_KM = 50.0;
+    /** Depth intervals thinner than this (km) are treated as velocity discontinuities, not layers. */
+    private static final double MIN_LAYER_KM = 1e-4;
+    /** Samples with S velocity below this (km/s) are fluid; the model is truncated there. */
+    private static final double FLUID_VS = 0.1;
+    private static final double BIG = 1e30;
 
-    private enum VelocityGradientMode {
-        /** Floor tiny |dv/dz| for discrete global models (.nd / .tvel). */
-        ND_AND_TVEL,
-        /** HYPO VLSTR struct files: use exact layer gradients (no EPS_SLOPE floor). */
-        HYPO_VLSTR
-    }
-    private static final double EPS_DIV = 1e-10;
+    /** Model-coordinate layer arrays (flattened depth/velocity when {@link #flattened}). */
+    private final int nl;
+    private final double[] zTop;
+    private final double[] zBot;
+    private final double[] vTop;
+    private final double[] vBot;
+    /** {@code prefMaxV[j]} = max velocity in layers 0..j (model coordinates). */
+    private final double[] prefMaxV;
+    private final boolean flattened;
 
-    /**
-     * Below this epicentral distance (km), branch selection prefers the smallest horizontal-distance residual
-     * to the target range before tie-breaking by travel time. Above it, the fastest positive-time branch wins.
-     */
-    private static final double SHORT_EPICENTRAL_DIST_KM = 120.0;
-
-    /**
-     * When epicentral distance is short, distance-root fits on global layered models may be unreliable; large
-     * residuals trigger the straight-ray fallback through mean {@code Vs}.
-     */
-    private static boolean shortRangeDistanceRootNotTrusted(double rrKm, double minXResidualKm) {
-        if (!Double.isFinite(minXResidualKm)) {
-            return true;
-        }
-        double tol = Math.max(5.0, 0.15 * rrKm);
-        return minXResidualKm > tol;
-    }
-
-    private final int n1;
-    private final double[] y;
-    private final double[] vr;
-    private final double[] vlg;
-    private final double[] v;
+    /** Physical (unflattened, truncated) samples used for {@link #sourceSVelocity(double)}. */
+    private final double[] physZ;
+    private final double[] physV;
+    private final double zMaxPhys;
 
     /**
-     * Result of {@link Raytrace1D#solveFastestRay(double, double, double)}: travel time and endpoint ray angles
-     * in the flat-layer convention (downward vertical reference).
+     * Result of {@link Raytrace1D#solveFastestRay(double, double, double)}: travel time, endpoint ray angles and
+     * horizontal slowness.
      */
     public static final class RaySolution {
         /** Geometric ray travel time along the selected branch (s). */
         public final double travelTimeSeconds;
         /**
-         * Takeoff angle at the deeper endpoint (rad), measured <strong>from downward vertical</strong> into the ray plane.
-         * Not interchangeable with spherical TauP takeoff angles without explicit convention conversion.
+         * Takeoff angle at the source (rad), measured <strong>from downward vertical</strong> into the ray plane
+         * (0 = straight down, {@code pi} = straight up).
          */
         public final double takeoffAngleRad;
-        /** Incident angle at the shallower endpoint (rad), from downward vertical. */
+        /** Incident angle at the receiver (rad), from downward vertical (acute; the ray arrives from below). */
         public final double incidentAngleRad;
+        /** Horizontal slowness (ray parameter) {@code p = dT/dX} along the surface (s/km). */
+        public final double horizontalSlowness;
 
         public RaySolution(double travelTimeSeconds, double takeoffAngleRad, double incidentAngleRad) {
+            this(travelTimeSeconds, takeoffAngleRad, incidentAngleRad, Double.NaN);
+        }
+
+        public RaySolution(double travelTimeSeconds, double takeoffAngleRad, double incidentAngleRad,
+                           double horizontalSlowness) {
             this.travelTimeSeconds = travelTimeSeconds;
             this.takeoffAngleRad = takeoffAngleRad;
             this.incidentAngleRad = incidentAngleRad;
+            this.horizontalSlowness = horizontalSlowness;
         }
     }
 
-    private Raytrace1D(List<Double> depthSamples, List<Double> sVelSamples) {
-        this(depthSamples, sVelSamples, VelocityGradientMode.ND_AND_TVEL);
+    private static boolean defaultFlattening() {
+        return !Boolean.getBoolean("xtreloc.raytrace.flatEarth");
     }
 
-    private Raytrace1D(List<Double> depthSamples, List<Double> sVelSamples, VelocityGradientMode gradientMode) {
+    private Raytrace1D(List<Double> depthSamples, List<Double> sVelSamples, boolean flatten) {
         if (depthSamples.size() < 2 || depthSamples.size() != sVelSamples.size()) {
             throw new IllegalArgumentException("Invalid velocity samples.");
         }
-        this.n1 = depthSamples.size() - 1;
-        this.y = new double[n1 + 1];
-        this.vr = new double[n1 + 1];
-        this.vlg = new double[n1 + 1];
-        this.v = new double[n1 + 1];
+        this.flattened = flatten;
 
-        for (int i = 0; i <= n1; i++) {
-            y[i] = depthSamples.get(i);
-            vr[i] = sVelSamples.get(i);
-        }
-        if (rayDebug()) {
-            rayLog("model built n1=" + n1 + " maxDepthKm=" + y[n1] + " gradientMode=" + gradientMode);
-        }
-        for (int i = 1; i <= n1; i++) {
-            double dz = y[i] - y[i - 1];
-            if (dz <= 0) {
-                dz = 1e-6;
-                y[i] = y[i - 1] + dz;
+        // 1) truncate at the first fluid sample
+        List<Double> zs = new ArrayList<>();
+        List<Double> vs = new ArrayList<>();
+        for (int i = 0; i < depthSamples.size(); i++) {
+            double v = sVelSamples.get(i);
+            if (v < FLUID_VS) {
+                break;
             }
-            double g = (vr[i] - vr[i - 1]) / dz;
-            if (gradientMode == VelocityGradientMode.HYPO_VLSTR) {
-                vlg[i] = g;
-            } else if (Math.abs(g) < EPS_SLOPE) {
-                g = (g >= 0.0 ? 1.0 : -1.0) * EPS_SLOPE;
-                vlg[i] = g;
-            } else {
-                vlg[i] = g;
+            zs.add(depthSamples.get(i));
+            vs.add(v);
+        }
+        if (zs.size() < 2) {
+            throw new IllegalArgumentException("Velocity model has no solid layer starting at the surface.");
+        }
+        this.physZ = new double[zs.size()];
+        this.physV = new double[zs.size()];
+        for (int i = 0; i < physZ.length; i++) {
+            physZ[i] = zs.get(i);
+            physV[i] = vs.get(i);
+        }
+        this.zMaxPhys = physZ[physZ.length - 1];
+
+        // 2) layers (skip near-zero thickness = discontinuity), subdivide, flatten
+        List<double[]> layers = new ArrayList<>();
+        for (int i = 1; i < physZ.length; i++) {
+            double za = physZ[i - 1];
+            double zb = physZ[i];
+            double va = physV[i - 1];
+            double vb = physV[i];
+            double dz = zb - za;
+            if (dz < MIN_LAYER_KM) {
+                continue;
+            }
+            int nsub = flatten ? Math.max(1, (int) Math.ceil(dz / MAX_SUBLAYER_KM)) : 1;
+            for (int k = 0; k < nsub; k++) {
+                double f0 = (double) k / nsub;
+                double f1 = (double) (k + 1) / nsub;
+                double z0 = za + f0 * dz;
+                double z1 = za + f1 * dz;
+                double v0 = va + f0 * (vb - va);
+                double v1 = va + f1 * (vb - va);
+                layers.add(new double[] {
+                    toModelDepth(z0, flatten), toModelDepth(z1, flatten),
+                    toModelVelocity(v0, z0, flatten), toModelVelocity(v1, z1, flatten)});
             }
         }
-        v[1] = vr[0] / vlg[1];
-        for (int i = 2; i <= n1; i++) {
-            int j = i - 1;
-            v[i] = (vlg[j] * v[j] + (vlg[j] - vlg[i]) * y[j]) / vlg[i];
+        if (layers.isEmpty()) {
+            throw new IllegalArgumentException("Velocity model has no layers.");
         }
+        this.nl = layers.size();
+        this.zTop = new double[nl];
+        this.zBot = new double[nl];
+        this.vTop = new double[nl];
+        this.vBot = new double[nl];
+        this.prefMaxV = new double[nl];
+        double run = 0.0;
+        for (int j = 0; j < nl; j++) {
+            double[] L = layers.get(j);
+            zTop[j] = L[0];
+            zBot[j] = L[1];
+            vTop[j] = L[2];
+            vBot[j] = L[3];
+            run = Math.max(run, Math.max(vTop[j], vBot[j]));
+            prefMaxV[j] = run;
+        }
+        rayLog("model built layers=" + nl + " maxDepthKm=" + zMaxPhys + " flattened=" + flatten);
     }
+
+    private static double toModelDepth(double z, boolean flatten) {
+        if (!flatten) {
+            return z;
+        }
+        return -R_EARTH * Math.log1p(-Math.min(z, R_EARTH * 0.999999) / R_EARTH);
+    }
+
+    private static double toModelVelocity(double v, double z, boolean flatten) {
+        if (!flatten) {
+            return v;
+        }
+        return v * R_EARTH / (R_EARTH - Math.min(z, R_EARTH * 0.999999));
+    }
+
+    // ------------------------------------------------------------------ loading
 
     /**
      * Loads a velocity model from the classpath, an absolute/relative file path, or a short name
@@ -173,7 +233,219 @@ public final class Raytrace1D {
      * @return a ready-to-use model
      * @throws Exception if the file is missing, malformed, or not a supported format
      */
+    /**
+     * P and S tracers from the same {@code .nd}/{@code .tvel} or WIN structure model. Both Vp and Vs are required
+     * ({@code .nd}/{@code .tvel} must list them; WIN derives S as Vp/1.73).
+     */
+    public static final class Dual {
+        public final Raytrace1D p;
+        public final Raytrace1D s;
+
+        Dual(Raytrace1D p, Raytrace1D s) {
+            this.p = p;
+            this.s = s;
+        }
+
+        public Raytrace1D forPhase(com.treloc.xtreloc.solver.table.TravelTimeTable.Phase phase) {
+            return phase == com.treloc.xtreloc.solver.table.TravelTimeTable.Phase.P ? p : s;
+        }
+    }
+
     public static Raytrace1D load(String taupFile) throws Exception {
+        return load(taupFile, defaultFlattening());
+    }
+
+    public static Dual loadDual(String taupFile) throws Exception {
+        return loadDual(taupFile, defaultFlattening());
+    }
+
+    public static Dual loadDual(String taupFile, boolean earthFlattening) throws Exception {
+        String cacheKey = "dual|" + taupFile + '|' + earthFlattening;
+        Dual cached = DUAL_CACHE.get(cacheKey);
+        if (cached != null) {
+            return cached;
+        }
+        Dual loaded = loadDualUncached(taupFile, earthFlattening);
+        Dual raced = DUAL_CACHE.putIfAbsent(cacheKey, loaded);
+        return raced != null ? raced : loaded;
+    }
+
+    /**
+     * Same as {@link #load(String)} with explicit control of the Earth-flattening transform
+     * (ignored for HYPO {@code .aob} models, which are always flat).
+     *
+     * @param earthFlattening {@code true}: treat the model as a spherical Earth (matches TauP);
+     *                        {@code false}: pure flat layers
+     */
+    public static Raytrace1D load(String taupFile, boolean earthFlattening) throws Exception {
+        boolean flat = earthFlattening;
+        String cacheKey = String.valueOf(taupFile) + '|' + flat;
+        Raytrace1D cached = LOAD_CACHE.get(cacheKey);
+        if (cached != null) {
+            return cached;
+        }
+        Raytrace1D loaded = loadUncached(taupFile, flat);
+        Raytrace1D raced = LOAD_CACHE.putIfAbsent(cacheKey, loaded);
+        return raced != null ? raced : loaded;
+    }
+
+    private static Dual loadDualUncached(String taupFile, boolean earthFlattening) throws Exception {
+        String resolved = VelocityModelCatalog.toResourcePath(taupFile);
+        InputStream in = Raytrace1D.class.getClassLoader().getResourceAsStream(resolved);
+        String ext;
+        BufferedReader br;
+        if (in != null) {
+            ext = FileUtils.getFileExtension(resolved).toLowerCase();
+            br = new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8));
+        } else {
+            File f = new File(taupFile);
+            if (!f.exists() || !f.isFile()) {
+                String bundled = bundledResourceForToken(taupFile);
+                if (bundled == null) {
+                    throw new IOException(
+                        "Velocity model not found: " + taupFile
+                            + ". Pass a path to .nd/.tvel with Vp and Vs (e.g. prem.nd).");
+                }
+                String path = VelocityModelCatalog.toResourcePath(bundled);
+                in = Raytrace1D.class.getClassLoader().getResourceAsStream(path);
+                if (in == null) {
+                    throw new IOException("Bundled resource missing: " + path);
+                }
+                ext = FileUtils.getFileExtension(bundled).toLowerCase();
+                br = new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8));
+            } else {
+                ext = FileUtils.getFileExtension(taupFile).toLowerCase();
+                br = new BufferedReader(new FileReader(f, StandardCharsets.UTF_8));
+            }
+        }
+        try (BufferedReader r = br) {
+            if ("tvel".equals(ext)) {
+                return dualFromSamples(readTvelSamples(r), earthFlattening);
+            }
+            List<String> lines = readAllLines(r);
+            if ("aob".equals(ext) || WinHypomhStruct.isWinFileName(taupFile) || WinHypomhStruct.looksLike(lines)) {
+                return dualFromWin(WinHypomhStruct.parse(lines));
+            }
+            return dualFromSamples(readNdSamples(lines), earthFlattening);
+        }
+    }
+
+    private static final class VelSamples {
+        final List<Double> dep = new ArrayList<>();
+        final List<Double> vp = new ArrayList<>();
+        final List<Double> vs = new ArrayList<>();
+    }
+
+    private static Dual dualFromSamples(VelSamples s, boolean flat) throws IOException {
+        if (s.dep.isEmpty() || s.dep.size() != s.vp.size() || s.dep.size() != s.vs.size()) {
+            throw new IOException("Velocity model has no Depth / Vp / Vs rows.");
+        }
+        boolean anyP = false;
+        boolean anyS = false;
+        for (int i = 0; i < s.vp.size(); i++) {
+            if (s.vp.get(i) >= 0.5) {
+                anyP = true;
+            }
+            if (s.vs.get(i) >= FLUID_VS) {
+                anyS = true;
+            }
+        }
+        if (!anyP || !anyS) {
+            throw new IOException("Velocity model must provide both P and S velocities.");
+        }
+        List<Double> dP = new ArrayList<>(s.dep);
+        List<Double> vP = new ArrayList<>(s.vp);
+        List<Double> dS = new ArrayList<>(s.dep);
+        List<Double> vS = new ArrayList<>(s.vs);
+        normalizeSamples(dP, vP);
+        normalizeSamples(dS, vS);
+        return new Dual(new Raytrace1D(dP, vP, flat), new Raytrace1D(dS, vS, flat));
+    }
+
+    private static Dual dualFromWin(WinHypomhStruct w) throws IOException {
+        VelSamples s = new VelSamples();
+        for (int i = 0; i < w.depthKm.length; i++) {
+            s.dep.add(w.depthKm[i]);
+            s.vp.add(w.vp[i]);
+            s.vs.add(w.vs[i]);
+        }
+        return dualFromSamples(s, false);
+    }
+
+    private static List<String> readAllLines(BufferedReader br) throws IOException {
+        List<String> lines = new ArrayList<>();
+        String line;
+        while ((line = br.readLine()) != null) {
+            lines.add(line);
+        }
+        return lines;
+    }
+
+    private static VelSamples readNdSamples(BufferedReader br) throws IOException {
+        return readNdSamples(readAllLines(br));
+    }
+
+    private static VelSamples readNdSamples(List<String> raw) throws IOException {
+        VelSamples out = new VelSamples();
+        boolean inBlockComment = false;
+        for (String line : raw) {
+            String t = line;
+            if (inBlockComment) {
+                int end = t.indexOf("*/");
+                if (end < 0) {
+                    continue;
+                }
+                t = t.substring(end + 2);
+                inBlockComment = false;
+            }
+            int blk = t.indexOf("/*");
+            if (blk >= 0) {
+                int end = t.indexOf("*/", blk + 2);
+                if (end >= 0) {
+                    t = t.substring(0, blk) + t.substring(end + 2);
+                } else {
+                    t = t.substring(0, blk);
+                    inBlockComment = true;
+                }
+            }
+            t = stripInlineComment(t).trim();
+            if (t.isEmpty()) {
+                continue;
+            }
+            String[] p = t.split("\\s+");
+            if (p.length < 3 || !isNumeric(p[0]) || !isNumeric(p[1]) || !isNumeric(p[2])) {
+                continue;
+            }
+            out.dep.add(Double.parseDouble(p[0]));
+            out.vp.add(Double.parseDouble(p[1]));
+            out.vs.add(Double.parseDouble(p[2]));
+        }
+        return out;
+    }
+
+    private static VelSamples readTvelSamples(BufferedReader br) throws IOException {
+        br.readLine();
+        br.readLine();
+        VelSamples out = new VelSamples();
+        String line;
+        while ((line = br.readLine()) != null) {
+            String t = stripInlineComment(line).trim();
+            if (t.isEmpty()) {
+                continue;
+            }
+            String[] p = t.split("\\s+");
+            if (p.length < 3) {
+                continue;
+            }
+            out.dep.add(Double.parseDouble(p[0]));
+            out.vp.add(Double.parseDouble(p[1]));
+            out.vs.add(Double.parseDouble(p[2]));
+        }
+        return out;
+    }
+
+    private static Raytrace1D loadUncached(String taupFile, boolean earthFlattening) throws Exception {
+        boolean flat = earthFlattening;
         String resolved = VelocityModelCatalog.toResourcePath(taupFile);
         InputStream in = Raytrace1D.class.getClassLoader().getResourceAsStream(resolved);
         if (in != null) {
@@ -182,12 +454,12 @@ public final class Raytrace1D {
             try (InputStream resourceIn = in;
                  BufferedReader br = new BufferedReader(new InputStreamReader(resourceIn, StandardCharsets.UTF_8))) {
                 if ("tvel".equals(extRes)) {
-                    return fromTvelReader(br);
+                    return fromTvelReader(br, flat);
                 }
                 if ("aob".equals(extRes)) {
                     return fromHypomhVlstrReader(br);
                 }
-                return fromNdReader(br);
+                return fromNdReader(br, flat);
             }
         }
         File f = new File(taupFile);
@@ -195,23 +467,26 @@ public final class Raytrace1D {
             rayLog("load file path=" + f.getAbsolutePath());
             String ext = FileUtils.getFileExtension(taupFile).toLowerCase();
             if ("tvel".equals(ext)) {
-                return fromTvelFile(f);
+                try (BufferedReader br = new BufferedReader(new FileReader(f, StandardCharsets.UTF_8))) {
+                    return fromTvelReader(br, flat);
+                }
             }
-            if ("aob".equals(ext)) {
+            if ("aob".equals(ext) || WinHypomhStruct.isWinFileName(taupFile)) {
                 return loadHypomhStructFile(f);
             }
-            return fromNdFile(f);
+            try (BufferedReader br = new BufferedReader(new FileReader(f, StandardCharsets.UTF_8))) {
+                return fromNdReader(br, flat);
+            }
         }
-        return loadByModelToken(taupFile);
+        return loadByModelToken(taupFile, flat);
     }
 
     /**
-     * Loads a HYPO-style VLSTR {@code struct} (hypomh) file. Line 1 is reference epicenter (lat, lon, depth km);
-     * line 2 is layer count and name; then boundary S velocities, thicknesses, and an uncertainty line.
-     * Interface depths are not passed through {@code normalizeSamples} so layer boundaries stay aligned with the file.
+     * Loads a WIN / hypomh structure file. P velocities at layer tops are linearly interpolated
+     * (constant gradient, continuous at interfaces); S = Vp/1.73. Flat layers (no Earth flattening).
      *
      * @param file readable {@code .aob} or equivalent struct
-     * @return model in {@link VelocityGradientMode#HYPO_VLSTR} mode
+     * @return flat-layer model
      * @throws IOException if the layout does not match the expected record counts
      */
     public static Raytrace1D loadHypomhStructFile(File file) throws IOException {
@@ -221,86 +496,21 @@ public final class Raytrace1D {
     }
 
     private static Raytrace1D fromHypomhVlstrReader(BufferedReader br) throws IOException {
-        readNonBlankLine(br);
-        String line2 = readNonBlankLine(br);
-        String[] t2 = line2.trim().split("\\s+");
-        if (t2.length < 2) {
-            throw new IOException("hypomh struct line 2: expected NN and name, got: " + line2);
-        }
-        int nn = Integer.parseInt(t2[0]);
-        String name = t2[1].length() > 3 ? t2[1].substring(0, 3) : t2[1];
-        double va = 0.0;
-        double vb = 0.0;
-        if (t2.length >= 4) {
-            va = Double.parseDouble(t2[2]);
-            vb = Double.parseDouble(t2[3]);
-        }
-        rayLog("hypomh vlstr header nn=" + nn + " name=" + name + " va=" + va + " vb=" + vb);
-        int n1 = nn + 1;
-        int nVr = nn + 2;
-        List<Double> vrList = readFixedWidthFloatSequence(br, nVr);
-        List<Double> thList = readFixedWidthFloatSequence(br, n1);
-        readFixedWidthFloatSequence(br, 4);
-        if (vrList.size() != nVr || thList.size() != n1) {
-            throw new IOException("hypomh struct: expected " + nVr + " VR and " + n1 + " TH values, got "
-                + vrList.size() + " and " + thList.size());
-        }
+        WinHypomhStruct w = WinHypomhStruct.read(br);
+        rayLog("WIN/hypomh struct name=" + w.name + " layers=" + w.nLayers);
         List<Double> dep = new ArrayList<>();
         List<Double> vs = new ArrayList<>();
-        dep.add(0.0);
-        vs.add(Math.max(0.01, vrList.get(0)));
-        double yAcc = 0.0;
-        for (int i = 1; i <= n1; i++) {
-            yAcc += thList.get(i - 1);
-            dep.add(yAcc);
-            vs.add(Math.max(0.01, vrList.get(i)));
+        for (int i = 0; i < w.depthKm.length; i++) {
+            dep.add(w.depthKm[i]);
+            vs.add(w.vs[i]);
         }
-        return new Raytrace1D(dep, vs, VelocityGradientMode.HYPO_VLSTR);
-    }
-
-    private static String readNonBlankLine(BufferedReader br) throws IOException {
-        String line;
-        do {
-            line = br.readLine();
-            if (line == null) {
-                throw new IOException("Unexpected EOF in hypomh struct file.");
-            }
-            line = stripInlineComment(line).trim();
-        } while (line.isEmpty());
-        return line;
-    }
-
-    /**
-     * Reads {@code count} floats from following non-comment lines (whitespace- or fixed-column separated).
-     */
-    private static List<Double> readFixedWidthFloatSequence(BufferedReader br, int count) throws IOException {
-        List<Double> out = new ArrayList<>(count);
-        while (out.size() < count) {
-            String line = br.readLine();
-            if (line == null) {
-                throw new IOException("Unexpected EOF while reading numeric sequence (need " + count + " values).");
-            }
-            line = stripInlineComment(line).trim();
-            if (line.isEmpty()) {
-                continue;
-            }
-            for (String t : line.split("\\s+")) {
-                if (t.isEmpty()) {
-                    continue;
-                }
-                out.add(Double.parseDouble(t.replace('D', 'E').replace('d', 'e')));
-                if (out.size() >= count) {
-                    break;
-                }
-            }
-        }
-        return out;
+        return new Raytrace1D(dep, vs, false);
     }
 
     /**
      * Resolve short names (e.g. {@code prem}) to bundled resources without TauP.
      */
-    private static Raytrace1D loadByModelToken(String token) throws IOException {
+    private static Raytrace1D loadByModelToken(String token, boolean flat) throws IOException {
         String bundled = bundledResourceForToken(token);
         if (bundled == null) {
             throw new IOException(
@@ -317,9 +527,9 @@ public final class Raytrace1D {
              BufferedReader br = new BufferedReader(new InputStreamReader(resourceIn, StandardCharsets.UTF_8))) {
             String ext = FileUtils.getFileExtension(bundled).toLowerCase();
             if ("tvel".equals(ext)) {
-                return fromTvelReader(br);
+                return fromTvelReader(br, flat);
             }
-            return fromNdReader(br);
+            return fromNdReader(br, flat);
         }
     }
 
@@ -351,13 +561,7 @@ public final class Raytrace1D {
         }
     }
 
-    private static Raytrace1D fromTvelFile(File file) throws IOException {
-        try (BufferedReader br = new BufferedReader(new FileReader(file))) {
-            return fromTvelReader(br);
-        }
-    }
-
-    private static Raytrace1D fromTvelReader(BufferedReader br) throws IOException {
+    private static Raytrace1D fromTvelReader(BufferedReader br, boolean flat) throws IOException {
         List<Double> dep = new ArrayList<>();
         List<Double> vs = new ArrayList<>();
         br.readLine();
@@ -372,21 +576,18 @@ public final class Raytrace1D {
             vs.add(Double.parseDouble(p[2]));
         }
         normalizeSamples(dep, vs);
-        return new Raytrace1D(dep, vs);
+        return new Raytrace1D(dep, vs, flat);
     }
 
-    private static Raytrace1D fromNdFile(File file) throws IOException {
-        try (BufferedReader br = new BufferedReader(new FileReader(file))) {
-            return fromNdReader(br);
+    private static Raytrace1D fromNdReader(BufferedReader br, boolean flat) throws IOException {
+        List<String> raw = readAllLines(br);
+        if (WinHypomhStruct.looksLike(raw)) {
+            return fromHypomhVlstrReader(new BufferedReader(new java.io.StringReader(String.join("\n", raw))));
         }
-    }
-
-    private static Raytrace1D fromNdReader(BufferedReader br) throws IOException {
         List<Double> dep = new ArrayList<>();
         List<Double> vs = new ArrayList<>();
         boolean inBlockComment = false;
-        String line;
-        while ((line = br.readLine()) != null) {
+        for (String line : raw) {
             String t = line;
             if (inBlockComment) {
                 int end = t.indexOf("*/");
@@ -413,7 +614,7 @@ public final class Raytrace1D {
             vs.add(Double.parseDouble(p[2]));
         }
         normalizeSamples(dep, vs);
-        return new Raytrace1D(dep, vs);
+        return new Raytrace1D(dep, vs, flat);
     }
 
     private static String stripInlineComment(String line) {
@@ -470,8 +671,10 @@ public final class Raytrace1D {
         vs.addAll(v2);
     }
 
+    // ------------------------------------------------------------------ public API
+
     /**
-     * Shortest API: S-wave travel time (s) for the fastest selected ray branch.
+     * Shortest API: S-wave travel time (s) for the fastest ray.
      *
      * @param distKm        epicentral distance (km, non-negative)
      * @param srcDepthKm    source depth below surface (km)
@@ -483,465 +686,339 @@ public final class Raytrace1D {
     }
 
     /**
-     * Computes the preferred direct-S ray for the given horizontal distance and endpoint depths, including
-     * travel time and takeoff/incident angles in the layer model.
+     * Physical (unflattened) S-velocity samples of the model, fluid layers removed:
+     * {@code {depthsKm, vsKmPerSec}}. A discontinuity appears as two samples at the same depth; velocity is linear
+     * between consecutive samples.
+     */
+    public double[][] sVelocityProfile() {
+        return new double[][] {physZ.clone(), physV.clone()};
+    }
+
+    /**
+     * Physical (not flattened) S velocity at the given depth (km/s), linearly interpolated in the model.
+     * Used for the vertical slowness at the source.
+     */
+    public double sourceSVelocity(double depthKm) {
+        double z = Math.max(0.0, Math.min(depthKm, zMaxPhys));
+        int lo = 0;
+        int hi = physZ.length - 1;
+        while (hi - lo > 1) {
+            int mid = (lo + hi) >>> 1;
+            if (physZ[mid] <= z) {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+        double dz = physZ[hi] - physZ[lo];
+        if (dz < MIN_LAYER_KM) {
+            return physV[hi];
+        }
+        double t = (z - physZ[lo]) / dz;
+        return physV[lo] + t * (physV[hi] - physV[lo]);
+    }
+
+    /**
+     * Computes the fastest ray for the given horizontal distance and endpoint depths, including travel time,
+     * takeoff/incident angles and the horizontal slowness.
      *
      * @param distKm        epicentral distance (km)
      * @param srcDepthKm    hypocenter depth (km)
      * @param stnDepthKm    station depth (km)
      * @return travel time and angles; see {@link RaySolution} for angle conventions
-     * @throws IllegalStateException if no numerically valid branch is found
+     * @throws IllegalStateException if no valid ray is found
      */
     public RaySolution solveFastestRay(double distKm, double srcDepthKm, double stnDepthKm) {
-        rayLog("solveFastestRay distKm=" + distKm + " srcDepthKm=" + srcDepthKm + " stnDepthKm=" + stnDepthKm);
-        double rr = Math.max(0.0, distKm);
-        double ya = clampDepth(srcDepthKm);
-        double yb = clampDepth(stnDepthKm);
+        final double rr = Math.max(0.0, distKm);
+        final double zs = toModelDepth(clampPhysDepth(srcDepthKm), flattened);
+        final double zr = toModelDepth(clampPhysDepth(stnDepthKm), flattened);
+        final int jsrc = layerOf(zs);
+        final int jstn = layerOf(zr);
+        final double vSrc = vel(jsrc, zs);
+        final double vStn = vel(jstn, zr);
+        final boolean srcDeeper = zs >= zr;
+        final double zSh = Math.min(zs, zr);
+        final double zDp = Math.max(zs, zr);
+        final int js = srcDeeper ? jstn : jsrc;
+        final int jd = srcDeeper ? jsrc : jstn;
+        rayLog("solve rr=" + rr + " zs=" + zs + " zr=" + zr + " js=" + js + " jd=" + jd);
 
-        int l1 = where(Math.max(ya, yb));
-        int l2 = where(Math.min(ya, yb));
-        rayLog("branch ya=" + ya + " yb=" + yb + " l1=" + l1 + " l2=" + l2 + " rr=" + rr);
-        double[] xc = new double[n1 + 2];
-        double[] tac = new double[n1 + 2];
-        rpcod(Math.max(ya, yb), l1, Math.min(ya, yb), l2, xc, tac);
-        if (rayDebug()) {
-            int hi = Math.min(n1, l1 + 4);
-            StringBuilder sb = new StringBuilder("rpcod xc/tac sample i=");
-            for (int ii = l1; ii <= hi; ii++) {
-                sb.append(" [").append(ii).append(" xc=").append(xc[ii]).append(" tacRad=").append(tac[ii]).append("]");
+        // maximum velocity on [zSh, zDp]
+        double mBase = vel(js, zSh);
+        for (int j = js; j < jd; j++) {
+            mBase = Math.max(mBase, Math.max(vBot[j], vTop[j + 1]));
+        }
+        mBase = Math.max(mBase, vel(jd, zDp));
+
+        final Best best = new Best();
+        final double[] acc = new double[2];
+
+        // -------- direct family
+        final double dzDiff = zDp - zSh;
+        if (dzDiff > 1e-9) {
+            double pHi = (1.0 / mBase) * (1.0 - 1e-13);
+            if (rr < 1e-9) {
+                acc[0] = 0;
+                acc[1] = 0;
+                addRange(0.0, js, zSh, jd, zDp, acc);
+                best.offer(acc[1], 0.0, srcDeeper);
+            } else {
+                acc[0] = 0;
+                acc[1] = 0;
+                addRange(pHi, js, zSh, jd, zDp, acc);
+                if (acc[0] >= rr) {
+                    double lo = 0.0;
+                    double hi = pHi;
+                    for (int it = 0; it < 200; it++) {
+                        double mid = 0.5 * (lo + hi);
+                        acc[0] = 0;
+                        acc[1] = 0;
+                        addRange(mid, js, zSh, jd, zDp, acc);
+                        if (acc[0] < rr) {
+                            lo = mid;
+                        } else {
+                            hi = mid;
+                        }
+                        if (hi - lo <= 1e-15 * hi) {
+                            break;
+                        }
+                    }
+                    double p = 0.5 * (lo + hi);
+                    acc[0] = 0;
+                    acc[1] = 0;
+                    addRange(p, js, zSh, jd, zDp, acc);
+                    if (Math.abs(acc[0] - rr) <= 1e-6 * Math.max(1.0, rr)) {
+                        best.offer(acc[1], p, srcDeeper);
+                    }
+                }
             }
-            rayLog(sb.toString());
+        } else if (rr > 0.0) {
+            // same depth: a horizontal path is always a valid (upper-bound) path
+            best.offer(rr / vSrc, 1.0 / vSrc, false);
+        } else {
+            best.offer(0.0, 0.0, false);
         }
 
-        List<Double> cTrv = new ArrayList<>();
-        List<Double> cAng = new ArrayList<>();
-        List<Double> cBng = new ArrayList<>();
-        List<Double> cXres = new ArrayList<>();
-        List<Integer> cLayer = new ArrayList<>();
-
-        for (int i = l1; i <= n1; i++) {
-            int j = i + 1;
-            double t1 = rr - xc[i];
-            double t2 = xc[j] - rr;
-            if (t1 * t2 < 0.0) continue;
-            double x1 = xc[i];
-            double x2 = xc[j];
-            double ta1 = tac[i];
-            double ta2 = tac[j];
-            double x0 = x1;
-            double a0 = 0.0;
-            double ta0 = 0.0;
-            final double eps1 = 1e-8;
-            final int lit1 = 30;
-            for (int k = 0; k < lit1; k++) {
-                double xr = x1 - x2;
-                if (rr > 0.0 && Math.abs(xr / rr) < eps1) {
-                    break;
-                }
-                ta0 = (ta1 + ta2) / 2.0;
-                double[] xa = rxcod(Math.max(ya, yb), l1, Math.min(ya, yb), l2, ta0);
-                x0 = xa[0];
-                a0 = xa[1];
-                double t0 = rr - x0;
-                if (t0 * t1 <= 0.0) {
-                    x2 = x0;
-                    ta2 = ta0;
+        // -------- turning families and head waves
+        if (rr >= 1e-9) {
+            double mRun = mBase;
+            for (int jt = jd; jt < nl; jt++) {
+                double lo;
+                double hi = vBot[jt];
+                if (jt == jd) {
+                    lo = mBase;
                 } else {
-                    x1 = x0;
-                    ta1 = ta0;
+                    mRun = Math.max(mRun, vBot[jt - 1]);
+                    lo = Math.max(mRun, vTop[jt]);
                 }
-            }
-            final double bisectionTa0 = ta0;
-            final double eps2 = 1e-14;
-            final int lit2 = 10;
-            double tag = bisectionTa0;
-            double dt0 = rr <= 0.0 ? Math.abs(rr - x0) : Math.abs((rr - x0) / rr);
-            for (int k = 0; k < lit2; k++) {
-                double dta = (rr - x0) / a0;
-                tag = bisectionTa0 + dta;
-                if (Math.abs(dta) < eps2) {
-                    break;
-                }
-                double[] xa = rxcod(Math.max(ya, yb), l1, Math.min(ya, yb), l2, tag);
-                x0 = xa[0];
-                a0 = xa[1];
-                double dtc = rr <= 0.0 ? Math.abs(rr - x0) : Math.abs((rr - x0) / rr);
-                if (dt0 > dtc) {
-                    if (dtc < eps2) {
-                        break;
+                if (jt > jd && best.t < BIG) {
+                    double bound = 2.0 * (zTop[jt] - zDp) / prefMaxV[jt];
+                    if (bound > best.t) {
+                        continue;
                     }
+                }
+                double dzL = zBot[jt] - zTop[jt];
+                double g = (vBot[jt] - vTop[jt]) / dzL;
+                rayLog("family jt=" + jt + " lo=" + lo + " hi=" + hi + " g=" + g);
+
+                // head wave along a (nearly) constant-velocity layer
+                if (jt > jd && Math.abs(g) < 1e-6 && vTop[jt] > mRun * (1.0 + 1e-12)) {
+                    double p = 1.0 / vTop[jt];
+                    acc[0] = 0;
+                    acc[1] = 0;
+                    addLeg(p, zs, jsrc, jt, vTop[jt], acc);
+                    addLeg(p, zr, jstn, jt, vTop[jt], acc);
+                    if (acc[0] <= rr) {
+                        best.offer(acc[1] + (rr - acc[0]) / vTop[jt], p, false);
+                    }
+                }
+
+                if (!(hi > lo * (1.0 + 1e-12)) || g <= 0.0) {
                     continue;
                 }
-                tag = bisectionTa0;
-                break;
-            }
-            double trvCand = trvel(Math.max(ya, yb), l1, Math.min(ya, yb), l2, tag);
-            if (!Double.isFinite(trvCand) || trvCand <= 0.0) {
-                continue;
-            }
-            double[] xaFit = rxcod(Math.max(ya, yb), l1, Math.min(ya, yb), l2, tag);
-            double xResidualKm = Math.abs(rr - xaFit[0]);
-            double angVal;
-            double bngVal;
-            if (ya >= yb) {
-                angVal = tag;
-                double sang = Math.sin(tag) * vlg[l2] * (Math.min(ya, yb) + v[l2])
-                    / (vlg[l1] * (Math.max(ya, yb) + v[l1]));
-                sang = Math.max(-1.0, Math.min(1.0, sang));
-                bngVal = Math.asin(sang);
-            } else {
-                double sang = Math.sin(tag) * vlg[l2] * (Math.min(ya, yb) + v[l2])
-                    / (vlg[l1] * (Math.max(ya, yb) + v[l1]));
-                sang = Math.max(-1.0, Math.min(1.0, sang));
-                angVal = Math.asin(sang);
-                bngVal = tag;
-            }
-            cTrv.add(trvCand);
-            cAng.add(angVal);
-            cBng.add(bngVal);
-            cXres.add(xResidualKm);
-            cLayer.add(i);
-            if (rayDebug()) {
-                rayLog("candidate layerLoopI=" + i + " tagDeg=" + Math.toDegrees(tag)
-                    + " xResKm=" + xResidualKm + " trv=" + trvCand);
-            }
-        }
-        if (cTrv.isEmpty()) {
-            if (rr <= SHORT_EPICENTRAL_DIST_KM) {
-                if (rayDebug()) {
-                    rayLog("short-range straight-ray fallback (no positive-time candidates) rr=" + rr);
+                // root of X(vt) - rr, vt = lo + (hi - lo) s^2, s in (0, 1]
+                final int ns = 8;
+                double sPrev = 1e-7;
+                double fPrev = turnX(sPrev, lo, hi, zs, jsrc, zr, jstn, jt, acc) - rr;
+                for (int k = 1; k <= ns; k++) {
+                    double sCur = (double) k / ns;
+                    double fCur = turnX(sCur, lo, hi, zs, jsrc, zr, jstn, jt, acc) - rr;
+                    if ((fPrev <= 0.0 && fCur >= 0.0) || (fPrev >= 0.0 && fCur <= 0.0)) {
+                        double a = sPrev;
+                        double b = sCur;
+                        double fa = fPrev;
+                        for (int it = 0; it < 80; it++) {
+                            double m = 0.5 * (a + b);
+                            double fm = turnX(m, lo, hi, zs, jsrc, zr, jstn, jt, acc) - rr;
+                            if ((fa <= 0.0) == (fm <= 0.0)) {
+                                a = m;
+                                fa = fm;
+                            } else {
+                                b = m;
+                            }
+                            if (b - a < 1e-14) {
+                                break;
+                            }
+                        }
+                        double s = 0.5 * (a + b);
+                        double vt = lo + (hi - lo) * s * s;
+                        double p = 1.0 / vt;
+                        acc[0] = 0;
+                        acc[1] = 0;
+                        addLeg(p, zs, jsrc, jt, vt, acc);
+                        addLeg(p, zr, jstn, jt, vt, acc);
+                        if (Math.abs(acc[0] - rr) <= 1e-6 * Math.max(1.0, rr)) {
+                            best.offer(acc[1], p, false);
+                        }
+                    }
+                    sPrev = sCur;
+                    fPrev = fCur;
                 }
-                return approximateRegionalDirectRay(rr, ya, yb);
-            }
-            throw new IllegalStateException("No valid ray path for distance/depth combination.");
-        }
-        double minXResidual = Double.POSITIVE_INFINITY;
-        for (double xr : cXres) {
-            if (Double.isFinite(xr)) {
-                minXResidual = Math.min(minXResidual, xr);
             }
         }
-        if (rr <= SHORT_EPICENTRAL_DIST_KM && shortRangeDistanceRootNotTrusted(rr, minXResidual)) {
-            if (rayDebug()) {
-                rayLog("short-range straight-ray fallback minXResidualKm=" + minXResidual + " rr=" + rr);
-            }
-            return approximateRegionalDirectRay(rr, ya, yb);
+
+        if (!(best.t < BIG)) {
+            throw new IllegalStateException("No valid ray path for distKm=" + distKm + " srcDepthKm="
+                + srcDepthKm + " stnDepthKm=" + stnDepthKm);
         }
-        if (shouldPreferDistanceRoot(rr)) {
-            return pickShortEpicentralBestDistanceRoot(rr, cTrv, cAng, cBng, cLayer, cXres);
+        double p = best.p;
+        double sinTake = Math.min(1.0, p * vSrc);
+        double sinInc = Math.min(1.0, p * vStn);
+        double take;
+        if (best.upgoingDirect && srcDeeper) {
+            take = Math.PI - Math.asin(sinTake);
+        } else {
+            take = Math.asin(sinTake);
         }
-        return pickMinlocPositiveTrv(cTrv, cAng, cBng, cLayer, "min-travel-time");
+        double inc = Math.asin(sinInc);
+        rayLog("solution T=" + best.t + " p=" + p + " takeoff=" + take + " incident=" + inc);
+        return new RaySolution(best.t, take, inc, p);
     }
 
-    /** Optional override for tests / parity harness (default: distance-based pick below {@link #SHORT_EPICENTRAL_DIST_KM}). */
-    private static boolean shouldPreferDistanceRoot(double rrKm) {
-        if (Boolean.getBoolean("xtreloc.raytrace.minlocBranchesOnly")) {
-            return false;
-        }
-        return rrKm <= SHORT_EPICENTRAL_DIST_KM;
-    }
+    // ------------------------------------------------------------------ internals
 
-    /**
-     * Straight ray in a locally uniform medium: path length {@code hypot(Δ, |zs−zr|)} / {@code Vs} at mid-depth.
-     * Angles use {@code atan2(horizontal, |Δz|)} from vertical in a uniform wedge — rough fallback only; same caveat as
-     * {@link RaySolution#takeoffAngleRad} vs spherical TauP angles.
-     */
-    private RaySolution approximateRegionalDirectRay(double epicentralKm, double sourceDepthKm, double stationDepthKm) {
-        double r = Math.max(0.0, epicentralKm);
-        double zs = clampDepth(sourceDepthKm);
-        double zr = clampDepth(stationDepthKm);
-        double dz = zs - zr;
-        double horizDen = Math.abs(dz) < 1e-12 ? 1e-12 : Math.abs(dz);
-        double pathLen = Math.hypot(r, dz);
-        double vs = sourceSVelocity(0.5 * (zs + zr));
-        vs = Math.max(0.5, vs);
-        double t = pathLen / vs;
-        double ang = Math.atan2(r, horizDen);
-        if (!Double.isFinite(ang)) {
-            ang = Math.PI / 4.0;
-        }
-        return new RaySolution(t, ang, ang);
-    }
+    private static final class Best {
+        double t = BIG;
+        double p = 0.0;
+        boolean upgoingDirect = false;
 
-    /**
-     * Regional rays: among branches with crustal direct-S–like travel times, minimize epicentral-distance
-     * residual to epicentral distance, then travel time. Spurious long-path roots often fit {@code rr}
-     * very tightly but sit outside this envelope; excluding them before min-residual avoids picking ~300 s at
-     * ~10 km. If no candidate lies in the envelope, retries without the filter (then minimum-time fallback).
-     */
-    private RaySolution pickShortEpicentralBestDistanceRoot(
-        double rr,
-        List<Double> cTrv,
-        List<Double> cAng,
-        List<Double> cBng,
-        List<Integer> cLayer,
-        List<Double> cXres) {
-        RaySolution inEnvelope = selectShortRangeRootByMinDistanceResidual(
-            rr, cTrv, cAng, cBng, cLayer, cXres, true);
-        if (inEnvelope != null) {
-            return inEnvelope;
-        }
-        RaySolution unconstrained = selectShortRangeRootByMinDistanceResidual(
-            rr, cTrv, cAng, cBng, cLayer, cXres, false);
-        if (unconstrained != null) {
-            return unconstrained;
-        }
-        return pickMinlocPositiveTrv(cTrv, cAng, cBng, cLayer, "min-travel-time-fallback");
-    }
-
-    /**
-     * @param travelTimeEnvelope if true, keep only candidates with {@code rr/10 ≤ trv ≤ rr/2 + 80} (seconds).
-     */
-    private RaySolution selectShortRangeRootByMinDistanceResidual(
-        double rr,
-        List<Double> cTrv,
-        List<Double> cAng,
-        List<Double> cBng,
-        List<Integer> cLayer,
-        List<Double> cXres,
-        boolean travelTimeEnvelope) {
-        final double tLo = rr / 10.0;
-        final double tHi = rr / 2.0 + 80.0;
-        final double tolKm = 1e-4 * Math.max(rr, 1.0) + 1e-6;
-        int bestI = -1;
-        double bestX = Double.POSITIVE_INFINITY;
-        double bestT = Double.POSITIVE_INFINITY;
-        for (int i = 0; i < cTrv.size(); i++) {
-            double t = cTrv.get(i);
-            if (!Double.isFinite(t) || t <= 0.0) {
-                continue;
-            }
-            if (travelTimeEnvelope && (t < tLo || t > tHi)) {
-                continue;
-            }
-            double xr = cXres.get(i);
-            if (xr < bestX - tolKm) {
-                bestX = xr;
-                bestT = t;
-                bestI = i;
-            } else if (Math.abs(xr - bestX) <= tolKm && t < bestT) {
-                bestT = t;
-                bestI = i;
+        void offer(double time, double slowness, boolean upgoing) {
+            rayLog("candidate T=" + time + " p=" + slowness + " up=" + upgoing);
+            if (time >= 0.0 && time < t) {
+                t = time;
+                p = slowness;
+                upgoingDirect = upgoing;
             }
         }
-        if (bestI < 0) {
-            return null;
-        }
-        if (rayDebug()) {
-            rayLog("pick tier=short-range-minXResidual envelope=" + travelTimeEnvelope
-                + " layerLoopI=" + cLayer.get(bestI) + " xResKm=" + cXres.get(bestI) + " bestTimeSec=" + bestT);
-        }
-        return new RaySolution(bestT, cAng.get(bestI), cBng.get(bestI));
     }
 
-    /** Picks the candidate with minimum positive travel time among collected branches. */
-    private RaySolution pickMinlocPositiveTrv(
-        List<Double> cTrv,
-        List<Double> cAng,
-        List<Double> cBng,
-        List<Integer> cLayer,
-        String tierLabel) {
-        int bestI = -1;
-        double bestT = Double.POSITIVE_INFINITY;
-        for (int i = 0; i < cTrv.size(); i++) {
-            double t = cTrv.get(i);
-            if (!Double.isFinite(t) || t <= 0.0) {
-                continue;
-            }
-            if (t < bestT) {
-                bestT = t;
-                bestI = i;
-            }
+    private double clampPhysDepth(double z) {
+        if (Double.isNaN(z)) {
+            return 0.0;
         }
-        if (bestI < 0) {
-            throw new IllegalStateException(
-                "No ray candidate passed plausibility checks (distance roots / takeoff).");
-        }
-        if (rayDebug()) {
-            rayLog("pick tier=" + tierLabel + " layerLoopI=" + cLayer.get(bestI) + " bestTimeSec=" + bestT);
-        }
-        return new RaySolution(bestT, cAng.get(bestI), cBng.get(bestI));
+        return Math.max(0.0, Math.min(z, zMaxPhys - 1e-6));
     }
 
-    /**
-     * Interpolated S velocity at {@code depthKm} (km) for partial derivatives in {@link com.treloc.xtreloc.solver.HypoUtils}.
-     */
-    double sourceSVelocity(double depthKm) {
-        double d = clampDepth(depthKm);
-        int i = where(d);
-        int i0 = Math.max(0, i - 1);
-        double y0 = y[i0];
-        double y1 = y[i];
-        double v0 = vr[i0];
-        double v1 = vr[i];
-        if (y1 <= y0 + 1e-12) {
-            return Math.max(0.01, v1);
-        }
-        double t = (d - y0) / (y1 - y0);
-        return Math.max(0.01, v0 + t * (v1 - v0));
-    }
-
-    private double clampDepth(double dep) {
-        double d = Math.max(0.0, dep);
-        return Math.min(d, y[n1] - 1e-6);
-    }
-
-    private int where(double depth) {
-        for (int i = 1; i <= n1; i++) {
-            if (y[i] >= depth) return i;
-        }
-        return n1;
-    }
-
-    private void rpcod(double y1, int l1, double y2, int l2, double[] xc, double[] tac) {
-        xc[l1] = 0.0;
-        tac[l1] = Math.PI;
-        for (int i = l1; i <= n1; i++) {
-            int j = i + 1;
-            double pp = 1.0 / Math.max(vr[i], EPS_DIV);
-            double yn = y[i];
-            double[] xa = rxinc(0, pp, y1, l1, y2, l2);
-            double[] xb = rxinc(1, pp, yn, i, y1, l1);
-            xc[j] = xa[0] + 2.0 * xb[0];
-            double sc = pp * vlg[l1] * (y1 + v[l1]);
-            sc = Math.max(-1.0, Math.min(1.0, sc));
-            tac[j] = Math.asin(sc);
-        }
-    }
-
-    private double[] rxcod(double y1, int l1, double y2, int l2, double ta) {
-        double p2 = Math.PI / 2.0;
-        double pp = Math.sin(ta) / (vlg[l1] * (y1 + v[l1]));
-        double[] xa = rxinc(0, pp, y1, l1, y2, l2);
-        double x = xa[0];
-        double a = xa[1];
-        if (ta >= p2) {
-            return new double[] { x, -a };
-        }
-        double pn = 1.0 / Math.max(pp, EPS_DIV);
-        int nl = n1;
-        for (int i = 1; i <= n1; i++) {
-            if (vr[i] >= pn) {
-                nl = i;
-                break;
-            }
-        }
-        double yn = pn / vlg[nl] - v[nl];
-        double[] xd = rxinc(1, pp, yn, nl, y1, l1);
-        x += 2.0 * xd[0];
-        a += 2.0 * xd[1];
-        return new double[] { x, a };
-    }
-
-    /** Layer integral for horizontal distance ({@code id==0}) or auxiliary term ({@code id==1}); stabilizes grazing rays by flooring {@code cn}. */
-    private double[] rxinc(int id, double pp, double y1, int l1, double y2, int l2) {
-        double x = 0.0;
-        double a = 0.0;
-        if (y1 == y2) return new double[] { x, a };
-        int k1 = l2 - 1;
-        int lm = (id == 0) ? l1 + 1 : l2 + 1;
-        double[] sn = new double[n1 + 2];
-        double[] cn = new double[n1 + 2];
-        double[] rn = new double[n1 + 2];
-        for (int i = k1; i <= l1; i++) {
-            int j = i + 1;
-            sn[j] = pp * vr[i];
-            if (i == k1) sn[j] = pp * vlg[l2] * (y2 + v[l2]);
-            if (i == l1) sn[j] = pp * vlg[l1] * (y1 + v[l1]);
-            sn[j] = Math.max(-1.0, Math.min(1.0, sn[j]));
-            cn[j] = Math.sqrt(Math.max(0.0, 1.0 - sn[j] * sn[j]));
-            if (cn[j] < 1e-10) {
-                cn[j] = 1e-10;
-            }
-        }
-        for (int i = k1; i <= l1; i++) {
-            int j = i + 1;
-            if ((id == 0 && i == l1) || (id == 1 && i == k1)) {
-                rn[j] = 1.0;
-            } else if (id == 1 && i == l1) {
-                rn[j] = 0.0;
+    /** Layer index containing model depth {@code zm} (upper layer on a boundary). */
+    private int layerOf(double zm) {
+        int lo = 0;
+        int hi = nl - 1;
+        while (lo < hi) {
+            int mid = (lo + hi) >>> 1;
+            if (zBot[mid] >= zm - 1e-12) {
+                hi = mid;
             } else {
-                rn[j] = cn[lm] / cn[j];
+                lo = mid + 1;
             }
         }
-        for (int i = l2; i <= l1; i++) {
-            int j = i + 1;
-            x += (cn[i] - cn[j]) / vlg[i];
-            a += (rn[i] - rn[j]) / vlg[i];
-        }
-        x /= Math.max(pp, EPS_DIV);
-        double snLm = sn[lm];
-        if (Math.abs(snLm) < EPS_DIV) {
-            snLm = snLm >= 0.0 ? EPS_DIV : -EPS_DIV;
-        }
-        a = -a / (Math.max(pp, EPS_DIV) * snLm);
-        return new double[] { x, a };
+        return lo;
     }
 
-    private double trvel(double y1, int l1, double y2, int l2, double ta) {
-        double p2 = Math.PI / 2.0;
-        double pp = Math.sin(ta) / (vlg[l1] * (y1 + v[l1]));
-        double tt = rtinc(pp, y1, l1, y2, l2);
-        if (ta >= p2) {
-            if (rayDebug()) {
-                rayLog("trvel ta>pi/2 branch tt=" + tt + " pp=" + pp);
-            }
-            return tt;
+    private double vel(int j, double zm) {
+        double dz = zBot[j] - zTop[j];
+        double t = (zm - zTop[j]) / dz;
+        if (t < 0.0) {
+            t = 0.0;
+        } else if (t > 1.0) {
+            t = 1.0;
         }
-        double pn = 1.0 / Math.max(pp, EPS_DIV);
-        int nl = n1;
-        for (int i = 1; i <= n1; i++) {
-            if (vr[i] >= pn) {
-                nl = i;
-                break;
-            }
-        }
-        double yn = pn / vlg[nl] - v[nl];
-        double td = rtinc(pp, yn, nl, y1, l1);
-        if (rayDebug()) {
-            rayLog("trvel ta<pi/2 tt=" + tt + " td=" + td + " sum=" + (tt + 2.0 * td) + " pp=" + pp + " nl=" + nl + " yn=" + yn);
-        }
-        return tt + 2.0 * td;
+        return vTop[j] + t * (vBot[j] - vTop[j]);
     }
 
-    /** Travel-time integral across layers; uses the raw {@code cnr} ratio without clamping the denominator. */
-    private double rtinc(double pp, double y1, int l1, double y2, int l2) {
-        double tt = 0.0;
-        if (y1 == y2) {
-            return tt;
+    /** Sum of X and T of a ray with slowness {@code p} between two depths (no turning). */
+    private void addRange(double p, int jA, double zA, int jB, double zB, double[] out) {
+        for (int j = jA; j <= jB; j++) {
+            double za = (j == jA) ? zA : zTop[j];
+            double zb = (j == jB) ? zB : zBot[j];
+            double va = (j == jA) ? vel(j, zA) : vTop[j];
+            double vb = (j == jB) ? vel(j, zB) : vBot[j];
+            addLayer(va, vb, zb - za, p, out);
         }
-        int k1 = l2 - 1;
-        double[] sn = new double[n1 + 2];
-        double[] cn = new double[n1 + 2];
-        for (int i = k1; i <= l1; i++) {
-            int j = i + 1;
-            sn[j] = pp * vr[i];
-            if (i == k1) {
-                sn[j] = pp * vlg[l2] * (y2 + v[l2]);
-            }
-            if (i == l1) {
-                sn[j] = pp * vlg[l1] * (y1 + v[l1]);
-            }
-            sn[j] = Math.max(-1.0, Math.min(1.0, sn[j]));
-            cn[j] = Math.sqrt(Math.max(0.0, 1.0 - sn[j] * sn[j]));
+    }
+
+    /**
+     * Adds the range/time of one leg: from depth {@code zStart} (layer {@code jStart}) down to the turning point
+     * with velocity {@code vt} inside layer {@code jt}.
+     */
+    private void addLeg(double p, double zStart, int jStart, int jt, double vt, double[] out) {
+        for (int j = jStart; j < jt; j++) {
+            double za = (j == jStart) ? zStart : zTop[j];
+            double va = (j == jStart) ? vel(j, zStart) : vTop[j];
+            addLayer(va, vBot[j], zBot[j] - za, p, out);
         }
-        int layerLog = 0;
-        final int maxLayerLog = 18;
-        for (int i = l2; i <= l1; i++) {
-            int j = i + 1;
-            double num = (1.0 - cn[j]) * (1.0 + cn[i]);
-            double den = (1.0 + cn[j]) * (1.0 - cn[i]);
-            double cnr = num / den;
-            double term = Math.log(cnr) / (2.0 * vlg[i]);
-            tt += term;
-            if (rayDebug() && layerLog < maxLayerLog) {
-                rayLog("rtinc layer i=" + i + " cnr=" + cnr + " vlg[i]=" + vlg[i] + " term=" + term + " ttAcc=" + tt);
-                layerLog++;
-            }
+        double va = (jt == jStart) ? vel(jt, zStart) : vTop[jt];
+        if (vt > va) {
+            double g = (vBot[jt] - vTop[jt]) / (zBot[jt] - zTop[jt]);
+            addLayer(va, vt, (vt - va) / g, p, true, out);
         }
-        if (rayDebug()) {
-            rayLog("rtinc done pp=" + pp + " y1=" + y1 + " l1=" + l1 + " y2=" + y2 + " l2=" + l2 + " ttSum=" + tt);
+    }
+
+    private double turnX(double s, double lo, double hi, double zs, int jsrc, double zr, int jstn, int jt,
+                         double[] acc) {
+        double vt = lo + (hi - lo) * s * s;
+        double p = 1.0 / vt;
+        acc[0] = 0;
+        acc[1] = 0;
+        addLeg(p, zs, jsrc, jt, vt, acc);
+        addLeg(p, zr, jstn, jt, vt, acc);
+        return acc[0];
+    }
+
+    /**
+     * Adds range and time of a ray with slowness {@code p} crossing a constant-gradient layer from velocity
+     * {@code va} to {@code vb} over depth {@code dz} (the ray must satisfy {@code p v <= 1}).
+     */
+    private static void addLayer(double va, double vb, double dz, double p, double[] out) {
+        addLayer(va, vb, dz, p, false, out);
+    }
+
+    /**
+     * @param turningEnd if true, {@code vb = 1/p} is the turning velocity and its cosine is set to exactly zero
+     *                   (avoids rounding noise of order sqrt(eps) in {@code 1 - p^2 vb^2})
+     */
+    private static void addLayer(double va, double vb, double dz, double p, boolean turningEnd, double[] out) {
+        if (dz <= 0.0) {
+            return;
         }
-        return tt;
+        double ca = Math.sqrt(Math.max(0.0, 1.0 - p * p * va * va));
+        double cb = turningEnd ? 0.0 : Math.sqrt(Math.max(0.0, 1.0 - p * p * vb * vb));
+        double csum = ca + cb;
+        if (csum < 1e-14) {
+            out[0] += BIG;
+            out[1] += BIG;
+            return;
+        }
+        double x = p * dz * (va + vb) / csum;
+        double dv = vb - va;
+        double t;
+        if (Math.abs(dv) <= 1e-9 * Math.max(va, vb)) {
+            t = dz / (0.25 * (va + vb) * csum);
+        } else {
+            double l1 = Math.log1p(dv / va);
+            double l2 = Math.log1p((p * p * (vb * vb - va * va) / csum) / (1.0 + cb));
+            t = dz * (l1 + l2) / dv;
+        }
+        out[0] += x;
+        out[1] += t;
     }
 }

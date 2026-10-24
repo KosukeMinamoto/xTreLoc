@@ -2,11 +2,10 @@ package com.treloc.xtreloc.app.gui.view;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.treloc.xtreloc.io.AppConfig;
-import com.treloc.xtreloc.io.ModeConfigResolver;
-import com.treloc.xtreloc.io.VelocityModelCatalog;
 import com.treloc.xtreloc.util.ExecutionFailureReporter;
 import com.treloc.xtreloc.util.JsonMapperHolder;
 import com.treloc.xtreloc.solver.HypoGridSearch;
+import com.treloc.xtreloc.solver.HypoUtils;
 import com.treloc.xtreloc.solver.HypoStationPairDiff;
 import com.treloc.xtreloc.solver.SyntheticTest;
 import com.treloc.xtreloc.solver.ConvergenceCallback;
@@ -15,6 +14,7 @@ import com.treloc.xtreloc.util.ModeNameMapper;
 import com.treloc.xtreloc.util.CatalogFileNameGenerator;
 import com.treloc.xtreloc.util.SolverLogger;
 import com.treloc.xtreloc.app.gui.util.AppPanelStyle;
+import com.treloc.xtreloc.app.gui.util.SharedFileManager;
 import com.treloc.xtreloc.app.gui.util.BundledImageLoader;
 import com.treloc.xtreloc.app.gui.util.SolverBatchSummary;
 import com.treloc.xtreloc.solver.SolverRunMetrics;
@@ -64,6 +64,10 @@ import java.util.logging.Logger;
  */
 public class HypocenterLocationPanel extends JPanel {
     private static final Logger logger = Logger.getLogger(HypocenterLocationPanel.class.getName());
+    /** Cap execution-log document size to keep EDT responsive in long runs. */
+    private static final int MAX_EXEC_LOG_CHARS = 250_000;
+    /** When trimming log, keep this many trailing chars. */
+    private static final int EXEC_LOG_TRIM_TO_CHARS = 200_000;
 
     private static final Color CONVERGENCE_DOCK_BG = new Color(20, 20, 30);
     
@@ -77,14 +81,21 @@ public class HypocenterLocationPanel extends JPanel {
     private JComboBox<String> modeCombo;
     private JComboBox<String> taupModelCombo;
     private JLabel taupModelLabel;
+    private static final String USE_VELOCITY_MODEL = "Use velocity model (no table)";
+    private static final String SELECT_TT_FILE = "Select from file...";
+    private String velocityModelRef = "";
+    private boolean updatingTaupCombo;
     private JLabel targetDirLabel;
     private JTextField totalGridsField;
     private JTextField numFocusField;
+    private JTextField rangeSigmaField;
+    private JTextField depthSeedsField;
     private JTextField numJobsField;
     private JTextField thresholdField;
+    private JTextField pWeightField;
+    private JTextField minDataCountField;
     private JTextField hypBottomField;
     private JTextField stationFileField;
-    private JButton selectStationButton;
     private JTextField outputDirField;
     private JButton selectOutputDirButton;
     private JTextField outputFileField;
@@ -96,6 +107,9 @@ public class HypocenterLocationPanel extends JPanel {
     private JLabel configExportLabel;
     private JButton executeButton;
     private JButton cancelButton;
+    private JProgressBar executeProgressBar;
+    /** Execute / Cancel strip: outside the left column scroll (same idea as Trace processing). */
+    private JPanel solverLeftExecuteBarPanel;
     private JTextField importJsonFileField;
     private JButton selectImportJsonButton;
     private JButton importJsonButton;
@@ -191,8 +205,8 @@ public class HypocenterLocationPanel extends JPanel {
         });
         
         sharedManager.addTaupFileListener(file -> {
-            if (file != null && taupModelCombo != null) {
-                taupModelCombo.setSelectedItem(file);
+            if (file != null) {
+                applyTaupSelection(file);
             }
         });
     }
@@ -210,15 +224,6 @@ public class HypocenterLocationPanel extends JPanel {
      */
     public String getSolverModeAbbreviation() {
         return getSelectedModeAbbreviation();
-    }
-
-    /**
-     * Notified after the mode combo selection changes (same EDT).
-     */
-    public void addSolverModeChangeListener(Runnable listener) {
-        if (listener != null) {
-            solverModeChangeListeners.add(listener);
-        }
     }
 
     private void fireSolverModeChangeListeners() {
@@ -244,14 +249,14 @@ public class HypocenterLocationPanel extends JPanel {
         final int maxWidth = Short.MAX_VALUE;
         
         JPanel modePanel = createModePanel();
-        modePanel.setPreferredSize(new Dimension(PANEL_WIDTH, 70));
-        modePanel.setMaximumSize(new Dimension(maxWidth, 70));
+        modePanel.setPreferredSize(new Dimension(PANEL_WIDTH, 110));
+        modePanel.setMaximumSize(new Dimension(maxWidth, 110));
         leftPanel.add(modePanel);
         leftPanel.add(Box.createVerticalStrut(5));
         
         inputDataPanel = createInputDataPanel();
-        inputDataPanel.setPreferredSize(new Dimension(PANEL_WIDTH, 300));
-        inputDataPanel.setMaximumSize(new Dimension(maxWidth, 300));
+        inputDataPanel.setPreferredSize(new Dimension(PANEL_WIDTH, 185));
+        inputDataPanel.setMaximumSize(new Dimension(maxWidth, 185));
         leftPanel.add(inputDataPanel);
         leftPanel.add(Box.createVerticalStrut(5));
         
@@ -265,12 +270,11 @@ public class HypocenterLocationPanel extends JPanel {
         outputPanel.setPreferredSize(new Dimension(PANEL_WIDTH, 180));
         outputPanel.setMaximumSize(new Dimension(maxWidth, 180));
         leftPanel.add(outputPanel);
-        leftPanel.add(Box.createVerticalStrut(5));
-        
-        JPanel buttonPanel = createButtonPanel();
-        leftPanel.add(buttonPanel);
-        
+
+        solverLeftExecuteBarPanel = createButtonPanel();
+
         AppPanelStyle.applyThemeTo(leftPanel);
+        AppPanelStyle.applyThemeTo(solverLeftExecuteBarPanel);
         
         logPanel = createLogPanel();
         
@@ -325,9 +329,24 @@ public class HypocenterLocationPanel extends JPanel {
         solverConvergenceHostPanel.add(convergenceLogPanel, BorderLayout.CENTER);
         
         loadLogHistory();
+
+        com.treloc.xtreloc.app.gui.util.SharedFileManager.getInstance().addGeometryListener(() -> {
+            double d = com.treloc.xtreloc.app.gui.util.SharedFileManager.getInstance().getGeometry().maxDepthKm;
+            if (hypBottomField != null) {
+                hypBottomField.setText(String.valueOf(d));
+            }
+            refreshModelSummary();
+            updateExecuteButtonState();
+        });
+        com.treloc.xtreloc.app.gui.util.SharedFileManager.getInstance().addTaupFileListener(f -> {
+            refreshModelSummary();
+            updateExecuteButtonState();
+        });
         
         updateParameterFields();
         updateExecuteButtonState();
+        refreshModelSummary();
+        SharedFileManager.getInstance().addComputationBusyListener(this::setInputsLocked);
         
         if (modeCombo != null && residualPlotPanel != null) {
             String initialMode = getSelectedModeAbbreviation();
@@ -342,7 +361,15 @@ public class HypocenterLocationPanel extends JPanel {
         JScrollPane scrollPane = new JScrollPane(leftPanel);
         scrollPane.setBorder(null);
         scrollPane.setVerticalScrollBarPolicy(JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED);
-        return scrollPane;
+        scrollPane.getViewport().setBackground(AppPanelStyle.getPanelBg());
+        AppPanelStyle.styleScrollPane(scrollPane);
+        JPanel wrap = new JPanel(new BorderLayout());
+        AppPanelStyle.setPanelBackground(wrap);
+        wrap.add(scrollPane, BorderLayout.CENTER);
+        if (solverLeftExecuteBarPanel != null) {
+            wrap.add(solverLeftExecuteBarPanel, BorderLayout.SOUTH);
+        }
+        return wrap;
     }
     
     public JPanel getLogPanel() {
@@ -351,6 +378,10 @@ public class HypocenterLocationPanel extends JPanel {
     
     public JPanel getConvergenceDockPanel() {
         return solverConvergenceHostPanel;
+    }
+
+    public ResidualPlotPanel getResidualPlotPanel() {
+        return residualPlotPanel;
     }
     
     private void updateLayoutForMode(String mode) {
@@ -375,44 +406,9 @@ public class HypocenterLocationPanel extends JPanel {
         }
     }
 
-    /**
-     * Per-iteration residual/sample lines are not copied to the Execution log (they explode volume for GRD/MCMC/DE).
-     * Charts still update live when the convergence panel is visible; runs end with a {@link SolverBatchSummary} TSV block.
-     */
-    private boolean shouldStreamConvergenceToExecutionLog() {
-        return false;
-    }
-
     private void updateConvergenceLogForMode(String mode) {
-        if (convergenceLogPanel == null) {
-            return;
-        }
-
-        boolean isSynMode = "SYN".equals(mode);
-
-        if (isSynMode) {
-            convergenceLogPanel.setMinimumSize(new Dimension(0, 0));
-            convergenceLogPanel.setVisible(false);
-            if (solverConvergenceHostPanel != null) {
-                solverConvergenceHostPanel.setVisible(false);
-            }
-        } else {
-            if (solverConvergenceHostPanel != null) {
-                solverConvergenceHostPanel.setVisible(true);
-            }
-            convergenceLogPanel.setVisible(true);
-            convergenceLogPanel.setMinimumSize(new Dimension(200, 150));
-            if (residualPlotPanel != null) {
-                residualPlotPanel.setMode(mode);
-            }
-            showConvergenceCard("PLOT_ONLY");
-        }
-
-        convergenceLogPanel.revalidate();
-        convergenceLogPanel.repaint();
-        if (solverConvergenceHostPanel != null) {
-            solverConvergenceHostPanel.revalidate();
-            solverConvergenceHostPanel.repaint();
+        if (residualPlotPanel != null && mode != null && !"SYN".equals(mode)) {
+            residualPlotPanel.setMode(mode);
         }
     }
     
@@ -527,51 +523,6 @@ public class HypocenterLocationPanel extends JPanel {
         gbc.fill = GridBagConstraints.HORIZONTAL;
         
         gbc.gridx = 0; gbc.gridy = 0;
-        panel.add(new JLabel("Import (Json):"), gbc);
-        gbc.gridx = 1;
-        gbc.weightx = 1.0;
-        importJsonFileField = new JTextField();
-        importJsonFileField.setEditable(true);
-        importJsonFileField.setHorizontalAlignment(JTextField.LEFT);
-        AppPanelStyle.styleTextField(importJsonFileField);
-        selectImportJsonButton = new JButton();
-        try {
-            Icon fileIcon = UIManager.getIcon("FileView.fileIcon");
-            if (fileIcon != null) {
-                selectImportJsonButton.setIcon(fileIcon);
-            } else {
-                selectImportJsonButton.setText("📄");
-            }
-        } catch (Exception e) {
-            selectImportJsonButton.setText("📄");
-        }
-        selectImportJsonButton.setToolTipText("Select config file (JSON)");
-        AppPanelStyle.stylePrimaryButton(selectImportJsonButton);
-        selectImportJsonButton.addActionListener(e -> selectImportJsonFile());
-        importJsonButton = new JButton();
-        ImageIcon applyIcon = BundledImageLoader.loadImageIcon("Check.png");
-        if (applyIcon != null && applyIcon.getIconWidth() > 0) {
-            Image scaled = applyIcon.getImage().getScaledInstance(16, 16, Image.SCALE_SMOOTH);
-            importJsonButton.setIcon(new ImageIcon(scaled));
-            importJsonButton.setText(null);
-        } else {
-            importJsonButton.setText("Load");
-            importJsonButton.setFont(UiFonts.uiBold(12f));
-        }
-        importJsonButton.setToolTipText("Apply configuration from JSON");
-        importJsonButton.setPreferredSize(new Dimension(28, 26));
-        AppPanelStyle.stylePrimaryButton(importJsonButton);
-        importJsonButton.addActionListener(e -> importConfigFromJson());
-        JPanel importJsonPanel = new JPanel(new BorderLayout());
-        importJsonPanel.add(selectImportJsonButton, BorderLayout.WEST);
-        importJsonPanel.add(importJsonFileField, BorderLayout.CENTER);
-        JPanel importJsonEast = new JPanel(new FlowLayout(FlowLayout.LEADING, 2, 0));
-        importJsonEast.add(importJsonButton);
-        importJsonPanel.add(importJsonEast, BorderLayout.EAST);
-        panel.add(importJsonPanel, gbc);
-        gbc.weightx = 0.0;
-        
-        gbc.gridx = 0; gbc.gridy = 1;
         targetDirLabel = new JLabel("Directory:");
         panel.add(targetDirLabel, gbc);
         gbc.gridx = 1;
@@ -608,7 +559,7 @@ public class HypocenterLocationPanel extends JPanel {
         panel.add(dirPanel, gbc);
         gbc.weightx = 0.0;
         
-        gbc.gridx = 0; gbc.gridy = 2;
+        gbc.gridx = 0; gbc.gridy = 1;
         catalogFileLabel = new JLabel("Catalog File:");
         panel.add(catalogFileLabel, gbc);
         gbc.gridx = 1;
@@ -644,70 +595,87 @@ public class HypocenterLocationPanel extends JPanel {
         panel.add(catalogPanel, gbc);
         gbc.weightx = 0.0;
         
-        gbc.gridx = 0; gbc.gridy = 3;
-        panel.add(new JLabel("Station File:"), gbc);
-        gbc.gridx = 1;
-        gbc.weightx = 1.0;
+        // Hidden: kept in sync with the Model tab (SharedFileManager) for config import / per-mode cache.
         stationFileField = new JTextField();
-        stationFileField.setEditable(true);
-        stationFileField.setHorizontalAlignment(JTextField.LEFT);
-        AppPanelStyle.styleTextField(stationFileField);
         stationFileField.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
             public void changedUpdate(javax.swing.event.DocumentEvent e) { updateStationFileFromField(); }
             public void removeUpdate(javax.swing.event.DocumentEvent e) { updateStationFileFromField(); }
             public void insertUpdate(javax.swing.event.DocumentEvent e) { updateStationFileFromField(); }
         });
-        selectStationButton = new JButton();
-        try {
-            Icon fileIcon = UIManager.getIcon("FileView.fileIcon");
-            if (fileIcon != null) {
-                selectStationButton.setIcon(fileIcon);
-            } else {
-                selectStationButton.setText("📄");
-            }
-        } catch (Exception e) {
-            selectStationButton.setText("📄");
-        }
-        selectStationButton.setToolTipText("Select station file");
-        AppPanelStyle.stylePrimaryButton(selectStationButton);
-        selectStationButton.addActionListener(e -> selectStationFile());
-        JPanel stationPanel = new JPanel(new BorderLayout());
-        stationPanel.add(selectStationButton, BorderLayout.WEST);
-        stationPanel.add(stationFileField, BorderLayout.CENTER);
-        panel.add(stationPanel, gbc);
-        gbc.weightx = 0.0;
-        
-        gbc.gridx = 0; gbc.gridy = 4;
-        taupModelLabel = new JLabel("Velocity Model:");
-        taupModelLabel.setFont(AppPanelStyle.getLabelFont());
-        taupModelLabel.setForeground(AppPanelStyle.getContentTextColor());
-        panel.add(taupModelLabel, gbc);
-        gbc.gridx = 1;
-        gbc.weightx = 1.0;
-        String[] models = VelocityModelCatalog.comboModels();
-        String[] comboItems = java.util.Arrays.copyOf(models, models.length + 1);
-        comboItems[models.length] = "Select from file...";
-        taupModelCombo = new JComboBox<>(comboItems);
-        taupModelCombo.setSelectedItem(VelocityModelCatalog.DEFAULT_MODEL);
+        DefaultComboBoxModel<String> ttModel = new DefaultComboBoxModel<>();
+        ttModel.addElement(USE_VELOCITY_MODEL);
+        ttModel.addElement(SELECT_TT_FILE);
+        taupModelCombo = new JComboBox<>(ttModel);
+        taupModelCombo.setSelectedItem(USE_VELOCITY_MODEL);
         AppPanelStyle.styleComboBox(taupModelCombo);
         taupModelCombo.addActionListener(e -> {
+            if (updatingTaupCombo) {
+                return;
+            }
             String selected = (String) taupModelCombo.getSelectedItem();
-            if (selected != null) {
-                if ("Select from file...".equals(selected)) {
-                    selectTaupFile();
-                    if (selectedTaupFile != null) {
-                    } else {
-                        taupModelCombo.setSelectedItem(VelocityModelCatalog.DEFAULT_MODEL);
-                    }
-                } else {
-                    com.treloc.xtreloc.app.gui.util.SharedFileManager.getInstance().setTaupFile(selected);
-                }
+            if (SELECT_TT_FILE.equals(selected)) {
+                selectTaupFile();
+            } else if (USE_VELOCITY_MODEL.equals(selected)) {
+                com.treloc.xtreloc.app.gui.util.SharedFileManager.getInstance().setTaupFile(velocityModelRef);
+            } else if (selected != null) {
+                com.treloc.xtreloc.app.gui.util.SharedFileManager.getInstance().setTaupFile(selected);
             }
         });
+        taupModelLabel = new JLabel("Travel time:");
+        taupModelLabel.setFont(AppPanelStyle.getLabelFont());
+        taupModelLabel.setToolTipText("Stations + a velocity model or a travel-time table (one of the two).");
+        taupModelCombo.setToolTipText("Use the Model tab (Build), or load a table (*.time.hdr). Not both.");
+        gbc.gridx = 0; gbc.gridy = 2; gbc.gridwidth = 1; gbc.weightx = 0.0;
+        panel.add(taupModelLabel, gbc);
+        gbc.gridx = 1; gbc.weightx = 1.0;
         panel.add(taupModelCombo, gbc);
         gbc.weightx = 0.0;
-        
+
         return panel;
+    }
+
+    private void applyTaupSelection(String file) {
+        if (taupModelCombo == null || file == null) {
+            return;
+        }
+        updatingTaupCombo = true;
+        try {
+            if (com.treloc.xtreloc.solver.table.TravelTimeTables.isTableSpec(file)) {
+                DefaultComboBoxModel<String> m = (DefaultComboBoxModel<String>) taupModelCombo.getModel();
+                if (m.getIndexOf(file) < 0) {
+                    int last = Math.max(0, m.getSize() - 1);
+                    m.insertElementAt(file, last);
+                }
+                taupModelCombo.setSelectedItem(file);
+            } else if (!file.trim().isEmpty() && !SELECT_TT_FILE.equals(file) && !USE_VELOCITY_MODEL.equals(file)) {
+                velocityModelRef = file;
+                taupModelCombo.setSelectedItem(USE_VELOCITY_MODEL);
+            } else {
+                taupModelCombo.setSelectedItem(USE_VELOCITY_MODEL);
+            }
+        } finally {
+            updatingTaupCombo = false;
+        }
+    }
+
+    private void refreshModelSummary() {
+        // stations / model / depth live on the Model tab
+    }
+
+    private String resolveTaupFile() {
+        String t = com.treloc.xtreloc.app.gui.util.SharedFileManager.getInstance().getTaupFile();
+        if (t != null && !t.trim().isEmpty() && !SELECT_TT_FILE.equals(t) && !USE_VELOCITY_MODEL.equals(t)) {
+            return t.trim();
+        }
+        Object o = taupModelCombo != null ? taupModelCombo.getSelectedItem() : null;
+        if (o == null || SELECT_TT_FILE.equals(o.toString()) || USE_VELOCITY_MODEL.equals(o.toString())) {
+            return velocityModelRef;
+        }
+        return o.toString();
+    }
+
+    private double resolveHypBottom() {
+        return com.treloc.xtreloc.app.gui.util.SharedFileManager.getInstance().getGeometry().maxDepthKm;
     }
     
     private JPanel createOutputPanel() {
@@ -896,13 +864,16 @@ public class HypocenterLocationPanel extends JPanel {
         GridBagConstraints gbc = new GridBagConstraints();
         gbc.insets = new Insets(AppPanelStyle.GAP, AppPanelStyle.GAP + 2, AppPanelStyle.GAP, AppPanelStyle.GAP + 2);
         gbc.anchor = GridBagConstraints.WEST;
+        gbc.fill = GridBagConstraints.HORIZONTAL;
         
         gbc.gridx = 0; gbc.gridy = 0;
+        gbc.weightx = 0;
         JLabel modeLabel = new JLabel("Mode:");
         modeLabel.setFont(AppPanelStyle.getLabelFont());
         modeLabel.setForeground(AppPanelStyle.getContentTextColor());
         panel.add(modeLabel, gbc);
         gbc.gridx = 1;
+        gbc.weightx = 1.0;
         modeCombo = new JComboBox<>(ModeNameMapper.getAllDisplayNames());
         modeCombo.setSelectedItem(ModeNameMapper.getDisplayName("GRD"));
         AppPanelStyle.styleComboBox(modeCombo);
@@ -920,8 +891,64 @@ public class HypocenterLocationPanel extends JPanel {
             fireSolverModeChangeListeners();
         });
         panel.add(modeCombo, gbc);
+
+        gbc.gridx = 0; gbc.gridy = 1;
+        gbc.weightx = 0;
+        JLabel presetLabel = new JLabel("Preset (if any):");
+        presetLabel.setFont(AppPanelStyle.getLabelFont());
+        presetLabel.setForeground(AppPanelStyle.getContentTextColor());
+        presetLabel.setToolTipText("Optional parameter preset for the selected mode. Leave empty to use the fields below.");
+        panel.add(presetLabel, gbc);
+        gbc.gridx = 1;
+        gbc.weightx = 1.0;
+        panel.add(createPresetPicker(), gbc);
         
         return panel;
+    }
+
+    private JPanel createPresetPicker() {
+        importJsonFileField = new JTextField();
+        importJsonFileField.setEditable(true);
+        importJsonFileField.setHorizontalAlignment(JTextField.LEFT);
+        AppPanelStyle.styleTextField(importJsonFileField);
+        importJsonFileField.setToolTipText("Optional JSON preset for this mode (params and I/O). Not required.");
+        selectImportJsonButton = new JButton();
+        try {
+            Icon fileIcon = UIManager.getIcon("FileView.fileIcon");
+            if (fileIcon != null) {
+                selectImportJsonButton.setIcon(fileIcon);
+            } else {
+                selectImportJsonButton.setText("📄");
+            }
+        } catch (Exception e) {
+            selectImportJsonButton.setText("📄");
+        }
+        selectImportJsonButton.setToolTipText("Select parameter preset (JSON)");
+        AppPanelStyle.stylePrimaryButton(selectImportJsonButton);
+        selectImportJsonButton.addActionListener(e -> selectImportJsonFile());
+        importJsonButton = new JButton();
+        ImageIcon applyIcon = BundledImageLoader.loadImageIcon("Check.png");
+        if (applyIcon != null && applyIcon.getIconWidth() > 0) {
+            Image scaled = applyIcon.getImage().getScaledInstance(16, 16, Image.SCALE_SMOOTH);
+            importJsonButton.setIcon(new ImageIcon(scaled));
+            importJsonButton.setText(null);
+        } else {
+            importJsonButton.setText("Load");
+            importJsonButton.setFont(UiFonts.uiBold(12f));
+        }
+        importJsonButton.setToolTipText("Apply this preset to the selected mode only");
+        importJsonButton.setPreferredSize(new Dimension(28, 26));
+        AppPanelStyle.stylePrimaryButton(importJsonButton);
+        importJsonButton.addActionListener(e -> importConfigFromJson());
+        JPanel importJsonPanel = new JPanel(new BorderLayout());
+        importJsonPanel.setBackground(AppPanelStyle.getPanelBg());
+        importJsonPanel.add(selectImportJsonButton, BorderLayout.WEST);
+        importJsonPanel.add(importJsonFileField, BorderLayout.CENTER);
+        JPanel importJsonEast = new JPanel(new FlowLayout(FlowLayout.LEADING, 2, 0));
+        importJsonEast.setBackground(AppPanelStyle.getPanelBg());
+        importJsonEast.add(importJsonButton);
+        importJsonPanel.add(importJsonEast, BorderLayout.EAST);
+        return importJsonPanel;
     }
     
     private JPanel createParameterPanel() {
@@ -998,8 +1025,12 @@ public class HypocenterLocationPanel extends JPanel {
         
         totalGridsField = new JTextField("300", 10);
         numFocusField = new JTextField("3", 10);
+        rangeSigmaField = new JTextField("2.0", 10);
+        depthSeedsField = new JTextField("1,5,10", 10);
         numJobsField = new JTextField("4", 10);
         thresholdField = new JTextField("0.0", 10);
+        pWeightField = new JTextField("2.0", 10);
+        minDataCountField = new JTextField("0", 10);
         hypBottomField = new JTextField("100.0", 10);
         
         randomSeedField = new JTextField("100", 10);
@@ -1027,6 +1058,7 @@ public class HypocenterLocationPanel extends JPanel {
         
         trdIterNumField = new JTextField("10,10", 10);
         trdDistKmField = new JTextField("50,20", 10);
+        trdDistKmField.setToolTipText("Event-pair distance thresholds in km. Fractions are allowed (e.g. 0.5,20).");
         trdDampFactField = new JTextField("0,1", 10);
         trdMaxTripleDiffCountField = new JTextField("", 10);
         trdMaxTripleDiffCountField.setToolTipText("Per cluster; empty = no limit. TRD uses triple-diff data with smallest residual first.");
@@ -1058,8 +1090,10 @@ public class HypocenterLocationPanel extends JPanel {
     }
     
     private JPanel createButtonPanel() {
-        JPanel panel = new JPanel(new FlowLayout(FlowLayout.CENTER, 15, 10));
+        JPanel panel = new JPanel(new BorderLayout());
         AppPanelStyle.setPanelBackground(panel);
+        JPanel buttonRow = new JPanel(new FlowLayout(FlowLayout.CENTER, 15, 10));
+        AppPanelStyle.setPanelBackground(buttonRow);
         
         executeButton = new JButton("▶ Execute");
         executeButton.setEnabled(false);
@@ -1067,7 +1101,7 @@ public class HypocenterLocationPanel extends JPanel {
         executeButton.setPreferredSize(new Dimension(120, 35));
         AppPanelStyle.styleSuccessButton(executeButton);
         executeButton.addActionListener(e -> executeLocation());
-        panel.add(executeButton);
+        buttonRow.add(executeButton);
         
         cancelButton = new JButton("⏹ Cancel");
         cancelButton.setEnabled(false);
@@ -1079,8 +1113,21 @@ public class HypocenterLocationPanel extends JPanel {
         cancelButton.setBorderPainted(false);
         cancelButton.setOpaque(true);
         cancelButton.addActionListener(e -> cancelExecution());
-        panel.add(cancelButton);
-        
+        buttonRow.add(cancelButton);
+
+        // Progress bar is intentionally disabled for now.
+        // executeProgressBar = new JProgressBar();
+        // executeProgressBar.setVisible(false);
+        // executeProgressBar.setStringPainted(true);
+        // executeProgressBar.setString("");
+        // executeProgressBar.setPreferredSize(new Dimension(280, 16));
+        // JPanel progressRow = new JPanel(new FlowLayout(FlowLayout.CENTER, 8, 0));
+        // AppPanelStyle.setPanelBackground(progressRow);
+        // progressRow.add(executeProgressBar);
+
+        panel.add(buttonRow, BorderLayout.NORTH);
+        // panel.add(progressRow, BorderLayout.SOUTH);
+
         return panel;
     }
     
@@ -1167,120 +1214,57 @@ public class HypocenterLocationPanel extends JPanel {
         if (convergenceLogPanel == null) {
             return;
         }
-        if (visible) {
-            showConvergenceCard("PLOT_ONLY");
-            convergenceLogPanel.setMinimumSize(new Dimension(200, 150));
+        showConvergenceCard(visible ? "PLOT_ONLY" : "MESSAGE");
+    }
+
+    private boolean isConvergenceChartEnabled() {
+        return showConvergenceLogCheckBox != null && showConvergenceLogCheckBox.isSelected();
+    }
+
+    private void offerResidual(int iteration, double residual) {
+        if (!isConvergenceChartEnabled() || residualPlotPanel == null) {
+            return;
+        }
+        String eventName = getCurrentEventName();
+        if (eventName != null) {
+            residualPlotPanel.addResidualPoint(eventName, iteration, residual);
         } else {
-            showConvergenceCard("MESSAGE");
-            convergenceLogPanel.setMinimumSize(new Dimension(0, 0));
+            residualPlotPanel.addResidualPoint(iteration, residual);
         }
-        convergenceLogPanel.setVisible(visible);
-        if (solverConvergenceHostPanel != null) {
-            solverConvergenceHostPanel.setVisible(visible);
-            solverConvergenceHostPanel.revalidate();
-            solverConvergenceHostPanel.repaint();
-        }
-        convergenceLogPanel.revalidate();
-        convergenceLogPanel.repaint();
     }
     
     private void setupConvergenceCallback() {
         convergenceCallback = new ConvergenceCallback() {
             @Override
             public void onResidualUpdate(int iteration, double residual) {
-                String eventName = getCurrentEventName();
-                
-                if (residualPlotPanel != null && residualPlotPanel.isVisible()) {
-                    if (eventName != null) {
-                        residualPlotPanel.addResidualPoint(eventName, iteration, residual);
-                    } else {
-                        residualPlotPanel.addResidualPoint(iteration, residual);
-                    }
-                }
-                
-                if (convergenceLogPanel != null && convergenceLogPanel.isVisible()
-                    && shouldStreamConvergenceToExecutionLog()) {
-                    String logMessage = String.format("Iteration %d: Residual = %.6f s", iteration, residual);
-                    if (eventName != null) {
-                        logMessage = String.format("[%s] %s", eventName, logMessage);
-                    }
-                    appendConvergenceLog(logMessage);
-                }
+                offerResidual(iteration, residual);
             }
             
             @Override
             public void onLikelihoodUpdate(int sample, double logLikelihood) {
-                String eventName = getCurrentEventName();
-                
-                if (residualPlotPanel != null && residualPlotPanel.isVisible()) {
-                    if (eventName != null) {
-                        residualPlotPanel.addLikelihoodPoint(eventName, sample, logLikelihood);
-                    } else {
-                        residualPlotPanel.addLikelihoodPoint(sample, logLikelihood);
-                    }
+                if (!isConvergenceChartEnabled() || residualPlotPanel == null) {
+                    return;
                 }
-                
-                if (convergenceLogPanel != null && convergenceLogPanel.isVisible()
-                    && shouldStreamConvergenceToExecutionLog()) {
-                    String logMessage = String.format("Sample %d: Log-Likelihood = %.4f", sample, logLikelihood);
-                    if (eventName != null) {
-                        logMessage = String.format("[%s] %s", eventName, logMessage);
-                    }
-                    appendConvergenceLog(logMessage);
+                String eventName = getCurrentEventName();
+                if (eventName != null) {
+                    residualPlotPanel.addLikelihoodPoint(eventName, sample, logLikelihood);
+                } else {
+                    residualPlotPanel.addLikelihoodPoint(sample, logLikelihood);
                 }
             }
             
             @Override
             public void onClusterResidualUpdate(int clusterId, int iteration, double residual) {
-                String eventName = getCurrentEventName();
-                String clusterEventName = "Cluster " + clusterId;
-                
-                if (residualPlotPanel != null && residualPlotPanel.isVisible()) {
-                    residualPlotPanel.addResidualPoint(clusterEventName, iteration, residual);
+                if (!isConvergenceChartEnabled() || residualPlotPanel == null) {
+                    return;
                 }
-                
-                if (convergenceLogPanel != null && convergenceLogPanel.isVisible()
-                    && shouldStreamConvergenceToExecutionLog()) {
-                    String logMessage = String.format(
-                        "Cluster %d, LSQR step %d (cumulative over TRD stages): Residual = %.6f s",
-                        clusterId, iteration + 1, residual);
-                    if (eventName != null) {
-                        logMessage = String.format("[%s] %s", eventName, logMessage);
-                    }
-                    appendConvergenceLog(logMessage);
-                }
+                residualPlotPanel.addResidualPoint("Cluster " + clusterId, iteration, residual);
             }
             
             @Override
             public void onIterationUpdate(int iteration, int evaluations, double residual, 
                                          double[] parameterChanges) {
-                String eventName = getCurrentEventName();
-                
-                if (residualPlotPanel != null && residualPlotPanel.isVisible()) {
-                    if (eventName != null) {
-                        residualPlotPanel.addResidualPoint(eventName, iteration, residual);
-                    } else {
-                        residualPlotPanel.addResidualPoint(iteration, residual);
-                    }
-                }
-                
-                if (convergenceLogPanel != null && convergenceLogPanel.isVisible()
-                    && shouldStreamConvergenceToExecutionLog()) {
-                    String logMessage;
-                    if (parameterChanges != null && parameterChanges.length >= 3) {
-                        logMessage = String.format(
-                            "Iteration %d (Eval: %d): Residual = %.6f s, Δ(lon,lat,dep) = (%.6f°, %.6f°, %.3f km)",
-                            iteration, evaluations, residual,
-                            parameterChanges[0], parameterChanges[1], parameterChanges[2]);
-                    } else {
-                        logMessage = String.format("Iteration %d (Eval: %d): Residual = %.6f s",
-                            iteration, evaluations, residual);
-                    }
-                    if (eventName != null) {
-                        logMessage = String.format("[%s] %s", eventName, logMessage);
-                    }
-                    appendConvergenceLog(logMessage);
-                }
+                offerResidual(iteration, residual);
             }
         };
     }
@@ -1302,6 +1286,13 @@ public class HypocenterLocationPanel extends JPanel {
      * 
      * @return mode abbreviation (e.g., "LMO"), or "GRD" as default
      */
+    private static String formatKmListValue(double v) {
+        if (Double.isFinite(v) && v == Math.rint(v) && Math.abs(v) < 1e12) {
+            return Long.toString((long) Math.rint(v));
+        }
+        return java.math.BigDecimal.valueOf(v).stripTrailingZeros().toPlainString();
+    }
+
     private String getSelectedModeAbbreviation() {
         if (modeCombo == null) {
             return "GRD";
@@ -1352,38 +1343,6 @@ public class HypocenterLocationPanel extends JPanel {
         }
     }
     
-    private void selectStationFile() {
-        fileChooser.setDialogTitle("Select Station File");
-        fileChooser.setFileSelectionMode(JFileChooser.FILES_ONLY);
-        fileChooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter(
-            "Station files (*.tbl)", "tbl"));
-        
-        com.treloc.xtreloc.app.gui.util.FileChooserHelper.setDefaultDirectory(fileChooser);
-        
-        String currentPath = stationFileField.getText().trim();
-        if (!currentPath.isEmpty()) {
-            File currentFile = new File(currentPath);
-            if (currentFile.exists()) {
-                if (currentFile.isFile()) {
-                    fileChooser.setSelectedFile(currentFile);
-                } else {
-                    fileChooser.setCurrentDirectory(currentFile);
-                }
-            }
-        }
-        
-        int result = fileChooser.showOpenDialog(this);
-        
-        if (result == JFileChooser.APPROVE_OPTION) {
-            selectedStationFile = fileChooser.getSelectedFile();
-            stationFileField.setText(selectedStationFile.getAbsolutePath());
-            updateExecuteButtonState();
-            appendLog("Station file selected: " + selectedStationFile.getAbsolutePath());
-            
-            com.treloc.xtreloc.app.gui.util.SharedFileManager.getInstance().setStationFile(selectedStationFile);
-        }
-    }
-    
     private void updateStationFileFromField() {
         String filePath = stationFileField.getText().trim();
         if (!filePath.isEmpty()) {
@@ -1396,40 +1355,35 @@ public class HypocenterLocationPanel extends JPanel {
     }
     
     private void selectTaupFile() {
-        fileChooser.setDialogTitle("Select Velocity Model File");
-        fileChooser.setFileSelectionMode(JFileChooser.FILES_ONLY);
+        fileChooser.setDialogTitle("Select travel-time table (directory or *.time.hdr)");
+        fileChooser.setFileSelectionMode(JFileChooser.FILES_AND_DIRECTORIES);
         fileChooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter(
-            "Velocity model files (*.nd, *.tvel)", "nd", "tvel"));
+            "Travel-time headers (*.time.hdr)", "hdr"));
         fileChooser.setAcceptAllFileFilterUsed(true);
-        
+
         String homeDir = System.getProperty("user.home");
         if (homeDir != null && !homeDir.isEmpty()) {
             fileChooser.setCurrentDirectory(new File(homeDir));
         }
-        
+
         int result = fileChooser.showOpenDialog(this);
         if (result == JFileChooser.APPROVE_OPTION) {
             selectedTaupFile = fileChooser.getSelectedFile();
             String filePath = selectedTaupFile.getAbsolutePath();
-            
-            DefaultComboBoxModel<String> model = (DefaultComboBoxModel<String>) taupModelCombo.getModel();
-            
-            boolean alreadyExists = false;
-            for (int i = 0; i < model.getSize(); i++) {
-                if (model.getElementAt(i).equals(filePath)) {
-                    alreadyExists = true;
-                    break;
-                }
+            if (!com.treloc.xtreloc.solver.table.TravelTimeTables.isTableSpec(filePath)) {
+                JOptionPane.showMessageDialog(this,
+                    "Not a travel-time table:\n" + filePath
+                        + "\nChoose a directory of NonLinLoc TIME grids (P and S *.time.hdr).",
+                    "Travel-time table", JOptionPane.ERROR_MESSAGE);
+                applyTaupSelection(com.treloc.xtreloc.app.gui.util.SharedFileManager.getInstance().getTaupFile());
+                return;
             }
-            
-            if (!alreadyExists) {
-                model.addElement(filePath);
-            }
-            
-            taupModelCombo.setSelectedItem(filePath);
-            
+            applyTaupSelection(filePath);
             com.treloc.xtreloc.app.gui.util.SharedFileManager.getInstance().setTaupFile(filePath);
-            appendLog("TauP model file selected: " + filePath);
+            appendLog("Travel-time table selected: " + filePath);
+        } else {
+            String cur = com.treloc.xtreloc.app.gui.util.SharedFileManager.getInstance().getTaupFile();
+            applyTaupSelection(cur != null && !cur.isEmpty() ? cur : velocityModelRef);
         }
     }
     
@@ -1706,14 +1660,16 @@ public class HypocenterLocationPanel extends JPanel {
         if (!"SYN".equals(selectedMode)) {
             parameterTableModel.addRow(new Object[]{"Parallelization (numJobs)", numJobsField.getText(), "cluster triple-diff parallel jobs (CLS); file batch jobs (others)"});
             parameterTableModel.addRow(new Object[]{"Weight Threshold (threshold)", thresholdField.getText(), "weight (empty or 0.0 for no filtering)"});
-            if (!"CLS".equals(selectedMode)) {
-                parameterTableModel.addRow(new Object[]{"Maximum Depth (hypBottom)", hypBottomField.getText(), "km"});
-            }
+            parameterTableModel.addRow(new Object[]{"P phase weight (pWeight)", pWeightField.getText(), "relative to S (= 1); combined residual = sqrt(Σ w r² / Σ w). Default 2"});
+            parameterTableModel.addRow(new Object[]{"Minimum Data Count (minDataCount)", minDataCountField.getText(), "after threshold screening; 0 = no minimum"});
         }
         
         if ("GRD".equals(selectedMode)) {
             parameterTableModel.addRow(new Object[]{"Total Grids (totalGrids)", totalGridsField.getText(), ""});
             parameterTableModel.addRow(new Object[]{"Focus Count (numFocus)", numFocusField.getText(), ""});
+            parameterTableModel.addRow(new Object[]{"Range sigma (rangeSigma)", rangeSigmaField.getText(), "half-width = sigma × std of threshold stations. Default 2"});
+            parameterTableModel.addRow(new Object[]{"Depth seeds (depthSeeds)", depthSeedsField.getText(), "km, comma-separated multi-start; pick best residual. Default 1,5,10"});
+            parameterTableModel.addRow(new Object[]{"Show convergence (showConvergenceLog)", showConvergenceLogCheckBox.isSelected() ? "true" : "false", "Show residual chart on the right; run totals only in TSV summary below"});
         } else if ("LMO".equals(selectedMode)) {
             parameterTableModel.addRow(new Object[]{"LM Initial Step Bound (initialStepBoundFactor)", lmInitialStepBoundField.getText(), ""});
             parameterTableModel.addRow(new Object[]{"LM Cost Relative Tolerance (costRelativeTolerance)", lmCostRelativeToleranceField.getText(), ""});
@@ -1724,7 +1680,7 @@ public class HypocenterLocationPanel extends JPanel {
             parameterTableModel.addRow(new Object[]{"Show convergence (showConvergenceLog)", showConvergenceLogCheckBox.isSelected() ? "true" : "false", "Show residual chart on the right; run totals only in TSV summary below"});
         } else if ("TRD".equals(selectedMode)) {
             parameterTableModel.addRow(new Object[]{"Iteration Count (iterNum)", trdIterNumField.getText(), "Comma-separated (e.g., 10,10)"});
-            parameterTableModel.addRow(new Object[]{"Distance Threshold (distKm)", trdDistKmField.getText(), "km, comma-separated (e.g., 50,20)"});
+            parameterTableModel.addRow(new Object[]{"Distance Threshold (distKm)", trdDistKmField.getText(), "km, comma-separated (e.g., 0.5,20)"});
             parameterTableModel.addRow(new Object[]{"Damping Factor (dampFact)", trdDampFactField.getText(), "Comma-separated (e.g., 0,1)"});
             parameterTableModel.addRow(new Object[]{"Max Triple-Diff Count (maxTripleDiffCount)", trdMaxTripleDiffCountField.getText(), "Per cluster; empty = no limit; smallest residual first"});
             parameterTableModel.addRow(new Object[]{"LSQR ATOL (atol)", lsqrAtolField.getText(), "Stopping tolerance (default: 1e-6)"});
@@ -1746,6 +1702,8 @@ public class HypocenterLocationPanel extends JPanel {
             parameterTableModel.addRow(new Object[]{"Max Generations (maxGenerations)", deMaxGenerationsField.getText(), ""});
             parameterTableModel.addRow(new Object[]{"Scaling Factor (scalingFactor)", deScalingFactorField.getText(), "[0-2]"});
             parameterTableModel.addRow(new Object[]{"Crossover Rate (crossoverRate)", deCrossoverRateField.getText(), "[0-1]"});
+            parameterTableModel.addRow(new Object[]{"Range sigma (rangeSigma)", rangeSigmaField.getText(), "half-width = sigma × std of threshold stations. Default 2"});
+            parameterTableModel.addRow(new Object[]{"Depth seeds (depthSeeds)", depthSeedsField.getText(), "km, comma-separated; seed population at each depth. Default 1,5,10"});
             parameterTableModel.addRow(new Object[]{"Show convergence (showConvergenceLog)", showConvergenceLogCheckBox.isSelected() ? "true" : "false", "Show residual chart on the right; run totals only in TSV summary below"});
         } else if ("CLS".equals(selectedMode)) {
             parameterTableModel.addRow(new Object[]{"Minimum Points (minPts)", minPtsField.getText(), ""});
@@ -1822,8 +1780,8 @@ public class HypocenterLocationPanel extends JPanel {
         if (stationFileField != null) cache.put("stationFile", stationFileField.getText() != null ? stationFileField.getText() : "");
         if (catalogFileField != null) cache.put("catalogFile", catalogFileField.getText() != null ? catalogFileField.getText() : "");
         if (taupModelCombo != null) {
-            Object selected = taupModelCombo.getSelectedItem();
-            cache.put("taupFile", selected != null ? selected.toString() : "");
+            String selected = resolveTaupFile();
+            cache.put("taupFile", selected != null ? selected : "");
         }
         if (importJsonFileField != null) {
             String importPath = importJsonFileField.getText() != null ? importJsonFileField.getText() : "";
@@ -1929,7 +1887,8 @@ public class HypocenterLocationPanel extends JPanel {
             configExportField.setText(v);
         }
         if ((v = cache.get("taupFile")) != null && taupModelCombo != null && !v.trim().isEmpty()) {
-            taupModelCombo.setSelectedItem(v);
+            applyTaupSelection(v);
+            com.treloc.xtreloc.app.gui.util.SharedFileManager.getInstance().setTaupFile(v);
         }
         updateParameterFields();
     }
@@ -1946,9 +1905,13 @@ public class HypocenterLocationPanel extends JPanel {
         switch (key) {
             case "numJobs": if (numJobsField != null) numJobsField.setText(value); break;
             case "threshold": if (thresholdField != null) thresholdField.setText(value); break;
+            case "pWeight": if (pWeightField != null) pWeightField.setText(value); break;
+            case "minDataCount": if (minDataCountField != null) minDataCountField.setText(value); break;
             case "hypBottom": if (hypBottomField != null) hypBottomField.setText(value); break;
             case "totalGrids": if (totalGridsField != null) totalGridsField.setText(value); break;
             case "numFocus": if (numFocusField != null) numFocusField.setText(value); break;
+            case "rangeSigma": if (rangeSigmaField != null) rangeSigmaField.setText(value); break;
+            case "depthSeeds": if (depthSeedsField != null) depthSeedsField.setText(value); break;
             case "initialStepBoundFactor": if (lmInitialStepBoundField != null) lmInitialStepBoundField.setText(value); break;
             case "costRelativeTolerance": if (lmCostRelativeToleranceField != null) lmCostRelativeToleranceField.setText(value); break;
             case "parRelativeTolerance": if (lmParRelativeToleranceField != null) lmParRelativeToleranceField.setText(value); break;
@@ -2097,6 +2060,30 @@ public class HypocenterLocationPanel extends JPanel {
                 String[] c = dampFactStr.split(",");
                 if (a.length != b.length || a.length != c.length) {
                     errors.add("TRD: iterNum, distKm, and dampFact must have the same number of comma-separated values.");
+                } else {
+                    for (String tok : b) {
+                        try {
+                            if (Double.parseDouble(tok.trim()) <= 0) {
+                                errors.add("TRD: distKm values must be > 0 (e.g. 0.5,20).");
+                                break;
+                            }
+                        } catch (NumberFormatException e) {
+                            errors.add("TRD: distKm values must be numbers (e.g. 0.5,20).");
+                            break;
+                        }
+                    }
+                }
+            }
+            String pWeightStr = getParameterValue("pWeight");
+            if (pWeightStr == null || pWeightStr.trim().isEmpty()) {
+                errors.add("P phase weight (pWeight) is required.");
+            } else {
+                try {
+                    if (Double.parseDouble(pWeightStr.trim()) < 0) {
+                        errors.add("P phase weight (pWeight) must be >= 0.");
+                    }
+                } catch (NumberFormatException e) {
+                    errors.add("P phase weight (pWeight) must be a number.");
                 }
             }
             return errors;
@@ -2120,15 +2107,41 @@ public class HypocenterLocationPanel extends JPanel {
             }
         }
         if (selectedStationFile == null || !selectedStationFile.exists()) {
-            errors.add("Station file is required. Please select an existing station file.");
+            errors.add("Station file is required. Load it in the Model tab.");
         }
         String thresholdStr = getParameterValue("threshold");
+        String pWeightStr = getParameterValue("pWeight");
+        String minDataCountStr = getParameterValue("minDataCount");
         String hypBottomStr = getParameterValue("hypBottom");
         if (thresholdStr == null || thresholdStr.trim().isEmpty()) {
             errors.add("Weight threshold (threshold) is required.");
         }
-        if (hypBottomStr == null || hypBottomStr.trim().isEmpty()) {
-            errors.add("Maximum depth (hypBottom) is required.");
+        if (pWeightStr == null || pWeightStr.trim().isEmpty()) {
+            errors.add("P phase weight (pWeight) is required.");
+        } else {
+            try {
+                double pw = Double.parseDouble(pWeightStr.trim());
+                if (pw < 0) {
+                    errors.add("P phase weight (pWeight) must be >= 0.");
+                }
+            } catch (NumberFormatException e) {
+                errors.add("P phase weight (pWeight) must be a number.");
+            }
+        }
+        if (minDataCountStr == null || minDataCountStr.trim().isEmpty()) {
+            errors.add("Minimum data count (minDataCount) is required.");
+        } else {
+            try {
+                int m = Integer.parseInt(minDataCountStr.trim());
+                if (m < 0) {
+                    errors.add("Minimum data count (minDataCount) must be >= 0.");
+                }
+            } catch (NumberFormatException e) {
+                errors.add("Minimum data count (minDataCount) must be an integer.");
+            }
+        }
+        if (!(resolveHypBottom() > 0)) {
+            errors.add("Maximum depth is required (set the range in the Model tab).");
         }
         if ("GRD".equals(selectedMode)) {
             String totalGridsStr = getParameterValue("totalGrids");
@@ -2136,6 +2149,7 @@ public class HypocenterLocationPanel extends JPanel {
             if ((totalGridsStr == null || totalGridsStr.trim().isEmpty()) && (numFocusStr == null || numFocusStr.trim().isEmpty())) {
                 errors.add("GRD: totalGrids or numFocus is required.");
             }
+            addSearchBoxParamErrors(errors, "GRD");
         } else if ("MCMC".equals(selectedMode)) {
             String nSamplesStr = getParameterValue("nSamples");
             String burnInStr = getParameterValue("burnIn");
@@ -2156,8 +2170,75 @@ public class HypocenterLocationPanel extends JPanel {
             if (maxGenerationsStr.isEmpty()) errors.add("DE: maxGenerations is required.");
             if (scalingFactorStr.isEmpty()) errors.add("DE: scalingFactor is required.");
             if (crossoverRateStr.isEmpty()) errors.add("DE: crossoverRate is required.");
+            addSearchBoxParamErrors(errors, "DE");
         }
         return errors;
+    }
+
+    private void addSearchBoxParamErrors(java.util.List<String> errors, String mode) {
+        String rangeSigmaStr = getParameterValue("rangeSigma");
+        if (rangeSigmaStr != null && !rangeSigmaStr.trim().isEmpty()) {
+            try {
+                if (Double.parseDouble(rangeSigmaStr.trim()) <= 0) {
+                    errors.add(mode + ": rangeSigma must be > 0.");
+                }
+            } catch (NumberFormatException e) {
+                errors.add(mode + ": rangeSigma must be a number.");
+            }
+        }
+        String depthSeedsStr = getParameterValue("depthSeeds");
+        if (depthSeedsStr != null && !depthSeedsStr.trim().isEmpty()) {
+            java.util.List<Double> parsed = new java.util.ArrayList<>();
+            HypoUtils.addDepthSeedTokens(depthSeedsStr, parsed);
+            if (parsed.isEmpty()) {
+                errors.add(mode + ": depthSeeds must be comma-separated depths in km (e.g. 1,5,10).");
+            } else {
+                for (Double v : parsed) {
+                    if (v == null || v <= 0) {
+                        errors.add(mode + ": depthSeeds values must be > 0.");
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    private void putSearchBoxParams(com.fasterxml.jackson.databind.node.ObjectNode solver) {
+        String rangeSigmaStr = getParameterValue("rangeSigma");
+        if ((rangeSigmaStr == null || rangeSigmaStr.trim().isEmpty()) && rangeSigmaField != null) {
+            rangeSigmaStr = rangeSigmaField.getText();
+        }
+        if (rangeSigmaStr != null && !rangeSigmaStr.trim().isEmpty()) {
+            solver.put("rangeSigma", Double.parseDouble(rangeSigmaStr.trim()));
+        }
+        String depthSeedsStr = getParameterValue("depthSeeds");
+        if ((depthSeedsStr == null || depthSeedsStr.trim().isEmpty()) && depthSeedsField != null) {
+            depthSeedsStr = depthSeedsField.getText();
+        }
+        if (depthSeedsStr != null && !depthSeedsStr.trim().isEmpty()) {
+            solver.put("depthSeeds", depthSeedsStr.trim());
+        }
+    }
+
+    private void applySearchBoxParams(com.fasterxml.jackson.databind.JsonNode solver) {
+        if (solver.has("rangeSigma") && rangeSigmaField != null) {
+            rangeSigmaField.setText(String.valueOf(solver.get("rangeSigma").asDouble()));
+        }
+        if (solver.has("depthSeeds") && depthSeedsField != null) {
+            var node = solver.get("depthSeeds");
+            if (node.isArray()) {
+                StringBuilder sb = new StringBuilder();
+                for (var x : node) {
+                    if (sb.length() > 0) sb.append(',');
+                    sb.append(x.asDouble());
+                }
+                depthSeedsField.setText(sb.toString());
+            } else {
+                depthSeedsField.setText(node.asText());
+            }
+        } else if (solver.has("defaultDepthKm") && depthSeedsField != null) {
+            depthSeedsField.setText(String.valueOf(solver.get("defaultDepthKm").asDouble()));
+        }
     }
     
     /**
@@ -2168,6 +2249,8 @@ public class HypocenterLocationPanel extends JPanel {
         SolverLogger.setSuppressInfoInCallback(false);
         SolverLogger.setMode(true, false, false);
         SolverLogger.setCallback(null);
+        stopExecutionProgress();
+        SharedFileManager.getInstance().setComputationBusy(false);
         if (executeButton != null) {
             executeButton.setEnabled(true);
         }
@@ -2176,7 +2259,60 @@ public class HypocenterLocationPanel extends JPanel {
         }
         updateExecuteButtonState();
     }
+
+    private void setInputsLocked(boolean locked) {
+        AppPanelStyle.setTreeEnabled(leftPanel, !locked);
+        if (!locked) {
+            String mode = getSelectedModeAbbreviation();
+            if (mode != null) {
+                updateLayoutForMode(mode);
+            }
+        }
+    }
+
+    private void updateExecutionProgress(int done, int total) {
+        if (executeProgressBar == null) {
+            return;
+        }
+        SwingUtilities.invokeLater(() -> {
+            executeProgressBar.setVisible(true);
+            executeProgressBar.setIndeterminate(false);
+            executeProgressBar.setMinimum(0);
+            executeProgressBar.setMaximum(Math.max(1, total));
+            executeProgressBar.setValue(Math.min(done, Math.max(1, total)));
+            executeProgressBar.setString(done + " / " + total);
+        });
+    }
+
+    private void stopExecutionProgress() {
+        if (executeProgressBar == null) {
+            return;
+        }
+        SwingUtilities.invokeLater(() -> {
+            executeProgressBar.setIndeterminate(false);
+            executeProgressBar.setValue(0);
+            executeProgressBar.setString("");
+            executeProgressBar.setVisible(false);
+        });
+    }
+
+    private static boolean isMinDataCountSkip(Throwable t) {
+        Throwable cur = t;
+        while (cur != null) {
+            String msg = cur.getMessage();
+            if (msg != null && msg.contains("Insufficient data after weight screening")) {
+                return true;
+            }
+            cur = cur.getCause();
+        }
+        return false;
+    }
     
+    /** True while a solver / synthetic run is in progress (used to confirm before closing the window). */
+    public boolean isBusy() {
+        return currentWorker != null && !currentWorker.isDone();
+    }
+
     private void updateExecuteButtonState() {
         if (executeButton == null) {
             return;
@@ -2318,6 +2454,12 @@ public class HypocenterLocationPanel extends JPanel {
         if (logArea == null) return;
         try {
             StyledDocument doc = logArea.getStyledDocument();
+            if (doc.getLength() > MAX_EXEC_LOG_CHARS) {
+                int removeLen = doc.getLength() - EXEC_LOG_TRIM_TO_CHARS;
+                if (removeLen > 0) {
+                    doc.remove(0, removeLen);
+                }
+            }
             SimpleAttributeSet attr = new SimpleAttributeSet();
             StyleConstants.setForeground(attr, color);
             doc.insertString(doc.getLength(), line, attr);
@@ -2392,13 +2534,6 @@ public class HypocenterLocationPanel extends JPanel {
         return false;
     }
     
-    private void appendConvergenceLog(String message) {
-        if (!shouldStreamConvergenceToExecutionLog()) {
-            return;
-        }
-        appendLog("Convergence: " + message);
-    }
-    
     /**
      * Loads log history from settings and displays it in the Execution Log panel.
      * Uses the configured history line count; on failure uses default and still tries to load from log file.
@@ -2451,13 +2586,14 @@ public class HypocenterLocationPanel extends JPanel {
      *
      * @return the constructed config, never null
      */
+    public AppConfig buildSolverConfig() {
+        return buildConfigFromUI();
+    }
+
     private AppConfig buildConfigFromUI() {
         AppConfig cfg = new AppConfig();
         
-        String selectedModel = (String) taupModelCombo.getSelectedItem();
-        if (selectedModel != null && !"Select from file...".equals(selectedModel)) {
-            cfg.taupFile = selectedModel;
-        }
+        cfg.taupFile = resolveTaupFile();
         cfg.raytraceMethod = com.treloc.xtreloc.app.gui.util.AppSettingsCache.snapshot().getRaytraceMethod();
         if (selectedStationFile != null) {
             cfg.stationFile = selectedStationFile.getAbsolutePath();
@@ -2465,6 +2601,8 @@ public class HypocenterLocationPanel extends JPanel {
         
         String numJobsStr = getParameterValue("numJobs");
         String thresholdStr = getParameterValue("threshold");
+        String pWeightStr = getParameterValue("pWeight");
+        String minDataCountStr = getParameterValue("minDataCount");
         String hypBottomStr = getParameterValue("hypBottom");
         if (!numJobsStr.isEmpty()) {
             cfg.numJobs = Integer.parseInt(numJobsStr);
@@ -2472,8 +2610,21 @@ public class HypocenterLocationPanel extends JPanel {
         if (!thresholdStr.isEmpty()) {
             cfg.threshold = Double.parseDouble(thresholdStr);
         }
-        if (!hypBottomStr.isEmpty()) {
-            cfg.hypBottom = Double.parseDouble(hypBottomStr);
+        if (!pWeightStr.isEmpty()) {
+            cfg.pWeight = Double.parseDouble(pWeightStr);
+        }
+        if (!minDataCountStr.isEmpty()) {
+            cfg.minDataCount = Integer.parseInt(minDataCountStr.trim());
+        }
+        cfg.hypBottom = resolveHypBottom();
+        com.treloc.xtreloc.app.gui.util.SharedFileManager.Geometry loc =
+            com.treloc.xtreloc.app.gui.util.SharedFileManager.getInstance().getGeometry();
+        if (loc != null && loc.hasRegion()) {
+            cfg.locLonMin = loc.lonMin;
+            cfg.locLonMax = loc.lonMax;
+            cfg.locLatMin = loc.latMin;
+            cfg.locLatMax = loc.latMax;
+            cfg.locMinDepthKm = loc.minDepthKm;
         }
         
         String selectedMode = getSelectedModeAbbreviation();
@@ -2495,6 +2646,8 @@ public class HypocenterLocationPanel extends JPanel {
             if (!numFocusStr.isEmpty()) {
                 grdSolver.put("numFocus", Integer.parseInt(numFocusStr));
             }
+            putSearchBoxParams(grdSolver);
+            grdSolver.put("pWeight", cfg.pWeight);
             cfg.params.put("GRD", grdSolver);
         } else if ("LMO".equals(selectedMode)) {
             var lmoIO = new AppConfig.ModeIOConfig();
@@ -2559,6 +2712,7 @@ public class HypocenterLocationPanel extends JPanel {
                 if (!maxIterStr.isEmpty()) {
                     lmoSolver.put("maxIterations", Integer.parseInt(maxIterStr));
                 }
+                lmoSolver.put("pWeight", cfg.pWeight);
             cfg.params.put("LMO", lmoSolver);
         } else if ("TRD".equals(selectedMode)) {
             var trdIO = new AppConfig.ModeIOConfig();
@@ -2596,7 +2750,7 @@ public class HypocenterLocationPanel extends JPanel {
                     String[] distKmArray = distKmStr.split(",");
                     var distKmNode = trdSolver.putArray("distKm");
                     for (String val : distKmArray) {
-                        distKmNode.add(Integer.parseInt(val.trim()));
+                        distKmNode.add(Double.parseDouble(val.trim()));
                     }
                 }
                 if (!dampFactStr.isEmpty()) {
@@ -2669,6 +2823,7 @@ public class HypocenterLocationPanel extends JPanel {
                 if (lsqrCalcVarCheckBox != null) {
                     trdSolver.put("lsqrCalcVar", lsqrCalcVarCheckBox.isSelected());
                 }
+                trdSolver.put("pWeight", cfg.pWeight);
             cfg.params.put("TRD", trdSolver);
         } else if ("MCMC".equals(selectedMode)) {
             var mcmcIO = new AppConfig.ModeIOConfig();
@@ -2708,6 +2863,7 @@ public class HypocenterLocationPanel extends JPanel {
                 if (showConvergenceLogCheckBox != null) {
                     showConvergenceLogCheckBox.setSelected(showConvergenceLog);
                 }
+                mcmcSolver.put("pWeight", cfg.pWeight);
             cfg.params.put("MCMC", mcmcSolver);
         } else if ("DE".equals(selectedMode)) {
             var deIO = new AppConfig.ModeIOConfig();
@@ -2732,6 +2888,7 @@ public class HypocenterLocationPanel extends JPanel {
                 if (!crossoverRateStr.isEmpty()) {
                     deSolver.put("crossoverRate", Double.parseDouble(crossoverRateStr));
                 }
+                putSearchBoxParams(deSolver);
                 String showConvergenceLogStr = getParameterValue("showConvergenceLog");
                 boolean showConvergenceLog = false;
                 if (!showConvergenceLogStr.isEmpty()) {
@@ -2743,6 +2900,7 @@ public class HypocenterLocationPanel extends JPanel {
                 if (showConvergenceLogCheckBox != null) {
                     showConvergenceLogCheckBox.setSelected(showConvergenceLog);
                 }
+                deSolver.put("pWeight", cfg.pWeight);
             cfg.params.put("DE", deSolver);
         } else if ("CLS".equals(selectedMode)) {
             var clsIO = new AppConfig.ModeIOConfig();
@@ -3043,18 +3201,15 @@ public class HypocenterLocationPanel extends JPanel {
                     Math.max(1, Runtime.getRuntime().availableProcessors() - 1);
                 publish("Parallel processing: " + numJobs + " threads");
                 
-                if (residualPlotPanel != null) {
-                    SwingUtilities.invokeLater(() -> {
-                        residualPlotPanel.setMaxParallelJobs(numJobs);
-                    });
-                }
-                
                 AtomicInteger processedCount = new AtomicInteger(0);
                 AtomicInteger errorCount = new AtomicInteger(0);
-                java.util.List<com.treloc.xtreloc.app.gui.model.Hypocenter> allHypocenters = 
-                    new java.util.concurrent.CopyOnWriteArrayList<>();
+                java.util.List<com.treloc.xtreloc.app.gui.model.Hypocenter> allHypocenters =
+                    java.util.Collections.synchronizedList(new java.util.ArrayList<>());
 
                 List<File> datFiles = findDatFiles(selectedTargetDir);
+                if (residualPlotPanel != null) {
+                    residualPlotPanel.setTotalEventCount(datFiles.size());
+                }
                 ConcurrentHashMap<String, SolverBatchSummary.Row> batchSummary = new ConcurrentHashMap<>();
                 boolean multiEventBatch = datFiles.size() > 1;
                 if (multiEventBatch) {
@@ -3148,6 +3303,7 @@ public class HypocenterLocationPanel extends JPanel {
                                         });
                                     }
                                     processedCount.incrementAndGet();
+                                    updateExecutionProgress(processedCount.get() + errorCount.get(), datFiles.size());
                                     
                                     try {
                                         java.util.List<com.treloc.xtreloc.app.gui.model.Hypocenter> hypocenters = 
@@ -3174,12 +3330,21 @@ public class HypocenterLocationPanel extends JPanel {
                                         (e.getMessage() != null && e.getMessage().contains("interrupted"))) {
                                         return null;
                                     }
+                                    if (residualPlotPanel != null) {
+                                        SwingUtilities.invokeLater(() -> {
+                                            residualPlotPanel.stopProcessingEvent(finalDatFile.getName());
+                                        });
+                                    }
                                     errorCount.incrementAndGet();
+                                    updateExecutionProgress(processedCount.get() + errorCount.get(), datFiles.size());
+                                    boolean skipAsWarning = isMinDataCountSkip(e);
+                                    String status = skipAsWarning ? "WARN" : "ERROR";
                                     batchSummary.put(finalDatFile.getName(),
-                                        new SolverBatchSummary.Row(currentMode, finalDatFile.getName(), "ERROR", 0,
+                                        new SolverBatchSummary.Row(currentMode, finalDatFile.getName(), status, 0,
                                             SolverBatchSummary.truncateNote(e.getMessage(), 240)));
                                     if (!multiEventBatch) {
-                                        publish("Error: Skipping processing of " + finalDatFile.getName() + ": " + e.getMessage());
+                                        publish((skipAsWarning ? "Warning" : "Error")
+                                            + ": Skipping processing of " + finalDatFile.getName() + ": " + e.getMessage());
                                     }
                                     logger.warning("File processing error: " + finalDatFile.getName() + " - " + e.getMessage());
                                 }
@@ -3285,6 +3450,7 @@ public class HypocenterLocationPanel extends JPanel {
                                     });
                                 }
                                 processedCount.incrementAndGet();
+                                updateExecutionProgress(processedCount.get() + errorCount.get(), datFiles.size());
                                 try {
                                     java.util.List<com.treloc.xtreloc.app.gui.model.Hypocenter> hypocenters = 
                                         loadHypocentersFromDatFile(new File(outputPath));
@@ -3310,12 +3476,22 @@ public class HypocenterLocationPanel extends JPanel {
                                     (e.getMessage() != null && e.getMessage().contains("interrupted"))) {
                                     break;
                                 }
+                                if (residualPlotPanel != null) {
+                                    String failedEventName = datFile.getName();
+                                    SwingUtilities.invokeLater(() -> {
+                                        residualPlotPanel.markEventCompleted(failedEventName);
+                                    });
+                                }
                                 errorCount.incrementAndGet();
+                                updateExecutionProgress(processedCount.get() + errorCount.get(), datFiles.size());
+                                boolean skipAsWarning = isMinDataCountSkip(e);
+                                String status = skipAsWarning ? "WARN" : "ERROR";
                                 batchSummary.put(datFile.getName(),
-                                    new SolverBatchSummary.Row(currentMode, datFile.getName(), "ERROR", 0,
+                                    new SolverBatchSummary.Row(currentMode, datFile.getName(), status, 0,
                                         SolverBatchSummary.truncateNote(e.getMessage(), 240)));
                                 if (!multiEventBatch) {
-                                    publish("Error: Skipping processing of " + datFile.getName() + ": " + e.getMessage());
+                                    publish((skipAsWarning ? "Warning" : "Error")
+                                        + ": Skipping processing of " + datFile.getName() + ": " + e.getMessage());
                                 }
                                 logger.warning("File processing error: " + datFile.getName() + " - " + e.getMessage());
                             }
@@ -3336,6 +3512,7 @@ public class HypocenterLocationPanel extends JPanel {
                                 inputCatalogFile != null ? inputCatalogFile.getAbsolutePath() : null,
                                 currentMode, outputDir);
                         }
+                        catalogFile = com.treloc.xtreloc.util.CatalogFileNameGenerator.uniqueIfExists(catalogFile);
                         final File exportedCatalogFile = catalogFile;
                         try {
                             com.treloc.xtreloc.app.gui.service.CsvExporter.exportHypocenters(allHypocenters, catalogFile);
@@ -3454,6 +3631,7 @@ public class HypocenterLocationPanel extends JPanel {
         if (cancelButton != null) {
             cancelButton.setEnabled(true);
         }
+        SharedFileManager.getInstance().setComputationBusy(true);
         currentWorker.execute();
     }
     
@@ -3503,8 +3681,7 @@ public class HypocenterLocationPanel extends JPanel {
             logger.warning("SYN aborted: no station file.");
             return;
         }
-        String selectedModel = (String) taupModelCombo.getSelectedItem();
-        config.taupFile = selectedModel;
+        config.taupFile = resolveTaupFile();
         config.stationFile = selectedStationFile.getAbsolutePath();
         
         if (config.io == null) {
@@ -3637,6 +3814,23 @@ public class HypocenterLocationPanel extends JPanel {
                                 com.treloc.xtreloc.app.gui.service.CsvExporter.exportHypocenters(allHypocenters, catalogFile);
                                 publish("Catalog auto-generated: " + catalogFile.getAbsolutePath() + " (" + allHypocenters.size() + " entries)");
                                 publish("Processing result: " + processedCount + " files succeeded, " + errorCount + " files with errors");
+                                if (solverResultCatalogPanel != null) {
+                                    final java.util.List<com.treloc.xtreloc.app.gui.model.Hypocenter> hyposToAdd =
+                                        new java.util.ArrayList<>(allHypocenters);
+                                    final File exported = catalogFile;
+                                    SwingUtilities.invokeLater(() -> {
+                                        solverResultCatalogPanel.addCatalogFromHypocenters(
+                                            hyposToAdd, exported.getName(), exported);
+                                    });
+                                } else if (mapView != null) {
+                                    SwingUtilities.invokeLater(() -> {
+                                        try {
+                                            mapView.showHypocenters(allHypocenters);
+                                        } catch (Exception e) {
+                                            ExecutionFailureReporter.log(logger, "SYN: showHypocenters failed.", e);
+                                        }
+                                    });
+                                }
                             } catch (Exception e) {
                                 publish("Warning: Failed to auto-generate catalog: " + e.getMessage());
                             }
@@ -3683,6 +3877,7 @@ public class HypocenterLocationPanel extends JPanel {
             }
         };
         
+        SharedFileManager.getInstance().setComputationBusy(true);
         currentWorker.execute();
     }
     
@@ -3721,8 +3916,7 @@ public class HypocenterLocationPanel extends JPanel {
             logger.warning("CLS aborted: no station file.");
             return;
         }
-        String selectedModel = (String) taupModelCombo.getSelectedItem();
-        config.taupFile = selectedModel;
+        config.taupFile = resolveTaupFile();
         config.stationFile = selectedStationFile.getAbsolutePath();
         
         String thresholdStr = getParameterValue("threshold");
@@ -3915,6 +4109,7 @@ public class HypocenterLocationPanel extends JPanel {
             }
         };
         
+        SharedFileManager.getInstance().setComputationBusy(true);
         currentWorker.execute();
     }
     
@@ -3950,11 +4145,11 @@ public class HypocenterLocationPanel extends JPanel {
     }
     
     /**
-     * Opens a file chooser to select a JSON config file and sets the path in the Import (Json) field.
+     * Opens a file chooser to select an optional JSON parameter preset.
      */
     private void selectImportJsonFile() {
         JFileChooser chooser = new JFileChooser();
-        chooser.setDialogTitle("Select Config File (JSON)");
+        chooser.setDialogTitle("Select parameter preset (JSON)");
         chooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter("JSON files (*.json)", "json"));
         chooser.setSelectedFile(new File("config.json"));
         String currentPath = importJsonFileField != null ? importJsonFileField.getText().trim() : "";
@@ -3973,15 +4168,14 @@ public class HypocenterLocationPanel extends JPanel {
             File file = chooser.getSelectedFile();
             if (file != null) {
                 importJsonFileField.setText(file.getAbsolutePath());
-                appendLog("Import config file selected: " + file.getAbsolutePath());
+                appendLog("Preset selected: " + file.getAbsolutePath());
             }
         }
     }
     
     /**
-     * Loads solver settings from the path in the Import (Json) field and applies them to the UI.
-     * If the field is empty, opens a file chooser. Prompts for confirmation before overwriting
-     * the current configuration.
+     * Loads an optional JSON parameter preset and applies it to the currently selected mode only.
+     * If the field is empty, opens a file chooser. Prompts before overwriting this mode's fields.
      */
     private void importConfigFromJson() {
         try {
@@ -3993,13 +4187,15 @@ public class HypocenterLocationPanel extends JPanel {
             if (path.isEmpty()) return;
             File file = new File(path);
             if (!file.exists() || !file.isFile()) {
-                appendLog("ERROR: Import (Json) file not found: " + path);
-                logger.warning("Import config: file not found: " + path);
+                appendLog("ERROR: Preset file not found: " + path);
+                logger.warning("Preset: file not found: " + path);
                 return;
             }
+            String mode = getSelectedModeAbbreviation();
             int confirm = JOptionPane.showConfirmDialog(this,
-                "Do you want to overwrite the existing configuration?",
-                "Import (Json)",
+                "Apply this preset to " + (mode != null ? mode : "the current mode")
+                    + " parameters and I/O?\nOther modes are left unchanged.",
+                "Load preset",
                 JOptionPane.YES_NO_OPTION,
                 JOptionPane.QUESTION_MESSAGE);
             if (confirm != JOptionPane.YES_OPTION) {
@@ -4012,12 +4208,12 @@ public class HypocenterLocationPanel extends JPanel {
             if (importJsonFileField != null) {
                 importJsonFileField.setText(file.getAbsolutePath());
             }
-            appendLog("Configuration imported from: " + file.getAbsolutePath());
-            logger.info("Import (Json): configuration applied from " + file.getAbsolutePath());
+            appendLog("Preset applied to " + mode + " from: " + file.getAbsolutePath());
+            logger.info("Preset: applied " + mode + " from " + file.getAbsolutePath());
         } catch (Exception e) {
-            logger.log(Level.WARNING, "Failed to import config", e);
+            logger.log(Level.WARNING, "Failed to load preset", e);
             String message = e.getMessage() != null ? e.getMessage() : e.toString();
-            appendLog("ERROR: Failed to import configuration: " + message);
+            appendLog("ERROR: Failed to load preset: " + message);
         }
     }
     
@@ -4106,28 +4302,28 @@ public class HypocenterLocationPanel extends JPanel {
     }
     
     /**
-     * Applies a loaded config to all GUI input fields (paths, parameters, solver settings).
-     * Called when importing config.json or when the app starts with an existing config file.
+     * Applies an optional JSON preset to shared fields plus the currently selected mode's
+     * I/O and parameters. Other modes are left unchanged.
      */
     public void setConfig(AppConfig config) {
         this.config = config;
         if (config != null) {
+            final String presetMode = getSelectedModeAbbreviation();
             if (numJobsField != null && config.numJobs > 0) {
                 numJobsField.setText(String.valueOf(config.numJobs));
             }
             if (stationFileField != null && config.stationFile != null && !config.stationFile.isEmpty()) {
                 stationFileField.setText(config.stationFile);
                 File f = new File(config.stationFile);
-                if (f.exists() && f.isFile()) {
+                if (f.exists()) {
                     selectedStationFile = f;
+                    com.treloc.xtreloc.app.gui.util.SharedFileManager.getInstance().setStationFile(f);
                 }
             }
-            if (config.getModes() != null) {
-                for (Map.Entry<String, AppConfig.ModeConfig> entry : config.getModes().entrySet()) {
-                    String mode = entry.getKey();
-                    AppConfig.ModeConfig mc = ModeConfigResolver.getModeConfigWithFallback(config, mode);
-                    if (mc == null) continue;
-                    Map<String, String> cache = modeParameterCache.computeIfAbsent(mode, k -> new HashMap<>());
+            if (config.getModes() != null && presetMode != null) {
+                AppConfig.ModeConfig mc = config.getModes().get(presetMode);
+                if (mc != null) {
+                    Map<String, String> cache = modeParameterCache.computeIfAbsent(presetMode, k -> new HashMap<>());
                     if (config.stationFile != null && !config.stationFile.isEmpty()) {
                         cache.put("stationFile", config.stationFile);
                     }
@@ -4144,14 +4340,14 @@ public class HypocenterLocationPanel extends JPanel {
                     if (mc.catalogFile != null && !mc.catalogFile.isEmpty()) {
                         cache.put("catalogFile", mc.catalogFile);
                     }
-                    if ("SYN".equals(mode)) {
+                    if ("SYN".equals(presetMode)) {
                         if (mc.randomSeed != null) cache.put("randomSeed", String.valueOf(mc.randomSeed));
                         if (mc.phsErr != null) cache.put("phsErr", String.valueOf(mc.phsErr));
                         if (mc.locErr != null) cache.put("locErr", String.valueOf(mc.locErr));
                         if (mc.minSelectRate != null) cache.put("minSelectRate", String.valueOf(mc.minSelectRate));
                         if (mc.maxSelectRate != null) cache.put("maxSelectRate", String.valueOf(mc.maxSelectRate));
                     }
-                    if ("CLS".equals(mode)) {
+                    if ("CLS".equals(presetMode)) {
                         if (mc.minPts != null) cache.put("minPts", String.valueOf(mc.minPts));
                         if (mc.eps != null) cache.put("eps", String.valueOf(mc.eps));
                         if (mc.epsPercentile != null) cache.put("epsPercentile", String.valueOf(mc.epsPercentile));
@@ -4161,7 +4357,7 @@ public class HypocenterLocationPanel extends JPanel {
                         if (mc.calcTripleDiff != null) cache.put("calcTripleDiff", mc.calcTripleDiff ? "true" : "false");
                     }
                 }
-                if (config.getParams() != null && config.getParams().containsKey("CLS")) {
+                if ("CLS".equals(presetMode) && config.getParams() != null && config.getParams().containsKey("CLS")) {
                     var clsSolver = config.getParams().get("CLS");
                     Map<String, String> clsCache = modeParameterCache.get("CLS");
                     if (clsCache != null) {
@@ -4169,25 +4365,28 @@ public class HypocenterLocationPanel extends JPanel {
                         if (clsSolver.has("eps")) clsCache.put("eps", String.valueOf(clsSolver.get("eps").asDouble()));
                     }
                 }
-                if (modeCombo != null) {
-                    String currentMode = getSelectedModeAbbreviation();
-                    if (currentMode != null) {
-                        restoreModeStateFromCache(currentMode, null);
-                    }
-                }
+                restoreModeStateFromCache(presetMode, null);
             }
             thresholdField.setText(String.valueOf(config.threshold));
+            if (pWeightField != null) {
+                pWeightField.setText(String.valueOf(config.pWeight));
+            }
+            if (minDataCountField != null) {
+                minDataCountField.setText(String.valueOf(config.minDataCount));
+            }
             hypBottomField.setText(String.valueOf(config.hypBottom));
+            com.treloc.xtreloc.app.gui.util.SharedFileManager.Geometry geo =
+                com.treloc.xtreloc.app.gui.util.SharedFileManager.getInstance().getGeometry();
+            geo.maxDepthKm = config.hypBottom;
+            com.treloc.xtreloc.app.gui.util.SharedFileManager.getInstance().setGeometry(geo);
             
             if (config.taupFile != null && !config.taupFile.isEmpty()) {
-                if (taupModelCombo != null) {
-                    taupModelCombo.setSelectedItem(config.taupFile);
-                }
+                applyTaupSelection(config.taupFile);
                 com.treloc.xtreloc.app.gui.util.SharedFileManager.getInstance().setTaupFile(config.taupFile);
             }
             
-            if (config.getParams() != null) {
-                if (config.getParams().containsKey("GRD")) {
+            if (config.getParams() != null && presetMode != null) {
+                if ("GRD".equals(presetMode) && config.getParams().containsKey("GRD")) {
                     var grdSolver = config.getParams().get("GRD");
                     if (grdSolver.has("totalGrids") && totalGridsField != null) {
                         totalGridsField.setText(String.valueOf(grdSolver.get("totalGrids").asInt()));
@@ -4201,8 +4400,9 @@ public class HypocenterLocationPanel extends JPanel {
                             numFocusField.setText("1");
                         }
                     }
+                    applySearchBoxParams(grdSolver);
                 }
-                if (config.getParams().containsKey("LMO")) {
+                if ("LMO".equals(presetMode) && config.getParams().containsKey("LMO")) {
                     var lmoSolver = config.getParams().get("LMO");
                     if (lmoSolver.has("initialStepBoundFactor") && lmInitialStepBoundField != null) {
                         lmInitialStepBoundField.setText(String.valueOf(lmoSolver.get("initialStepBoundFactor").asDouble()));
@@ -4226,7 +4426,7 @@ public class HypocenterLocationPanel extends JPanel {
                         showConvergenceLogCheckBox.setSelected(lmoSolver.get("showConvergenceLog").asBoolean());
                     }
                 }
-                if (config.getParams().containsKey("MCMC")) {
+                if ("MCMC".equals(presetMode) && config.getParams().containsKey("MCMC")) {
                     var mcmcSolver = config.getParams().get("MCMC");
                     if (mcmcSolver.has("showConvergenceLog") && showConvergenceLogCheckBox != null) {
                         showConvergenceLogCheckBox.setSelected(mcmcSolver.get("showConvergenceLog").asBoolean());
@@ -4250,7 +4450,7 @@ public class HypocenterLocationPanel extends JPanel {
                         showConvergenceLogCheckBox.setSelected(mcmcSolver.get("showConvergenceLog").asBoolean());
                     }
                 }
-                if (config.getParams().containsKey("DE")) {
+                if ("DE".equals(presetMode) && config.getParams().containsKey("DE")) {
                     var deSolver = config.getParams().get("DE");
                     if (deSolver.has("populationSize") && dePopulationSizeField != null) {
                         dePopulationSizeField.setText(String.valueOf(deSolver.get("populationSize").asInt()));
@@ -4264,8 +4464,9 @@ public class HypocenterLocationPanel extends JPanel {
                     if (deSolver.has("crossoverRate") && deCrossoverRateField != null) {
                         deCrossoverRateField.setText(String.valueOf(deSolver.get("crossoverRate").asDouble()));
                     }
+                    applySearchBoxParams(deSolver);
                 }
-                if (config.getParams().containsKey("SYN")) {
+                if ("SYN".equals(presetMode) && config.getParams().containsKey("SYN")) {
                     var synParams = config.getParams().get("SYN");
                     if (synParams.has("randomSeed") && randomSeedField != null) {
                         randomSeedField.setText(String.valueOf(synParams.get("randomSeed").asInt()));
@@ -4283,7 +4484,7 @@ public class HypocenterLocationPanel extends JPanel {
                         maxSelectRateField.setText(String.valueOf(synParams.get("maxSelectRate").asDouble()));
                     }
                 }
-                if (config.getParams().containsKey("TRD")) {
+                if ("TRD".equals(presetMode) && config.getParams().containsKey("TRD")) {
                     var trdSolver = config.getParams().get("TRD");
                     if (trdSolver.has("iterNum") && trdIterNumField != null) {
                         var iterNumArray = trdSolver.get("iterNum");
@@ -4302,7 +4503,7 @@ public class HypocenterLocationPanel extends JPanel {
                             StringBuilder sb = new StringBuilder();
                             for (int i = 0; i < distKmArray.size(); i++) {
                                 if (i > 0) sb.append(",");
-                                sb.append(distKmArray.get(i).asInt());
+                                sb.append(formatKmListValue(distKmArray.get(i).asDouble()));
                             }
                             trdDistKmField.setText(sb.toString());
                         }
@@ -4347,12 +4548,6 @@ public class HypocenterLocationPanel extends JPanel {
                     if (trdSolver.has("showConvergenceLog") && showConvergenceLogCheckBox != null) {
                         showConvergenceLogCheckBox.setSelected(trdSolver.get("showConvergenceLog").asBoolean());
                     }
-                }
-            }
-            if (config.getModes() != null && modeCombo != null) {
-                String currentMode = getSelectedModeAbbreviation();
-                if (currentMode != null) {
-                    restoreModeStateFromCache(currentMode, null);
                 }
             }
             updateParameterFields();
@@ -4406,16 +4601,22 @@ public class HypocenterLocationPanel extends JPanel {
                     "  Default: 4. Increase for faster processing on multi-core systems.\n\n" +
                     "- threshold: Weight threshold for filtering data.\n" +
                     "  Default: 0.0 (no filtering). Use to exclude low-weight data.\n\n" +
-                    "- hypBottom: Maximum depth for hypocenter location (km).\n" +
-                    "  Default: 100.0 km.\n\n" +
+                    "- pWeight: Relative weight of P-phase residuals versus S (S = 1).\n" +
+                    "  Default: 2. Combined residual is sqrt(Σ w r² / Σ w).\n\n" +
                     "GRD-Specific Parameters:\n" +
                     "- totalGrids: Total number of grid points to search.\n" +
                     "  Default: 300. More grids = finer resolution but slower.\n\n" +
                     "- numFocus: Number of focus iterations.\n" +
                     "  Default: 3. Higher values = more iterations, better convergence.\n\n" +
+                    "- rangeSigma: First-focus half-width = sigma × sample std of stations\n" +
+                    "  that passed the weight / correlation threshold. Default: 2.\n\n" +
+                    "- depthSeeds: Comma-separated depth starts in km (default: 1,5,10).\n" +
+                    "  GRD runs a full search from each seed at the station centroid and\n" +
+                    "  keeps the lowest residual. Add 100 to include a deep start (clamped\n" +
+                    "  to hypBottom). Catalog-like .dat depths are included automatically.\n\n" +
                     "Algorithm Description:\n" +
-                    "Grid search exhaustively evaluates all grid points and iteratively\n" +
-                    "refines the search area around the best solution.";
+                    "Grid search samples a box around the centroid of threshold-passing\n" +
+                    "stations from each depth seed, then shrinks around the best residual.";
                     
             case "LMO":
                 return "Levenberg-Marquardt Optimization (LMO) Parameters\n" +
@@ -4425,8 +4626,6 @@ public class HypocenterLocationPanel extends JPanel {
                     "  Default: 4.\n\n" +
                     "- threshold: Weight threshold for filtering data.\n" +
                     "  Default: 0.0 (no filtering).\n\n" +
-                    "- hypBottom: Maximum depth for hypocenter location (km).\n" +
-                    "  Default: 100.0 km.\n\n" +
                     "LMO-Specific Parameters:\n" +
                     "- initialStepBoundFactor: Initial step bound multiplier.\n" +
                     "  Default: 100. Controls initial step size in optimization.\n\n" +
@@ -4446,8 +4645,6 @@ public class HypocenterLocationPanel extends JPanel {
                     "  Default: 4.\n\n" +
                     "- threshold: Weight threshold for filtering data.\n" +
                     "  Default: 0.0 (no filtering).\n\n" +
-                    "- hypBottom: Maximum depth for hypocenter location (km).\n" +
-                    "  Default: 100.0 km.\n\n" +
                     "MCMC-Specific Parameters:\n" +
                     "- nSamples: Number of MCMC samples to generate.\n" +
                     "  Default: 10000. More samples = better statistics, slower.\n\n" +
@@ -4471,8 +4668,6 @@ public class HypocenterLocationPanel extends JPanel {
                     "  Default: 4.\n\n" +
                     "- threshold: Weight threshold for filtering data.\n" +
                     "  Default: 0.0 (no filtering).\n\n" +
-                    "- hypBottom: Maximum depth for hypocenter location (km).\n" +
-                    "  Default: 100.0 km.\n\n" +
                     "DE-Specific Parameters:\n" +
                     "- populationSize: Size of the population in each generation.\n" +
                     "  Default: 20. Larger population = better exploration, slower.\n\n" +
@@ -4482,6 +4677,11 @@ public class HypocenterLocationPanel extends JPanel {
                     "  Default: 0.8. Range: [0.0, 2.0]. Controls mutation strength.\n\n" +
                     "- crossoverProbability: Crossover probability (CR parameter).\n" +
                     "  Default: 0.9. Range: [0.0, 1.0]. Higher = more mixing.\n\n" +
+                    "- rangeSigma: Search-box half-width = sigma × sample std of stations\n" +
+                    "  that passed the weight / correlation threshold. Default: 2.\n\n" +
+                    "- depthSeeds: Comma-separated depth starts in km (default: 1,5,10).\n" +
+                    "  The initial population is seeded at each depth; the search box\n" +
+                    "  spans all seeds. Catalog-like .dat depths are included automatically.\n\n" +
                     "Algorithm Description:\n" +
                     "Differential Evolution is a population-based stochastic optimization\n" +
                     "algorithm that evolves a population of candidate solutions through\n" +
@@ -4502,13 +4702,11 @@ public class HypocenterLocationPanel extends JPanel {
                     "  Default: 4.\n\n" +
                     "- threshold: Weight threshold for filtering data.\n" +
                     "  Default: 0.0 (no filtering).\n\n" +
-                    "- hypBottom: Maximum depth for hypocenter location (km).\n" +
-                    "  Default: 100.0 km.\n\n" +
                     "TRD-Specific Parameters:\n" +
                     "- iterNum: Number of iterations (comma-separated for stages).\n" +
                     "  Default: 10,10. Format: stage1,stage2,...\n\n" +
                     "- distKm: Distance thresholds in km (comma-separated).\n" +
-                    "  Default: 50,20. Defines event pair distance criteria.\n\n" +
+                    "  Default: 50,20. Fractions are allowed (e.g. 0.5,20).\n\n" +
                     "- dampFact: Damping factors (comma-separated).\n" +
                     "  Default: 0,1. Controls smoothing in iterative inversion.\n\n" +
                     "LSQR Parameters (Linear Least Squares Solver):\n" +

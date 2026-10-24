@@ -37,6 +37,8 @@ public class TripleDifferenceIO {
         public final int clusterId;
         /** Residual in seconds (absolute value). Double.NaN when not available. */
         public final double residual;
+        /** 0 = P, 1 = S ({@link com.treloc.xtreloc.solver.DatPair}). */
+        public final double phase;
 
         public TripleDifference(int eve0, int eve1, int stn0, int stn1,
                                double tdTime, double distKm, int clusterId) {
@@ -45,6 +47,11 @@ public class TripleDifferenceIO {
 
         public TripleDifference(int eve0, int eve1, int stn0, int stn1,
                                double tdTime, double distKm, int clusterId, double residual) {
+            this(eve0, eve1, stn0, stn1, tdTime, distKm, clusterId, residual, 1.0);
+        }
+
+        public TripleDifference(int eve0, int eve1, int stn0, int stn1,
+                               double tdTime, double distKm, int clusterId, double residual, double phase) {
             this.eve0 = eve0;
             this.eve1 = eve1;
             this.stn0 = stn0;
@@ -53,6 +60,7 @@ public class TripleDifferenceIO {
             this.distKm = distKm;
             this.clusterId = clusterId;
             this.residual = residual;
+            this.phase = phase;
         }
     }
     

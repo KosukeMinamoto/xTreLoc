@@ -259,4 +259,30 @@ public final class AppPanelStyle {
             }
         }
     }
+
+    /**
+     * Enables or disables {@code root} and every descendant, leaving {@code keep} components unchanged
+     * so a Cancel button can stay active while the rest of a form is locked.
+     */
+    public static void setTreeEnabled(Component root, boolean on, Component... keep) {
+        if (root == null) {
+            return;
+        }
+        java.util.Set<Component> skip = keep == null || keep.length == 0
+            ? java.util.Set.of()
+            : java.util.Set.of(keep);
+        applyEnabled(root, on, skip);
+    }
+
+    private static void applyEnabled(Component c, boolean on, java.util.Set<Component> skip) {
+        if (c == null || skip.contains(c)) {
+            return;
+        }
+        c.setEnabled(on);
+        if (c instanceof Container container) {
+            for (Component child : container.getComponents()) {
+                applyEnabled(child, on, skip);
+            }
+        }
+    }
 }
